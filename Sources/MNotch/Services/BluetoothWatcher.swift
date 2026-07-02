@@ -16,7 +16,10 @@ final class BluetoothWatcher: NSObject {
         )
     }
 
-    @objc private func deviceConnected(
+    /// IOBluetooth delivers this on a CoreBluetooth background thread, so the
+    /// handler must be nonisolated; plain value reads on the device object are
+    /// done here, then everything hops to the main actor.
+    @objc nonisolated private func deviceConnected(
         _ notification: IOBluetoothUserNotification,
         device: IOBluetoothDevice
     ) {
@@ -24,7 +27,7 @@ final class BluetoothWatcher: NSObject {
         let symbol = Self.symbol(forName: name, classOfDevice: device.classOfDevice)
         let address = device.addressString
 
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             // Registry entries appear shortly after connect.
             try? await Task.sleep(for: .seconds(1))
             let battery = await Task.detached {
@@ -34,7 +37,7 @@ final class BluetoothWatcher: NSObject {
         }
     }
 
-    private static func symbol(forName name: String, classOfDevice: BluetoothClassOfDevice) -> String {
+    private nonisolated static func symbol(forName name: String, classOfDevice: BluetoothClassOfDevice) -> String {
         let lower = name.lowercased()
         if lower.contains("airpods pro") || lower.contains("airpods max") { return "airpods.pro" }
         if lower.contains("airpods") { return "airpods" }
