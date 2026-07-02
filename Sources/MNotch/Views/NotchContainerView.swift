@@ -33,6 +33,10 @@ struct NotchBodyView: View {
             .frame(width: size.width, height: size.height, alignment: .top)
             .background(.black, in: shape)
             .clipShape(shape)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                viewModel.setPointerInside(inside)
+            }
             .animation(Anim.open, value: viewModel.mediaActive)
             .onChange(
                 of: services.media.hasActiveMedia && SettingsStore.shared.mediaEnabled,

@@ -34,6 +34,20 @@ final class AudioOutputService {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
+    private static var transportAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyTransportType,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    private static var nameAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioObjectPropertyName,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
+    private(set) var outputName = ""
+    /// SF Symbol for the current output route (Alcove shows this bottom-right).
+    private(set) var outputSymbol = "laptopcomputer"
 
     func start() {
         volumeListener = { [weak self] _, _ in
@@ -67,8 +81,39 @@ final class AudioOutputService {
             deviceID = newDevice
             AudioObjectAddPropertyListenerBlock(newDevice, &Self.volumeAddress, .main, volumeListener)
             AudioObjectAddPropertyListenerBlock(newDevice, &Self.muteAddress, .main, volumeListener)
+            refreshRoute()
         }
         refresh()
+    }
+
+    private func refreshRoute() {
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        AudioObjectGetPropertyData(deviceID, &Self.transportAddress, 0, nil, &size, &transport)
+
+        var nameRef: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        if AudioObjectGetPropertyData(deviceID, &Self.nameAddress, 0, nil, &size, &nameRef) == noErr,
+           let name = nameRef?.takeRetainedValue() {
+            outputName = name as String
+        }
+
+        let lowerName = outputName.lowercased()
+        outputSymbol = switch transport {
+        case kAudioDeviceTransportTypeBuiltIn:
+            "laptopcomputer"
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            lowerName.contains("airpods pro") || lowerName.contains("airpods max")
+                ? "airpods.pro"
+                : lowerName.contains("airpods") ? "airpods" : "headphones"
+        case kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeDisplayPort,
+             kAudioDeviceTransportTypeHDMI:
+            "hifispeaker.fill"
+        case kAudioDeviceTransportTypeAirPlay:
+            "airplayaudio"
+        default:
+            "speaker.wave.2.fill"
+        }
     }
 
     /// Kept as a stored reference so add/remove use the identical block.

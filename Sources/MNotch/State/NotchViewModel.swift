@@ -54,7 +54,8 @@ final class NotchViewModel {
     /// Extra width added to each side of the closed notch while media plays.
     static let mediaWingWidth: CGFloat = 26
 
-    static let expandedSize = CGSize(width: 520, height: 190)
+    /// Alcove's expanded panel is ~2.05:1.
+    static let expandedSize = CGSize(width: 420, height: 205)
     static let hudExtraWidth: CGFloat = 160
     static let hudExtraHeight: CGFloat = 10
     static let popExtraWidth: CGFloat = 190

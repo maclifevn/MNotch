@@ -29,40 +29,10 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         return super.hitTest(point)
     }
 
-    // MARK: - Hover tracking
-
-    private var trackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        updateHover(event)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        updateHover(event)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        viewModel.setPointerInside(false)
-    }
-
-    private func updateHover(_ event: NSEvent) {
-        let local = convert(event.locationInWindow, from: nil)
-        viewModel.setPointerInside(viewModel.interactiveRect(in: bounds).contains(local))
-    }
+    // Hover detection lives in SwiftUI (`.onHover` on the notch body): its
+    // tracking areas follow the animated layout automatically, which raw
+    // NSTrackingArea + mouseMoved did not do reliably in a non-activating
+    // panel. This view only handles click pass-through (hitTest) and drops.
 
     // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
 

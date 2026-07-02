@@ -16,6 +16,11 @@ struct MediaPlayback: Equatable {
     var isPlaying = false
     var bundleIdentifier = ""
     var trackIdentity = ""
+    /// nil when the source doesn't support shuffle (browsers/video).
+    var shuffleMode: Int?
+    var isVideo = false
+
+    var isShuffled: Bool { (shuffleMode ?? 1) != 1 }
 
     func elapsed(at date: Date = Date()) -> TimeInterval {
         guard isPlaying else { return elapsedTime }
@@ -55,19 +60,68 @@ final class MediaRemoteService {
 
     private static let pollInterval: Duration = .seconds(2)
 
+    /// Field types vary by media source (e.g. identifiers are strings for
+    /// Music but numbers for browsers), so every field decodes leniently —
+    /// one odd field must never sink the whole payload.
     private struct GetPayload: Decodable {
-        let title: String?
-        let artist: String?
-        let album: String?
-        let duration: Double?
-        let elapsedTime: Double?
-        let elapsedTimeNow: Double?
-        let artworkData: String?
-        let playbackRate: Double?
-        let playing: Bool?
-        let parentApplicationBundleIdentifier: String?
-        let bundleIdentifier: String?
-        let contentItemIdentifier: String?
+        var title: String?
+        var artist: String?
+        var album: String?
+        var duration: Double?
+        var elapsedTime: Double?
+        var elapsedTimeNow: Double?
+        var artworkData: String?
+        var playbackRate: Double?
+        var playing: Bool?
+        var parentApplicationBundleIdentifier: String?
+        var bundleIdentifier: String?
+        var contentItemIdentifier: String?
+        var shuffleMode: Int?
+        var mediaType: String?
+
+        private struct AnyKey: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+            init(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            func str(_ key: String) -> String? {
+                let k = AnyKey(stringValue: key)
+                if let s = try? c.decode(String.self, forKey: k) { return s }
+                if let i = try? c.decode(Int64.self, forKey: k) { return String(i) }
+                if let d = try? c.decode(Double.self, forKey: k) { return String(d) }
+                return nil
+            }
+            func num(_ key: String) -> Double? {
+                let k = AnyKey(stringValue: key)
+                if let d = try? c.decode(Double.self, forKey: k), d.isFinite { return d }
+                if let s = try? c.decode(String.self, forKey: k) { return Double(s) }
+                return nil
+            }
+            func bool(_ key: String) -> Bool? {
+                let k = AnyKey(stringValue: key)
+                if let b = try? c.decode(Bool.self, forKey: k) { return b }
+                if let i = try? c.decode(Int.self, forKey: k) { return i != 0 }
+                return nil
+            }
+            title = str("title")
+            artist = str("artist")
+            album = str("album")
+            duration = num("duration")
+            elapsedTime = num("elapsedTime")
+            elapsedTimeNow = num("elapsedTimeNow")
+            artworkData = str("artworkData")
+            playbackRate = num("playbackRate")
+            playing = bool("playing")
+            parentApplicationBundleIdentifier = str("parentApplicationBundleIdentifier")
+            bundleIdentifier = str("bundleIdentifier")
+            contentItemIdentifier = str("contentItemIdentifier")
+            shuffleMode = num("shuffleMode").map(Int.init)
+            mediaType = str("mediaType")
+        }
     }
 
     private static var adapterPaths: (script: String, framework: String)? {
@@ -115,6 +169,7 @@ final class MediaRemoteService {
 
         if playback.trackIdentity != artworkIdentity {
             artworkIdentity = playback.trackIdentity
+            mnotchLog.notice("track: \"\(self.playback.title, privacy: .public)\" — \(self.playback.artist, privacy: .public) [\(self.playback.bundleIdentifier, privacy: .public)] video=\(self.playback.isVideo)")
             await fetchArtwork()
         }
     }
@@ -131,6 +186,8 @@ final class MediaRemoteService {
         new.trackIdentity = p.contentItemIdentifier ?? (new.title + "|" + new.artist)
         new.elapsedTime = p.elapsedTimeNow ?? p.elapsedTime ?? 0
         new.timestamp = Date()
+        new.shuffleMode = p.shuffleMode
+        new.isVideo = p.mediaType?.localizedCaseInsensitiveContains("video") ?? false
         if playback != new {
             playback = new
         }
@@ -187,6 +244,16 @@ final class MediaRemoteService {
         p.timestamp = Date()
         playback = p
         runAdapter(["seek", String(Int(seconds * 1_000_000))])
+        pollSoon()
+    }
+
+    func toggleShuffle() {
+        // MRShuffleMode: 1 = off, 3 = songs.
+        let target = playback.isShuffled ? 1 : 3
+        var p = playback
+        p.shuffleMode = target
+        playback = p
+        runAdapter(["shuffle", String(target)])
         pollSoon()
     }
 
