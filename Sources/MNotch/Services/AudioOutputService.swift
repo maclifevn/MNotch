@@ -10,6 +10,10 @@ final class AudioOutputService {
     private(set) var volume: Double = 0.5
     private(set) var muted = false
 
+    /// Fired on every observed change (external or our own writes).
+    @ObservationIgnored
+    var onVolumeChanged: ((Double, Bool) -> Void)?
+
     private var deviceID = AudioObjectID(kAudioObjectUnknown)
 
     // 'vmvc' — virtual main volume (same selector AudioHardwareService used).
@@ -74,6 +78,9 @@ final class AudioOutputService {
     func refresh() {
         guard deviceID != kAudioObjectUnknown else { return }
 
+        let oldVolume = volume
+        let oldMuted = muted
+
         var level: Float32 = 0
         var size = UInt32(MemoryLayout<Float32>.size)
         if AudioObjectGetPropertyData(deviceID, &Self.volumeAddress, 0, nil, &size, &level) == noErr {
@@ -84,6 +91,10 @@ final class AudioOutputService {
         size = UInt32(MemoryLayout<UInt32>.size)
         if AudioObjectGetPropertyData(deviceID, &Self.muteAddress, 0, nil, &size, &muteValue) == noErr {
             muted = muteValue != 0
+        }
+
+        if oldVolume != volume || oldMuted != muted {
+            onVolumeChanged?(volume, muted)
         }
     }
 

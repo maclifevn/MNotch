@@ -55,7 +55,7 @@ final class NotchViewModel {
     static let mediaWingWidth: CGFloat = 26
 
     static let expandedSize = CGSize(width: 520, height: 190)
-    static let hudExtraWidth: CGFloat = 40
+    static let hudExtraWidth: CGFloat = 160
     static let hudExtraHeight: CGFloat = 10
     static let popExtraWidth: CGFloat = 190
     static let popExtraHeight: CGFloat = 6
@@ -134,6 +134,30 @@ final class NotchViewModel {
                 try? await Task.sleep(for: Self.closeDelay)
                 guard !Task.isCancelled, let self, !self.pointerInside else { return }
                 self.collapse()
+            }
+        }
+    }
+
+    // MARK: - HUD
+
+    private(set) var hudValue: Double = 0
+    private(set) var hudMuted = false
+    private var hudDismissTask: Task<Void, Never>?
+
+    func showHUD(_ kind: HUDKind, value: Double, muted: Bool = false) {
+        // Never interrupt an open panel; the action still happened.
+        if status.isExpanded { return }
+        hudValue = value
+        hudMuted = muted
+        hudDismissTask?.cancel()
+        if status != .hud(kind) {
+            withAnimation(Anim.hud) { status = .hud(kind) }
+        }
+        hudDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1300))
+            guard !Task.isCancelled, let self else { return }
+            if case .hud = self.status {
+                withAnimation(Anim.close) { self.status = .closed }
             }
         }
     }

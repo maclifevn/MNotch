@@ -42,7 +42,7 @@ struct NotchBodyView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.status {
-        case .closed, .hud, .pop:
+        case .closed, .pop:
             if viewModel.mediaActive {
                 MediaCompactView(
                     viewModel: viewModel,
@@ -53,6 +53,14 @@ struct NotchBodyView: View {
             } else {
                 Color.clear
             }
+        case .hud(let kind):
+            HUDView(
+                kind: kind,
+                value: viewModel.hudValue,
+                muted: viewModel.hudMuted,
+                geometry: viewModel.geometry
+            )
+            .transition(Anim.contentSwap)
         case .expanded(let tab):
             expanded(tab)
                 .transition(Anim.contentSwap)
