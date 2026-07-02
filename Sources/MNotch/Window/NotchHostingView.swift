@@ -12,6 +12,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
         super.init(rootView: NotchRootView(viewModel: viewModel))
+        registerForDraggedTypes([.fileURL])
     }
 
     @MainActor @preconcurrency required init?(coder: NSCoder) {
@@ -61,5 +62,24 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     private func updateHover(_ event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         viewModel.setPointerInside(viewModel.interactiveRect(in: bounds).contains(local))
+    }
+
+    // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard SettingsStore.shared.shelfEnabled else { return [] }
+        viewModel.expand(.shelf)
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard SettingsStore.shared.shelfEnabled else { return false }
+        let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        guard !urls.isEmpty else { return false }
+        ShelfStore.shared.add(urls)
+        return true
     }
 }

@@ -22,14 +22,18 @@ final class NotchWindowController {
         panels = []
         viewModels = []
 
-        // Built-in (physical notch) screens only for now; fake-notch external
-        // display support arrives with the settings toggle.
-        for screen in NSScreen.screens where screen.safeAreaInsets.top > 0 {
+        let fakeNotch = SettingsStore.shared.fakeNotchOnExternal
+        for screen in NSScreen.screens
+        where screen.safeAreaInsets.top > 0 || fakeNotch {
             let viewModel = NotchViewModel(geometry: .forScreen(screen))
             let panel = NotchPanel(screen: screen, viewModel: viewModel)
             panel.orderFrontRegardless()
             panels.append(panel)
             viewModels.append(viewModel)
+        }
+
+        SettingsStore.shared.onDisplayConfigChanged = { [weak self] in
+            self?.rebuild()
         }
 
         AppServices.shared.showHUD = { [weak self] kind, value, muted in

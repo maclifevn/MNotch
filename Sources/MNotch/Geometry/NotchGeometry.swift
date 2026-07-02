@@ -22,9 +22,12 @@ struct NotchGeometry: Equatable {
                 isPhysical: true
             )
         }
+        // Fake notch: match the external display's menu bar height so the
+        // black shape reads as part of the bar.
+        let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
         return NotchGeometry(
             notchWidth: fallbackWidth,
-            notchHeight: fallbackHeight,
+            notchHeight: menuBarHeight > 4 ? menuBarHeight : fallbackHeight,
             isPhysical: false
         )
     }

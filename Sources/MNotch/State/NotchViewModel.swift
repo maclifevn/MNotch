@@ -185,7 +185,13 @@ final class NotchViewModel {
 
     func expand(_ tab: NotchTab) {
         lastTab = tab
+        let wasExpanded = status.isExpanded
         withAnimation(Anim.open) { status = .expanded(tab) }
+        if !wasExpanded {
+            NSHapticFeedbackManager.defaultPerformer.perform(
+                .alignment, performanceTime: .default
+            )
+        }
     }
 
     func collapse() {

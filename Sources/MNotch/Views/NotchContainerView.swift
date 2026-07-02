@@ -34,8 +34,11 @@ struct NotchBodyView: View {
             .background(.black, in: shape)
             .clipShape(shape)
             .animation(Anim.open, value: viewModel.mediaActive)
-            .onChange(of: services.media.hasActiveMedia, initial: true) {
-                viewModel.mediaActive = services.media.hasActiveMedia
+            .onChange(
+                of: services.media.hasActiveMedia && SettingsStore.shared.mediaEnabled,
+                initial: true
+            ) { _, active in
+                viewModel.mediaActive = active
             }
     }
 
@@ -66,6 +69,9 @@ struct NotchBodyView: View {
             .transition(Anim.contentSwap)
         case .expanded(let tab):
             expanded(tab)
+                .overlay(alignment: .topTrailing) {
+                    TabStrip(viewModel: viewModel, current: tab)
+                }
                 .transition(Anim.contentSwap)
         }
     }
@@ -92,9 +98,55 @@ struct NotchBodyView: View {
                 audio: services.audio,
                 namespace: notchSpace
             )
-        case .shelf, .calendar:
-            // Later phases.
-            Color.clear
+        case .shelf:
+            ShelfView(viewModel: viewModel)
+        case .calendar:
+            CalendarStripView(viewModel: viewModel, calendar: services.calendar)
         }
+    }
+}
+
+/// Tiny tab/settings icons in the expanded panel's top-right wing.
+struct TabStrip: View {
+    let viewModel: NotchViewModel
+    let current: NotchTab
+    private let settings = SettingsStore.shared
+
+    var body: some View {
+        HStack(spacing: 2) {
+            tabButton(.media, symbol: "music.note")
+            if settings.shelfEnabled {
+                tabButton(.shelf, symbol: "tray.fill")
+            }
+            if settings.calendarEnabled {
+                tabButton(.calendar, symbol: "calendar")
+            }
+            Button {
+                SettingsWindowController.shared.show()
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 7)
+        .padding(.trailing, 12)
+    }
+
+    private func tabButton(_ tab: NotchTab, symbol: String) -> some View {
+        Button {
+            viewModel.selectTab(tab)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(current == tab ? .white : .white.opacity(0.35))
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle().fill(.white.opacity(current == tab ? 0.14 : 0))
+                )
+        }
+        .buttonStyle(.plain)
     }
 }

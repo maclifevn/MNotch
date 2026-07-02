@@ -13,6 +13,7 @@ final class AppServices {
     let backlight = KeyboardBacklightService()
     let power = PowerSourceService()
     let bluetooth = BluetoothWatcher()
+    let calendar = CalendarService()
 
     /// Set by NotchWindowController; fans HUDs out to every panel.
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
@@ -37,6 +38,7 @@ final class AppServices {
         keys.start()
 
         power.onPowerEvent = { [weak self] event in
+            guard SettingsStore.shared.batteryEnabled else { return }
             switch event {
             case .pluggedIn(let percentage):
                 self?.showPop?(.charging(percentage: percentage))
@@ -49,6 +51,7 @@ final class AppServices {
         power.start()
 
         bluetooth.onConnect = { [weak self] name, symbol, battery in
+            guard SettingsStore.shared.bluetoothEnabled else { return }
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
         bluetooth.start()
@@ -57,7 +60,7 @@ final class AppServices {
         // from any source as a HUD. Redundant-but-harmless when the tap is
         // active, since the key handler already showed the same value.
         audio.onVolumeChanged = { [weak self] volume, muted in
-            guard let self else { return }
+            guard let self, SettingsStore.shared.hudEnabled else { return }
             guard Date().timeIntervalSince(self.startedAt) > 3 else { return }
             guard self.lastObservedVolume != volume || muted else {
                 self.lastObservedVolume = volume
@@ -73,6 +76,7 @@ final class AppServices {
         keyDown: Bool,
         modifiers: NSEvent.ModifierFlags
     ) -> Bool {
+        guard SettingsStore.shared.hudEnabled else { return false }
         let fine = modifiers.contains(.shift) && modifiers.contains(.option)
         switch key {
         case .soundUp, .soundDown:
