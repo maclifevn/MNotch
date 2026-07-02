@@ -42,7 +42,7 @@ struct NotchBodyView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.status {
-        case .closed, .pop:
+        case .closed:
             if viewModel.mediaActive {
                 MediaCompactView(
                     viewModel: viewModel,
@@ -53,6 +53,9 @@ struct NotchBodyView: View {
             } else {
                 Color.clear
             }
+        case .pop(let kind):
+            popView(kind)
+                .transition(Anim.contentSwap)
         case .hud(let kind):
             HUDView(
                 kind: kind,
@@ -64,6 +67,18 @@ struct NotchBodyView: View {
         case .expanded(let tab):
             expanded(tab)
                 .transition(Anim.contentSwap)
+        }
+    }
+
+    @ViewBuilder
+    private func popView(_ kind: PopKind) -> some View {
+        switch kind {
+        case .charging(let percentage):
+            BatteryPopView(percentage: percentage, low: false, geometry: viewModel.geometry)
+        case .lowBattery(let percentage):
+            BatteryPopView(percentage: percentage, low: true, geometry: viewModel.geometry)
+        case .device(let name, let symbol, let battery):
+            DevicePopView(name: name, symbol: symbol, battery: battery, geometry: viewModel.geometry)
         }
     }
 

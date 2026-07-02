@@ -11,9 +11,13 @@ final class AppServices {
     let keys = KeyInterceptor()
     let brightness = BrightnessService()
     let backlight = KeyboardBacklightService()
+    let power = PowerSourceService()
+    let bluetooth = BluetoothWatcher()
 
     /// Set by NotchWindowController; fans HUDs out to every panel.
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
+    /// Set by NotchWindowController; fans pops out to every panel.
+    var showPop: ((PopKind) -> Void)?
 
     private var startedAt = Date.distantPast
     private var lastObservedVolume: Double?
@@ -31,6 +35,23 @@ final class AppServices {
             self?.handleSystemKey(key, keyDown: keyDown, modifiers: modifiers) ?? false
         }
         keys.start()
+
+        power.onPowerEvent = { [weak self] event in
+            switch event {
+            case .pluggedIn(let percentage):
+                self?.showPop?(.charging(percentage: percentage))
+            case .unplugged(let percentage):
+                _ = percentage // No pop on unplug; matches Alcove's restraint.
+            case .lowBattery(let percentage):
+                self?.showPop?(.lowBattery(percentage: percentage))
+            }
+        }
+        power.start()
+
+        bluetooth.onConnect = { [weak self] name, symbol, battery in
+            self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
+        }
+        bluetooth.start()
 
         // Observe-only fallback (no Accessibility yet): mirror volume changes
         // from any source as a HUD. Redundant-but-harmless when the tap is

@@ -13,9 +13,9 @@ enum HUDKind: Equatable {
 }
 
 enum PopKind: Equatable {
-    case charging
-    case lowBattery
-    case device
+    case charging(percentage: Int)
+    case lowBattery(percentage: Int)
+    case device(name: String, symbol: String, battery: Int?)
 }
 
 enum NotchStatus: Equatable {
@@ -157,6 +157,25 @@ final class NotchViewModel {
             try? await Task.sleep(for: .milliseconds(1300))
             guard !Task.isCancelled, let self else { return }
             if case .hud = self.status {
+                withAnimation(Anim.close) { self.status = .closed }
+            }
+        }
+    }
+
+    // MARK: - Pops
+
+    private var popDismissTask: Task<Void, Never>?
+
+    func showPop(_ kind: PopKind) {
+        // Priority: user hover/expanded > HUD > pop.
+        guard !status.isExpanded else { return }
+        if case .hud = status { return }
+        withAnimation(Anim.pop) { status = .pop(kind) }
+        popDismissTask?.cancel()
+        popDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(2600))
+            guard !Task.isCancelled, let self else { return }
+            if case .pop = self.status {
                 withAnimation(Anim.close) { self.status = .closed }
             }
         }

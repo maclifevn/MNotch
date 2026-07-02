@@ -35,5 +35,8 @@ final class NotchWindowController {
         AppServices.shared.showHUD = { [weak self] kind, value, muted in
             self?.viewModels.forEach { $0.showHUD(kind, value: value, muted: muted) }
         }
+        AppServices.shared.showPop = { [weak self] kind in
+            self?.viewModels.forEach { $0.showPop(kind) }
+        }
     }
 }
