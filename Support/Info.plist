@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>MNotch</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.mnotch.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>MNotch</string>
+	<key>CFBundleDisplayName</key>
+	<string>MNotch</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__BUILD__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>MNotch uses AppleScript to read now-playing info from Music and Spotify when the system media relay is unavailable.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>MNotch shows your upcoming events in the notch calendar widget.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>MNotch shows a popup with battery level when your AirPods or other Bluetooth devices connect.</string>
+</dict>
+</plist>
