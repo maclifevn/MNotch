@@ -19,6 +19,7 @@ struct NotchRootView: View {
 /// The black notch shape plus whatever content the current state calls for.
 struct NotchBodyView: View {
     let viewModel: NotchViewModel
+    private let services = AppServices.shared
     @Namespace private var notchSpace
 
     var body: some View {
@@ -32,44 +33,45 @@ struct NotchBodyView: View {
             .frame(width: size.width, height: size.height, alignment: .top)
             .background(.black, in: shape)
             .clipShape(shape)
+            .animation(Anim.open, value: viewModel.mediaActive)
+            .onChange(of: services.media.hasActiveMedia, initial: true) {
+                viewModel.mediaActive = services.media.hasActiveMedia
+            }
     }
 
     @ViewBuilder
     private var content: some View {
         switch viewModel.status {
         case .closed, .hud, .pop:
-            // Closed content (media compact chrome, HUD sliver, pops) lands in
-            // later phases.
-            Color.clear
-        case .expanded:
-            ExpandedView(viewModel: viewModel)
+            if viewModel.mediaActive {
+                MediaCompactView(
+                    viewModel: viewModel,
+                    media: services.media,
+                    namespace: notchSpace
+                )
+                .transition(Anim.contentSwap)
+            } else {
+                Color.clear
+            }
+        case .expanded(let tab):
+            expanded(tab)
                 .transition(Anim.contentSwap)
         }
     }
-}
 
-/// Placeholder expanded panel — replaced with real tabs (media, shelf,
-/// calendar) in later phases.
-struct ExpandedView: View {
-    let viewModel: NotchViewModel
-
-    var body: some View {
-        HStack(spacing: 16) {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.1))
-                .frame(width: 76, height: 76)
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(.white.opacity(0.15))
-                    .frame(width: 140, height: 12)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 10)
-            }
-            Spacer()
+    @ViewBuilder
+    private func expanded(_ tab: NotchTab) -> some View {
+        switch tab {
+        case .media:
+            MediaExpandedView(
+                viewModel: viewModel,
+                media: services.media,
+                audio: services.audio,
+                namespace: notchSpace
+            )
+        case .shelf, .calendar:
+            // Later phases.
+            Color.clear
         }
-        .padding(.horizontal, 24)
-        .padding(.top, viewModel.geometry.notchHeight + 12)
-        .padding(.bottom, 16)
     }
 }

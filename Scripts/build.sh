@@ -31,12 +31,14 @@ cp "$ROOT/.build/arm64-apple-macosx/$CONFIG/MNotch" "$APP/Contents/MacOS/MNotch"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUM/" \
     "$ROOT/Support/Info.plist" > "$APP/Contents/Info.plist"
 
-# MediaRemote adapter (vendored from boring.notch / ungive/mediaremote-adapter, BSD-3)
+# MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
 ADAPTER_DIR="$ROOT/Vendor/mediaremote-adapter"
-if [[ -d "$ADAPTER_DIR/MediaRemoteAdapter.framework" ]]; then
-    cp -R "$ADAPTER_DIR/MediaRemoteAdapter.framework" "$APP/Contents/Frameworks/"
-    cp "$ADAPTER_DIR/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
+if [[ ! -d "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" ]]; then
+    Scripts/build-adapter.sh
 fi
+cp -R "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" "$APP/Contents/Frameworks/"
+cp "$ADAPTER_DIR/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
+cp "$ADAPTER_DIR/build/MediaRemoteAdapterTestClient" "$APP/Contents/Resources/"
 
 codesign --force --deep -s "$SIGN_ID" "$APP"
 

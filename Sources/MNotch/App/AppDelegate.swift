@@ -5,6 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        mnotchLog.notice("MNotch launched")
+        AppServices.shared.startAll()
         notchController = NotchWindowController()
         notchController?.showAll()
 
@@ -18,5 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screensChanged() {
         notchController?.repositionAll()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppServices.shared.media.stop()
     }
 }
