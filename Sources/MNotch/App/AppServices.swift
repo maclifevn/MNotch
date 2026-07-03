@@ -51,7 +51,7 @@ final class AppServices {
         power.start()
 
         bluetooth.onConnect = { [weak self] name, symbol, battery in
-            guard SettingsStore.shared.bluetoothEnabled else { return }
+            guard SettingsStore.shared.connectivityEnabled else { return }
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
         bluetooth.start()
@@ -60,7 +60,7 @@ final class AppServices {
         // from any source as a HUD. Redundant-but-harmless when the tap is
         // active, since the key handler already showed the same value.
         audio.onVolumeChanged = { [weak self] volume, muted in
-            guard let self, SettingsStore.shared.hudEnabled else { return }
+            guard let self, SettingsStore.shared.soundHUDEnabled else { return }
             guard Date().timeIntervalSince(self.startedAt) > 3 else { return }
             guard self.lastObservedVolume != volume || muted else {
                 self.lastObservedVolume = volume
@@ -76,10 +76,11 @@ final class AppServices {
         keyDown: Bool,
         modifiers: NSEvent.ModifierFlags
     ) -> Bool {
-        guard SettingsStore.shared.hudEnabled else { return false }
+        let settings = SettingsStore.shared
         let fine = modifiers.contains(.shift) && modifiers.contains(.option)
         switch key {
         case .soundUp, .soundDown:
+            guard settings.soundHUDEnabled else { return false }
             if keyDown {
                 let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
                 let newVolume = min(max(audio.volume + step, 0), 1)
@@ -88,6 +89,7 @@ final class AppServices {
             }
             return true
         case .mute:
+            guard settings.soundHUDEnabled else { return false }
             if keyDown {
                 audio.setMuted(!audio.muted)
                 showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
@@ -96,14 +98,14 @@ final class AppServices {
         case .brightnessUp, .brightnessDown:
             // If we can't set brightness ourselves, let the system handle the
             // key (and show its own OSD) rather than breaking the feature.
-            guard brightness.available else { return false }
+            guard settings.displayHUDEnabled, brightness.available else { return false }
             if keyDown {
                 let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
                 showHUD?(.brightness, newValue, false)
             }
             return true
         case .illuminationUp, .illuminationDown:
-            guard backlight.available else { return false }
+            guard settings.displayHUDEnabled, backlight.available else { return false }
             if keyDown {
                 let newValue = backlight.step(up: key == .illuminationUp)
                 showHUD?(.keyboardBacklight, newValue, false)

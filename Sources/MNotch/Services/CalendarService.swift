@@ -24,8 +24,17 @@ final class CalendarService {
         var id: Date { day }
     }
 
+    struct CalendarInfo: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let red: Double
+        let green: Double
+        let blue: Double
+    }
+
     private(set) var today: [Item] = []
     private(set) var upcoming: [DaySection] = []
+    private(set) var calendars: [CalendarInfo] = []
     private(set) var authorized = false
     private(set) var requested = false
 
@@ -53,6 +62,18 @@ final class CalendarService {
 
     func reload() {
         guard let store, authorized else { return }
+
+        calendars = store.calendars(for: .event).map { cal in
+            let c = cal.cgColor?.components ?? [0.6, 0.5, 1, 1]
+            return CalendarInfo(
+                id: cal.calendarIdentifier,
+                title: cal.title,
+                red: Double(c.count > 0 ? c[0] : 0.6),
+                green: Double(c.count > 1 ? c[1] : 0.5),
+                blue: Double(c.count > 2 ? c[2] : 1)
+            )
+        }.sorted { $0.title < $1.title }
+
         let calendar = Calendar.current
         let now = Date()
         let startOfToday = calendar.startOfDay(for: now)

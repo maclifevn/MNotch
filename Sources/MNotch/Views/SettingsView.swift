@@ -1,34 +1,122 @@
 import AppKit
 import SwiftUI
 
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general
+    case battery, connectivity, focus, display, sound
+    case nowPlaying, calendar, fileTray, lockScreen
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .battery: "Battery"
+        case .connectivity: "Connectivity"
+        case .focus: "Focus"
+        case .display: "Display"
+        case .sound: "Sound"
+        case .nowPlaying: "Now Playing"
+        case .calendar: "Calendar"
+        case .fileTray: "File Tray"
+        case .lockScreen: "Lock Screen"
+        case .about: "About"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape.fill"
+        case .battery: "bolt.fill"
+        case .connectivity: "headphones"
+        case .focus: "moon.fill"
+        case .display: "sun.max.fill"
+        case .sound: "speaker.wave.2.fill"
+        case .nowPlaying: "play.fill"
+        case .calendar: "calendar"
+        case .fileTray: "tray.fill"
+        case .lockScreen: "lock.fill"
+        case .about: "info"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .general: .gray
+        case .battery: .orange
+        case .focus: .indigo
+        case .connectivity: .green
+        case .display: .purple
+        case .sound: .pink
+        case .nowPlaying: .red
+        case .calendar: .red
+        case .fileTray: Color(white: 0.45)
+        case .lockScreen: .black
+        case .about: .gray
+        }
+    }
+}
+
 struct SettingsView: View {
-    @Bindable var settings = SettingsStore.shared
+    @State private var section: SettingsSection = .general
 
     var body: some View {
-        Form {
-            Section("Features") {
-                Toggle("Now Playing", isOn: $settings.mediaEnabled)
-                Toggle("Volume & brightness HUD", isOn: $settings.hudEnabled)
-                Toggle("Battery alerts", isOn: $settings.batteryEnabled)
-                Toggle("Bluetooth device popups", isOn: $settings.bluetoothEnabled)
-                Toggle("Calendar", isOn: $settings.calendarEnabled)
-                Toggle("File shelf", isOn: $settings.shelfEnabled)
-            }
-            Section("Displays") {
-                Toggle("Fake notch on external displays", isOn: $settings.fakeNotchOnExternal)
-            }
-            Section("General") {
-                Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                LabeledContent("HUD key interception") {
-                    Text(AppServices.shared.keys.tapActive
-                        ? "Active"
-                        : "Grant Accessibility in System Settings, then relaunch")
-                        .foregroundStyle(.secondary)
+        NavigationSplitView {
+            List(selection: $section) {
+                sidebarRow(.general)
+                Section("Notifications") {
+                    sidebarRow(.battery)
+                    sidebarRow(.connectivity)
+                    sidebarRow(.focus)
+                    sidebarRow(.display)
+                    sidebarRow(.sound)
+                }
+                Section("Live Activities") {
+                    sidebarRow(.nowPlaying)
+                    sidebarRow(.calendar)
+                    sidebarRow(.fileTray)
+                    sidebarRow(.lockScreen)
+                }
+                Section("MNotch") {
+                    sidebarRow(.about)
                 }
             }
+            .navigationSplitViewColumnWidth(200)
+        } detail: {
+            detailPane
+                .navigationTitle(section.title)
         }
-        .formStyle(.grouped)
-        .frame(width: 380, height: 380)
+        .frame(width: 760, height: 620)
+    }
+
+    private func sidebarRow(_ s: SettingsSection) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: s.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(s.color.gradient, in: RoundedRectangle(cornerRadius: 6))
+            Text(s.title)
+        }
+        .tag(s)
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        switch section {
+        case .general: GeneralPane()
+        case .battery: BatteryPane()
+        case .connectivity: ConnectivityPane()
+        case .focus: FocusPane()
+        case .display: DisplayPane()
+        case .sound: SoundPane()
+        case .nowPlaying: NowPlayingPane()
+        case .calendar: CalendarPane()
+        case .fileTray: FileTrayPane()
+        case .lockScreen: LockScreenPane()
+        case .about: AboutPane()
+        }
     }
 }
 
@@ -41,12 +129,13 @@ final class SettingsWindowController {
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 380, height: 380),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+                styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
             window.title = "MNotch Settings"
+            window.titlebarAppearsTransparent = true
             window.contentView = NSHostingView(rootView: SettingsView())
             window.isReleasedWhenClosed = false
             window.center()

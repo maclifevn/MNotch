@@ -22,11 +22,13 @@ final class NotchWindowController {
         panels = []
         viewModels = []
 
-        let fakeNotch = SettingsStore.shared.fakeNotchOnExternal
+        let settings = SettingsStore.shared
         for screen in NSScreen.screens
-        where screen.safeAreaInsets.top > 0 || fakeNotch {
+        where (screen.safeAreaInsets.top > 0 || settings.forceSimulatedNotch)
+            && Self.isTargeted(screen, target: settings.displayTarget) {
             let viewModel = NotchViewModel(geometry: .forScreen(screen))
             let panel = NotchPanel(screen: screen, viewModel: viewModel)
+            panel.sharingType = settings.hideFromScreenCapture ? .none : .readOnly
             panel.orderFrontRegardless()
             panels.append(panel)
             viewModels.append(viewModel)
@@ -35,12 +37,32 @@ final class NotchWindowController {
         SettingsStore.shared.onDisplayConfigChanged = { [weak self] in
             self?.rebuild()
         }
-
         AppServices.shared.showHUD = { [weak self] kind, value, muted in
             self?.viewModels.forEach { $0.showHUD(kind, value: value, muted: muted) }
         }
         AppServices.shared.showPop = { [weak self] kind in
             self?.viewModels.forEach { $0.showPop(kind) }
         }
+    }
+
+    /// "all" | "main" | "builtIn" | CGDirectDisplayID as string
+    private static func isTargeted(_ screen: NSScreen, target: String) -> Bool {
+        switch target {
+        case "all":
+            return true
+        case "main":
+            return screen == NSScreen.main || screen == NSScreen.screens.first
+        case "builtIn":
+            return screen.safeAreaInsets.top > 0 || CGDisplayIsBuiltin(screen.displayID) != 0
+        default:
+            return String(screen.displayID) == target
+        }
+    }
+}
+
+extension NSScreen {
+    var displayID: CGDirectDisplayID {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+            .uint32Value ?? 0
     }
 }

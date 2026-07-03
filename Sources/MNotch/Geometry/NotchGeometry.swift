@@ -12,13 +12,18 @@ struct NotchGeometry: Equatable {
     static let fallbackWidth: CGFloat = 185
     static let fallbackHeight: CGFloat = 32
 
+    @MainActor
     static func forScreen(_ screen: NSScreen) -> NotchGeometry {
+        // User tuning offsets (Settings → General → Tuning).
+        let dw = CGFloat(SettingsStore.shared.notchWidthOffset)
+        let dh = CGFloat(SettingsStore.shared.notchHeightOffset)
+
         if screen.safeAreaInsets.top > 0,
            let left = screen.auxiliaryTopLeftArea,
            let right = screen.auxiliaryTopRightArea {
             return NotchGeometry(
-                notchWidth: screen.frame.width - left.width - right.width,
-                notchHeight: screen.safeAreaInsets.top,
+                notchWidth: max(80, screen.frame.width - left.width - right.width + dw),
+                notchHeight: max(20, screen.safeAreaInsets.top + dh),
                 isPhysical: true
             )
         }
@@ -26,8 +31,8 @@ struct NotchGeometry: Equatable {
         // black shape reads as part of the bar.
         let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
         return NotchGeometry(
-            notchWidth: fallbackWidth,
-            notchHeight: menuBarHeight > 4 ? menuBarHeight : fallbackHeight,
+            notchWidth: max(80, fallbackWidth + dw),
+            notchHeight: max(20, (menuBarHeight > 4 ? menuBarHeight : fallbackHeight) + dh),
             isPhysical: false
         )
     }

@@ -2,60 +2,337 @@ import AppKit
 import Observation
 import ServiceManagement
 
-/// UserDefaults-backed feature toggles.
+// MARK: - Option enums
+
+enum IdleActivity: String, CaseIterable {
+    case none, playing, calendar, duo
+}
+
+enum HUDBarStyle: String, CaseIterable {
+    case white, accent, decibel
+}
+
+enum AnimSpeed: String, CaseIterable {
+    case smooth, fast, instant
+}
+
+enum WaveformStyle: String, CaseIterable {
+    case monochrome, colored, gradient
+}
+
+enum MediaQuickAction: String, CaseIterable {
+    case favorite, shuffle, repeatMode, copy
+}
+
+enum MediaBadgeStyle: String, CaseIterable {
+    case none, appIcon
+}
+
+enum SoundIconStyle: String, CaseIterable {
+    case symbol, device
+}
+
+enum CalendarUse: String, CaseIterable {
+    case both, notifications, activity
+}
+
+/// UserDefaults-backed settings, one property per Alcove-style toggle.
+/// Every stored property persists via its didSet; defaults mirror Alcove's.
 @MainActor
 @Observable
 final class SettingsStore {
     static let shared = SettingsStore()
 
-    var mediaEnabled: Bool {
-        didSet { UserDefaults.standard.set(mediaEnabled, forKey: "feature.media") }
+    @ObservationIgnored private let d = UserDefaults.standard
+    @ObservationIgnored private var loading = true
+
+    /// Set by NotchWindowController to rebuild panels on display-ish toggles.
+    @ObservationIgnored var onDisplayConfigChanged: (() -> Void)?
+
+    private func save(_ key: String, _ value: Any) {
+        guard !loading else { return }
+        d.set(value, forKey: key)
     }
-    var hudEnabled: Bool {
-        didSet { UserDefaults.standard.set(hudEnabled, forKey: "feature.hud") }
-    }
-    var batteryEnabled: Bool {
-        didSet { UserDefaults.standard.set(batteryEnabled, forKey: "feature.battery") }
-    }
-    var bluetoothEnabled: Bool {
-        didSet { UserDefaults.standard.set(bluetoothEnabled, forKey: "feature.bluetooth") }
-    }
-    var calendarEnabled: Bool {
-        didSet { UserDefaults.standard.set(calendarEnabled, forKey: "feature.calendar") }
-    }
-    var shelfEnabled: Bool {
-        didSet { UserDefaults.standard.set(shelfEnabled, forKey: "feature.shelf") }
-    }
-    var fakeNotchOnExternal: Bool {
+
+    // MARK: General
+
+    var launchAtLogin: Bool { didSet { applyLaunchAtLogin() } }
+    var hideInFullscreen: Bool { didSet { save("general.hideFullscreen", hideInFullscreen) } }
+    var hideInMissionControl: Bool { didSet { save("general.hideMissionControl", hideInMissionControl) } }
+    var hideWhileGaming: Bool { didSet { save("general.hideGaming", hideWhileGaming) } }
+    var hideFromScreenCapture: Bool {
         didSet {
-            UserDefaults.standard.set(fakeNotchOnExternal, forKey: "display.fakeNotch")
+            save("general.hideCapture", hideFromScreenCapture)
             onDisplayConfigChanged?()
         }
     }
-    var launchAtLogin: Bool {
-        didSet { applyLaunchAtLogin() }
+    var forceSimulatedNotch: Bool {
+        didSet {
+            save("general.forceNotch", forceSimulatedNotch)
+            onDisplayConfigChanged?()
+        }
+    }
+    /// "all" | "main" | "builtIn" | display id string
+    var displayTarget: String {
+        didSet {
+            save("general.displayTarget", displayTarget)
+            onDisplayConfigChanged?()
+        }
     }
 
-    /// Set by NotchWindowController to rebuild panels on display toggles.
-    @ObservationIgnored
-    var onDisplayConfigChanged: (() -> Void)?
+    var idleActivity: IdleActivity { didSet { save("general.idleActivity", idleActivity.rawValue) } }
+    var idleMostRecent: Bool { didSet { save("general.idleMostRecent", idleMostRecent) } }
+
+    var contrastOutline: Bool { didSet { save("general.contrastOutline", contrastOutline) } }
+    var progressiveBlur: Bool { didSet { save("general.progressiveBlur", progressiveBlur) } }
+    var hapticFeedback: Bool { didSet { save("general.haptic", hapticFeedback) } }
+    var expandOnHover: Bool { didSet { save("general.expandOnHover", expandOnHover) } }
+
+    var gestureNatural: Bool { didSet { save("gesture.natural", gestureNatural) } }
+    var gestureToggleOpen: Bool { didSet { save("gesture.toggleOpen", gestureToggleOpen) } }
+    var gestureCycleActivity: Bool { didSet { save("gesture.cycle", gestureCycleActivity) } }
+    var gestureDismissActivity: Bool { didSet { save("gesture.dismiss", gestureDismissActivity) } }
+    var gestureSkipMedia: Bool { didSet { save("gesture.skipMedia", gestureSkipMedia) } }
+
+    var notchWidthOffset: Double {
+        didSet {
+            save("tuning.width", notchWidthOffset)
+            onDisplayConfigChanged?()
+        }
+    }
+    var notchHeightOffset: Double {
+        didSet {
+            save("tuning.height", notchHeightOffset)
+            onDisplayConfigChanged?()
+        }
+    }
+
+    // MARK: Battery
+
+    var batteryEnabled: Bool { didSet { save("battery.enabled", batteryEnabled) } }
+    var batteryDuration: Double { didSet { save("battery.duration", batteryDuration) } }
+    var batteryNotifyLowPower: Bool { didSet { save("battery.lowPower", batteryNotifyLowPower) } }
+    var batteryWarnLow: Bool { didSet { save("battery.warnLow", batteryWarnLow) } }
+    var batteryLowThreshold: Double { didSet { save("battery.threshold", batteryLowThreshold) } }
+    var batterySoundOnLow: Bool { didSet { save("battery.sound", batterySoundOnLow) } }
+    var batteryHideLabel: Bool { didSet { save("battery.hideLabel", batteryHideLabel) } }
+    var batteryHidePercentage: Bool { didSet { save("battery.hidePct", batteryHidePercentage) } }
+
+    // MARK: Connectivity
+
+    var connectivityEnabled: Bool { didSet { save("bt.enabled", connectivityEnabled) } }
+    var connectivityDuration: Double { didSet { save("bt.duration", connectivityDuration) } }
+    var connectivityWarnLow: Bool { didSet { save("bt.warnLow", connectivityWarnLow) } }
+    var connectivityLowThreshold: Double { didSet { save("bt.threshold", connectivityLowThreshold) } }
+    var connectivitySoundOnLow: Bool { didSet { save("bt.sound", connectivitySoundOnLow) } }
+
+    // MARK: Focus
+
+    var focusEnabled: Bool { didSet { save("focus.enabled", focusEnabled) } }
+    var focusDuration: Double { didSet { save("focus.duration", focusDuration) } }
+    var focusSoundOnSleep: Bool { didSet { save("focus.sleepSound", focusSoundOnSleep) } }
+    var focusReplaceWaveform: Bool { didSet { save("focus.replaceWaveform", focusReplaceWaveform) } }
+    var focusHideLabel: Bool { didSet { save("focus.hideLabel", focusHideLabel) } }
+    var focusAllowBattery: Bool { didSet { save("focus.allowBattery", focusAllowBattery) } }
+    var focusAllowConnectivity: Bool { didSet { save("focus.allowBt", focusAllowConnectivity) } }
+    var focusAllowDisplay: Bool { didSet { save("focus.allowDisplay", focusAllowDisplay) } }
+    var focusAllowSound: Bool { didSet { save("focus.allowSound", focusAllowSound) } }
+
+    // MARK: Display HUD (brightness)
+
+    var displayHUDEnabled: Bool { didSet { save("display.enabled", displayHUDEnabled) } }
+    var displayHUDDuration: Double { didSet { save("display.duration", displayHUDDuration) } }
+    var displayBarStyle: HUDBarStyle { didSet { save("display.barStyle", displayBarStyle.rawValue) } }
+    var displayShowPercentage: Bool { didSet { save("display.showPct", displayShowPercentage) } }
+    var displayHideLabel: Bool { didSet { save("display.hideLabel", displayHideLabel) } }
+    var displayAnimSpeed: AnimSpeed { didSet { save("display.animSpeed", displayAnimSpeed.rawValue) } }
+
+    // MARK: Sound HUD (volume)
+
+    var soundHUDEnabled: Bool { didSet { save("sound.enabled", soundHUDEnabled) } }
+    var soundHUDDuration: Double { didSet { save("sound.duration", soundHUDDuration) } }
+    var soundBarStyle: HUDBarStyle { didSet { save("sound.barStyle", soundBarStyle.rawValue) } }
+    var soundShowPercentage: Bool { didSet { save("sound.showPct", soundShowPercentage) } }
+    var soundHideLabel: Bool { didSet { save("sound.hideLabel", soundHideLabel) } }
+    var soundAnimSpeed: AnimSpeed { didSet { save("sound.animSpeed", soundAnimSpeed.rawValue) } }
+    var soundIconStyle: SoundIconStyle { didSet { save("sound.iconStyle", soundIconStyle.rawValue) } }
+
+    // MARK: Now Playing
+
+    var mediaEnabled: Bool { didSet { save("media.enabled", mediaEnabled) } }
+    var mediaIdleDuration: Double { didSet { save("media.idleDuration", mediaIdleDuration) } }
+    var mediaBadge: MediaBadgeStyle { didSet { save("media.badge", mediaBadge.rawValue) } }
+    var mediaWaveformStyle: WaveformStyle { didSet { save("media.waveform", mediaWaveformStyle.rawValue) } }
+    var mediaDisableCompactWaveform: Bool { didSet { save("media.noCompactWave", mediaDisableCompactWaveform) } }
+    var mediaDisableArtworkFlip: Bool { didSet { save("media.noFlip", mediaDisableArtworkFlip) } }
+    var mediaHideWhileSourceActive: Bool { didSet { save("media.hideSourceActive", mediaHideWhileSourceActive) } }
+    var mediaHideTitleExtras: Bool { didSet { save("media.hideExtras", mediaHideTitleExtras) } }
+    var mediaQuickAction: MediaQuickAction { didSet { save("media.quickAction", mediaQuickAction.rawValue) } }
+    var mediaKnownSources: [String] { didSet { save("media.knownSources", mediaKnownSources) } }
+    var mediaDisabledSources: [String] { didSet { save("media.disabledSources", mediaDisabledSources) } }
+
+    // MARK: Calendar
+
+    var calendarEnabled: Bool { didSet { save("cal.enabled", calendarEnabled) } }
+    var calendarTimeBefore: Double { didSet { save("cal.timeBefore", calendarTimeBefore) } }
+    var calendarSoundOnEvent: Bool { didSet { save("cal.eventSound", calendarSoundOnEvent) } }
+    var calendarHourlyChime: Bool { didSet { save("cal.chime", calendarHourlyChime) } }
+    var calendarUseColor: Bool { didSet { save("cal.useColor", calendarUseColor) } }
+    var calendarDisableDuringEvents: Bool { didSet { save("cal.noDuringEvents", calendarDisableDuringEvents) } }
+    var calendarEventIndicators: Bool { didSet { save("cal.indicators", calendarEventIndicators) } }
+    var calendarMonthView: Bool { didSet { save("cal.monthView", calendarMonthView) } }
+    var calendarQuickPeek: Bool { didSet { save("cal.peek", calendarQuickPeek) } }
+    var calendarPeekBeforeStart: Bool { didSet { save("cal.peekBefore", calendarPeekBeforeStart) } }
+    var calendarPeekWhenStarting: Bool { didSet { save("cal.peekStarting", calendarPeekWhenStarting) } }
+    var calendarPeekDuration: Double { didSet { save("cal.peekDuration", calendarPeekDuration) } }
+    var calendarColoredIndicator: Bool { didSet { save("cal.coloredIndicator", calendarColoredIndicator) } }
+    var calendarDisabledCalendars: [String] { didSet { save("cal.disabled", calendarDisabledCalendars) } }
+    /// calendarIdentifier -> CalendarUse rawValue (default both)
+    var calendarUses: [String: String] { didSet { save("cal.uses", calendarUses) } }
+
+    // MARK: Shelf & Lock Screen
+
+    var shelfEnabled: Bool { didSet { save("shelf.enabled", shelfEnabled) } }
+
+    var lockSoundOnLock: Bool { didSet { save("lock.soundLock", lockSoundOnLock) } }
+    var lockSoundOnUnlock: Bool { didSet { save("lock.soundUnlock", lockSoundOnUnlock) } }
+    var lockKeepAwake: Double { didSet { save("lock.keepAwake", lockKeepAwake) } }
+
+    // MARK: - Init / load
 
     private init() {
-        let defaults = UserDefaults.standard
-        func flag(_ key: String, default value: Bool) -> Bool {
-            defaults.object(forKey: key) == nil ? value : defaults.bool(forKey: key)
+        // Local shadow so the nested helpers don't touch self before
+        // initialization completes.
+        let d = UserDefaults.standard
+        func flag(_ key: String, _ fallback: Bool, legacy: String? = nil) -> Bool {
+            if d.object(forKey: key) != nil { return d.bool(forKey: key) }
+            if let legacy, d.object(forKey: legacy) != nil { return d.bool(forKey: legacy) }
+            return fallback
         }
-        mediaEnabled = flag("feature.media", default: true)
-        hudEnabled = flag("feature.hud", default: true)
-        batteryEnabled = flag("feature.battery", default: true)
-        bluetoothEnabled = flag("feature.bluetooth", default: true)
-        calendarEnabled = flag("feature.calendar", default: true)
-        shelfEnabled = flag("feature.shelf", default: true)
-        fakeNotchOnExternal = flag("display.fakeNotch", default: false)
+        func num(_ key: String, _ fallback: Double) -> Double {
+            d.object(forKey: key) != nil ? d.double(forKey: key) : fallback
+        }
+        func str(_ key: String, _ fallback: String) -> String {
+            d.string(forKey: key) ?? fallback
+        }
+        func opt<T: RawRepresentable>(_ key: String, _ fallback: T) -> T where T.RawValue == String {
+            d.string(forKey: key).flatMap(T.init(rawValue:)) ?? fallback
+        }
+
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        hideInFullscreen = flag("general.hideFullscreen", true)
+        hideInMissionControl = flag("general.hideMissionControl", true)
+        hideWhileGaming = flag("general.hideGaming", false)
+        hideFromScreenCapture = flag("general.hideCapture", false)
+        forceSimulatedNotch = flag("general.forceNotch", d.bool(forKey: "display.fakeNotch"))
+        displayTarget = str("general.displayTarget", "all")
+        idleActivity = opt("general.idleActivity", IdleActivity.playing)
+        idleMostRecent = flag("general.idleMostRecent", false)
+        contrastOutline = flag("general.contrastOutline", true)
+        progressiveBlur = flag("general.progressiveBlur", true)
+        hapticFeedback = flag("general.haptic", true)
+        expandOnHover = flag("general.expandOnHover", false)
+        gestureNatural = flag("gesture.natural", false)
+        gestureToggleOpen = flag("gesture.toggleOpen", true)
+        gestureCycleActivity = flag("gesture.cycle", true)
+        gestureDismissActivity = flag("gesture.dismiss", true)
+        gestureSkipMedia = flag("gesture.skipMedia", true)
+        notchWidthOffset = num("tuning.width", 0)
+        notchHeightOffset = num("tuning.height", 0)
+
+        batteryEnabled = flag("battery.enabled", true, legacy: "feature.battery")
+        batteryDuration = num("battery.duration", 5)
+        batteryNotifyLowPower = flag("battery.lowPower", true)
+        batteryWarnLow = flag("battery.warnLow", true)
+        batteryLowThreshold = num("battery.threshold", 10)
+        batterySoundOnLow = flag("battery.sound", false)
+        batteryHideLabel = flag("battery.hideLabel", false)
+        batteryHidePercentage = flag("battery.hidePct", false)
+
+        connectivityEnabled = flag("bt.enabled", true, legacy: "feature.bluetooth")
+        connectivityDuration = num("bt.duration", 5)
+        connectivityWarnLow = flag("bt.warnLow", true)
+        connectivityLowThreshold = num("bt.threshold", 20)
+        connectivitySoundOnLow = flag("bt.sound", false)
+
+        focusEnabled = flag("focus.enabled", true)
+        focusDuration = num("focus.duration", 5)
+        focusSoundOnSleep = flag("focus.sleepSound", false)
+        focusReplaceWaveform = flag("focus.replaceWaveform", false)
+        focusHideLabel = flag("focus.hideLabel", false)
+        focusAllowBattery = flag("focus.allowBattery", true)
+        focusAllowConnectivity = flag("focus.allowBt", true)
+        focusAllowDisplay = flag("focus.allowDisplay", true)
+        focusAllowSound = flag("focus.allowSound", true)
+
+        displayHUDEnabled = flag("display.enabled", true, legacy: "feature.hud")
+        displayHUDDuration = num("display.duration", 1.5)
+        displayBarStyle = opt("display.barStyle", HUDBarStyle.white)
+        displayShowPercentage = flag("display.showPct", false)
+        displayHideLabel = flag("display.hideLabel", false)
+        displayAnimSpeed = opt("display.animSpeed", AnimSpeed.fast)
+
+        soundHUDEnabled = flag("sound.enabled", true, legacy: "feature.hud")
+        soundHUDDuration = num("sound.duration", 1.5)
+        soundBarStyle = opt("sound.barStyle", HUDBarStyle.white)
+        soundShowPercentage = flag("sound.showPct", false)
+        soundHideLabel = flag("sound.hideLabel", false)
+        soundAnimSpeed = opt("sound.animSpeed", AnimSpeed.fast)
+        soundIconStyle = opt("sound.iconStyle", SoundIconStyle.device)
+
+        mediaEnabled = flag("media.enabled", true, legacy: "feature.media")
+        mediaIdleDuration = num("media.idleDuration", 3)
+        mediaBadge = opt("media.badge", MediaBadgeStyle.none)
+        mediaWaveformStyle = opt("media.waveform", WaveformStyle.colored)
+        mediaDisableCompactWaveform = flag("media.noCompactWave", false)
+        mediaDisableArtworkFlip = flag("media.noFlip", false)
+        mediaHideWhileSourceActive = flag("media.hideSourceActive", false)
+        mediaHideTitleExtras = flag("media.hideExtras", false)
+        mediaQuickAction = opt("media.quickAction", MediaQuickAction.shuffle)
+        mediaKnownSources = d.stringArray(forKey: "media.knownSources") ?? []
+        mediaDisabledSources = d.stringArray(forKey: "media.disabledSources") ?? []
+
+        calendarEnabled = flag("cal.enabled", true, legacy: "feature.calendar")
+        calendarTimeBefore = num("cal.timeBefore", 15)
+        calendarSoundOnEvent = flag("cal.eventSound", false)
+        calendarHourlyChime = flag("cal.chime", false)
+        calendarUseColor = flag("cal.useColor", true)
+        calendarDisableDuringEvents = flag("cal.noDuringEvents", false)
+        calendarEventIndicators = flag("cal.indicators", false)
+        calendarMonthView = flag("cal.monthView", false)
+        calendarQuickPeek = flag("cal.peek", true)
+        calendarPeekBeforeStart = flag("cal.peekBefore", false)
+        calendarPeekWhenStarting = flag("cal.peekStarting", true)
+        calendarPeekDuration = num("cal.peekDuration", 4)
+        calendarColoredIndicator = flag("cal.coloredIndicator", true)
+        calendarDisabledCalendars = d.stringArray(forKey: "cal.disabled") ?? []
+        calendarUses = (d.dictionary(forKey: "cal.uses") as? [String: String]) ?? [:]
+
+        shelfEnabled = flag("shelf.enabled", true, legacy: "feature.shelf")
+        lockSoundOnLock = flag("lock.soundLock", false)
+        lockSoundOnUnlock = flag("lock.soundUnlock", false)
+        lockKeepAwake = num("lock.keepAwake", 0)
+
+        loading = false
+    }
+
+    // MARK: - Helpers
+
+    func use(for calendarID: String) -> CalendarUse {
+        calendarUses[calendarID].flatMap(CalendarUse.init(rawValue:)) ?? .both
+    }
+
+    func isSourceEnabled(_ bundleID: String) -> Bool {
+        !mediaDisabledSources.contains(bundleID)
+    }
+
+    func rememberSource(_ bundleID: String) {
+        guard !bundleID.isEmpty, !mediaKnownSources.contains(bundleID) else { return }
+        mediaKnownSources.append(bundleID)
     }
 
     private func applyLaunchAtLogin() {
+        guard !loading else { return }
         do {
             if launchAtLogin {
                 try SMAppService.mainApp.register()
