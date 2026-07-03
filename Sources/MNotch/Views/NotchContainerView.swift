@@ -48,12 +48,21 @@ struct NotchBodyView: View {
                 viewModel.handleTap()
             }
             .animation(Anim.open, value: viewModel.mediaActive)
-            .onChange(
-                of: services.media.hasActiveMedia && SettingsStore.shared.mediaEnabled,
-                initial: true
-            ) { _, active in
+            .onChange(of: mediaVisible, initial: true) { _, active in
                 viewModel.mediaActive = active
             }
+    }
+
+    /// Media chrome shows when enabled, playing, and (optionally) the source
+    /// app isn't frontmost.
+    private var mediaVisible: Bool {
+        let settings = SettingsStore.shared
+        guard settings.mediaEnabled, services.media.hasActiveMedia else { return false }
+        if settings.mediaHideWhileSourceActive,
+           services.occlusion.frontmostBundleID == services.media.playback.bundleIdentifier {
+            return false
+        }
+        return true
     }
 
     @ViewBuilder

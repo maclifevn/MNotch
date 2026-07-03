@@ -14,6 +14,7 @@ final class AppServices {
     let power = PowerSourceService()
     let bluetooth = BluetoothWatcher()
     let calendar = CalendarService()
+    let occlusion = OcclusionWatcher()
 
     /// Set by NotchWindowController; fans HUDs out to every panel.
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
@@ -63,6 +64,7 @@ final class AppServices {
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
         bluetooth.start()
+        occlusion.start()
 
         // Observe-only fallback (no Accessibility yet): mirror volume changes
         // from any source as a HUD. Redundant-but-harmless when the tap is

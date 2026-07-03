@@ -43,6 +43,18 @@ final class NotchWindowController {
         AppServices.shared.showPop = { [weak self] kind in
             self?.viewModels.forEach { $0.showPop(kind) }
         }
+        AppServices.shared.occlusion.onHideChanged = { [weak self] hide in
+            guard let self else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                for panel in self.panels {
+                    panel.animator().alphaValue = hide ? 0 : 1
+                }
+            }
+            for panel in self.panels {
+                panel.ignoresMouseEvents = hide
+            }
+        }
     }
 
     /// "all" | "main" | "builtIn" | CGDirectDisplayID as string
