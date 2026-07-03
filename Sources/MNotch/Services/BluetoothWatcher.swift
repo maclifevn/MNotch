@@ -58,11 +58,23 @@ final class BluetoothWatcher: NSObject {
     /// IOBluetooth delivers this on a CoreBluetooth background thread, so the
     /// handler must be nonisolated; plain value reads on the device object are
     /// done here, then everything hops to the main actor.
+    /// Addresses recently popped, to swallow reconnect loops.
+    private var recentPops: [String: Date] = [:]
+
     @objc nonisolated private func deviceConnected(
         _ notification: IOBluetoothUserNotification,
         device: IOBluetoothDevice
     ) {
-        let name = device.name ?? "Bluetooth Device"
+        // Background Continuity handshakes (iPhone/Watch nearby) and service
+        // probes fire this too — nameless connections are never something the
+        // user just did, so stay silent for them.
+        guard let name = device.name, !name.isEmpty else { return }
+
+        // Only audio devices (4) and peripherals (5) warrant a pop; phones,
+        // watches and misc devices connect on their own all the time.
+        let majorClass = (device.classOfDevice >> 8) & 0x1F
+        guard majorClass == 4 || majorClass == 5 else { return }
+
         let symbol = Self.symbol(forName: name, classOfDevice: device.classOfDevice)
         let address = device.addressString
         device.register(
@@ -71,15 +83,24 @@ final class BluetoothWatcher: NSObject {
         )
 
         Task { @MainActor [weak self] in
-            self?.connected[address ?? name] = Connected(
+            guard let self else { return }
+            let key = address ?? name
+            self.connected[key] = Connected(
                 name: name, symbol: symbol, address: address
             )
+
+            // One pop per device per 2 minutes, however often it reconnects.
+            if let last = self.recentPops[key], Date().timeIntervalSince(last) < 120 {
+                return
+            }
+            self.recentPops[key] = Date()
+
             // Registry entries appear shortly after connect.
             try? await Task.sleep(for: .seconds(1))
             let battery = await Task.detached {
                 Self.hidBatteryPercent(address: address, name: name)
             }.value
-            self?.onConnect?(name, symbol, battery)
+            self.onConnect?(name, symbol, battery)
         }
     }
 
