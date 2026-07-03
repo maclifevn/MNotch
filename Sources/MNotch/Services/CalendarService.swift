@@ -1,8 +1,10 @@
 import EventKit
 import Observation
 
-/// Today's events via EventKit. Access is requested lazily, the first time the
-/// calendar tab appears, so launch never triggers a TCC prompt.
+/// Calendar events via EventKit: today's (including all-day — holidays and
+/// birthdays are the events people actually see up here) plus the next week,
+/// grouped by day. Access is requested lazily, the first time the calendar
+/// tab appears, so launch never triggers a TCC prompt.
 @MainActor
 @Observable
 final class CalendarService {
@@ -10,13 +12,20 @@ final class CalendarService {
         let id: String
         let title: String
         let start: Date
-        let end: Date
+        let isAllDay: Bool
         let colorRed: Double
         let colorGreen: Double
         let colorBlue: Double
     }
 
-    private(set) var items: [Item] = []
+    struct DaySection: Identifiable, Equatable {
+        let day: Date
+        let items: [Item]
+        var id: Date { day }
+    }
+
+    private(set) var today: [Item] = []
+    private(set) var upcoming: [DaySection] = []
     private(set) var authorized = false
     private(set) var requested = false
 
@@ -46,27 +55,44 @@ final class CalendarService {
         guard let store, authorized else { return }
         let calendar = Calendar.current
         let now = Date()
-        let endOfDay = calendar.date(
-            byAdding: .day, value: 1, to: calendar.startOfDay(for: now)
-        ) ?? now
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
+        let windowEnd = calendar.date(byAdding: .day, value: 8, to: startOfToday) ?? now
+
         let predicate = store.predicateForEvents(
-            withStart: now, end: endOfDay, calendars: nil
+            withStart: startOfToday, end: windowEnd, calendars: nil
         )
-        items = store.events(matching: predicate)
-            .filter { !$0.isAllDay }
-            .sorted { $0.startDate < $1.startDate }
-            .prefix(5)
+        let events = store.events(matching: predicate)
+            .sorted {
+                if $0.isAllDay != $1.isAllDay { return $0.isAllDay }
+                return $0.startDate < $1.startDate
+            }
             .map { event in
-                let color = event.calendar?.cgColor?.components ?? [0.5, 0.5, 1, 1]
+                let color = event.calendar?.cgColor?.components ?? [0.6, 0.5, 1, 1]
                 return Item(
-                    id: event.eventIdentifier ?? UUID().uuidString,
+                    id: (event.eventIdentifier ?? UUID().uuidString)
+                        + "\(event.startDate.timeIntervalSince1970)",
                     title: event.title ?? "Untitled",
                     start: event.startDate,
-                    end: event.endDate,
-                    colorRed: Double(color.count > 0 ? color[0] : 0.5),
+                    isAllDay: event.isAllDay,
+                    colorRed: Double(color.count > 0 ? color[0] : 0.6),
                     colorGreen: Double(color.count > 1 ? color[1] : 0.5),
                     colorBlue: Double(color.count > 2 ? color[2] : 1)
                 )
+            }
+
+        today = events
+            .filter { $0.start < startOfTomorrow }
+            .prefix(3)
+            .map { $0 }
+
+        let byDay = Dictionary(grouping: events.filter { $0.start >= startOfTomorrow }) {
+            calendar.startOfDay(for: $0.start)
+        }
+        upcoming = byDay.keys.sorted()
+            .prefix(3)
+            .map { day in
+                DaySection(day: day, items: Array(byDay[day]!.prefix(2)))
             }
     }
 }
