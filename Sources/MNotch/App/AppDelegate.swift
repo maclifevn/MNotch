@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
+    private let statusItem = StatusItemController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         mnotchLog.notice("MNotch launched")
@@ -12,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let notchController {
             DebugProbe.install(controller: notchController)
         }
+        statusItem.install()
 
         NotificationCenter.default.addObserver(
             self,

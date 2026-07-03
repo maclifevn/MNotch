@@ -31,6 +31,8 @@ cp "$ROOT/.build/arm64-apple-macosx/$CONFIG/MNotch" "$APP/Contents/MacOS/MNotch"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUM/" \
     "$ROOT/Support/Info.plist" > "$APP/Contents/Info.plist"
 
+cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/"
+
 # MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
 ADAPTER_DIR="$ROOT/Vendor/mediaremote-adapter"
 if [[ ! -d "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" ]]; then
