@@ -17,6 +17,7 @@ final class AppServices {
     let calendar = CalendarService()
     let occlusion = OcclusionWatcher()
     let focus = FocusWatcher()
+    let lockScreen = LockScreenWatcher()
 
     enum NotificationCategory {
         case battery, connectivity, display, sound
@@ -82,8 +83,13 @@ final class AppServices {
                   self?.allowedNow(.connectivity) != false else { return }
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
+        bluetooth.onLowBattery = { [weak self] name, symbol, battery in
+            guard self?.allowedNow(.connectivity) != false else { return }
+            self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
+        }
         bluetooth.start()
         occlusion.start()
+        lockScreen.start()
 
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared

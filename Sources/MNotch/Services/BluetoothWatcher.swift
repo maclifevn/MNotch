@@ -8,12 +8,51 @@ import IOKit
 @MainActor
 final class BluetoothWatcher: NSObject {
     var onConnect: ((_ name: String, _ symbol: String, _ battery: Int?) -> Void)?
+    var onLowBattery: ((_ name: String, _ symbol: String, _ battery: Int) -> Void)?
+
+    private struct Connected {
+        let name: String
+        let symbol: String
+        let address: String?
+    }
+
+    private var connected: [String: Connected] = [:]
+    private var warnedLow: Set<String> = []
 
     func start() {
         IOBluetoothDevice.register(
             forConnectNotifications: self,
             selector: #selector(deviceConnected(_:device:))
         )
+
+        // Periodic re-check of connected devices' battery (Settings →
+        // Connectivity → Warn on low battery).
+        let timer = Timer(timeInterval: 300, repeats: true) { _ in
+            Task { @MainActor [weak self] in self?.recheckBatteries() }
+        }
+        timer.tolerance = 30
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func recheckBatteries() {
+        let settings = SettingsStore.shared
+        guard settings.connectivityEnabled, settings.connectivityWarnLow else { return }
+        let threshold = Int(settings.connectivityLowThreshold)
+
+        for (key, device) in connected where !warnedLow.contains(key) {
+            Task { [weak self] in
+                let battery = await Task.detached {
+                    Self.hidBatteryPercent(address: device.address, name: device.name)
+                }.value
+                guard let battery, battery > 0, battery <= threshold else { return }
+                guard let self, !self.warnedLow.contains(key) else { return }
+                self.warnedLow.insert(key)
+                self.onLowBattery?(device.name, device.symbol, battery)
+                if SettingsStore.shared.connectivitySoundOnLow {
+                    SoundPlayer.play(.deviceLow)
+                }
+            }
+        }
     }
 
     /// IOBluetooth delivers this on a CoreBluetooth background thread, so the
@@ -26,14 +65,32 @@ final class BluetoothWatcher: NSObject {
         let name = device.name ?? "Bluetooth Device"
         let symbol = Self.symbol(forName: name, classOfDevice: device.classOfDevice)
         let address = device.addressString
+        device.register(
+            forDisconnectNotification: self,
+            selector: #selector(deviceDisconnected(_:device:))
+        )
 
         Task { @MainActor [weak self] in
+            self?.connected[address ?? name] = Connected(
+                name: name, symbol: symbol, address: address
+            )
             // Registry entries appear shortly after connect.
             try? await Task.sleep(for: .seconds(1))
             let battery = await Task.detached {
                 Self.hidBatteryPercent(address: address, name: name)
             }.value
             self?.onConnect?(name, symbol, battery)
+        }
+    }
+
+    @objc nonisolated private func deviceDisconnected(
+        _ notification: IOBluetoothUserNotification,
+        device: IOBluetoothDevice
+    ) {
+        let key = device.addressString ?? device.name ?? ""
+        Task { @MainActor [weak self] in
+            self?.connected.removeValue(forKey: key)
+            self?.warnedLow.remove(key)
         }
     }
 
