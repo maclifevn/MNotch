@@ -67,6 +67,10 @@ final class NotchViewModel {
     /// Hover apron: interactive region extends this far past the visible shape.
     static let apron: CGFloat = 8
 
+    /// Subtle growth while hovering the closed notch (Alcove-style feedback);
+    /// expanding requires a click.
+    static let hoverGrowth = CGSize(width: 18, height: 4)
+
     var closedSize: CGSize {
         let wings = mediaActive ? Self.mediaWingWidth * 2 : 0
         return CGSize(
@@ -78,7 +82,12 @@ final class NotchViewModel {
     var visualSize: CGSize {
         switch status {
         case .closed:
-            return closedSize
+            var size = closedSize
+            if isHovering {
+                size.width += Self.hoverGrowth.width
+                size.height += Self.hoverGrowth.height
+            }
+            return size
         case .hud:
             return CGSize(
                 width: closedSize.width + Self.hudExtraWidth,
@@ -110,10 +119,13 @@ final class NotchViewModel {
     }
 
     // MARK: - Hover intent
+    //
+    // Alcove behavior: hovering only grows the closed notch slightly; a click
+    // opens the expanded panel; moving the pointer away closes it.
 
-    static let openDelay: Duration = .milliseconds(120)
     static let closeDelay: Duration = .milliseconds(350)
 
+    private(set) var isHovering = false
     private var pointerInside = false
     private var hoverTask: Task<Void, Never>?
 
@@ -122,21 +134,21 @@ final class NotchViewModel {
         pointerInside = inside
         hoverTask?.cancel()
 
-        if inside {
-            guard !status.isExpanded else { return }
-            hoverTask = Task { [weak self] in
-                try? await Task.sleep(for: Self.openDelay)
-                guard !Task.isCancelled, let self, self.pointerInside else { return }
-                self.expand(self.lastTab)
-            }
-        } else {
-            guard status.isExpanded else { return }
+        withAnimation(inside ? Anim.open : Anim.close) { isHovering = inside }
+
+        if !inside, status.isExpanded {
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: Self.closeDelay)
                 guard !Task.isCancelled, let self, !self.pointerInside else { return }
                 self.collapse()
             }
         }
+    }
+
+    /// Click on the closed (or hovered) notch opens the panel.
+    func handleTap() {
+        guard !status.isExpanded else { return }
+        expand(lastTab)
     }
 
     // MARK: - HUD

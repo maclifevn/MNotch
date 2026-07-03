@@ -37,6 +37,9 @@ struct NotchBodyView: View {
             .onHover { inside in
                 viewModel.setPointerInside(inside)
             }
+            .onTapGesture {
+                viewModel.handleTap()
+            }
             .animation(Anim.open, value: viewModel.mediaActive)
             .onChange(
                 of: services.media.hasActiveMedia && SettingsStore.shared.mediaEnabled,
