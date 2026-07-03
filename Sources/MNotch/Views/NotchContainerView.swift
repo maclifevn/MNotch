@@ -31,6 +31,27 @@ struct NotchBodyView: View {
 
         content
             .frame(width: size.width, height: size.height, alignment: .top)
+            .background {
+                // Progressive blur: soft behind-window halo fading downward,
+                // mounted only while expanded so the closed notch costs
+                // nothing to composite.
+                if viewModel.status.isExpanded, SettingsStore.shared.progressiveBlur {
+                    VisualEffectView()
+                        .frame(width: size.width + 70, height: size.height + 60)
+                        .mask(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black, location: 0),
+                                    .init(color: .black.opacity(0.5), location: 0.55),
+                                    .init(color: .clear, location: 1),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .transition(.opacity)
+                }
+            }
             .background(.black, in: shape)
             .clipShape(shape)
             .overlay {
