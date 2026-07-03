@@ -103,16 +103,17 @@ final class NotchViewModel {
         }
     }
 
-    /// Interactive bounds in AppKit view coordinates (origin bottom-left),
-    /// for `NotchHostingView.hitTest` and hover math. Slightly larger than the
-    /// visible shape so tiny pointer overshoots don't collapse the panel.
-    func interactiveRect(in bounds: CGRect) -> CGRect {
+    /// Interactive bounds for `NotchHostingView.hitTest`, in that view's
+    /// coordinates. NSHostingView is FLIPPED (origin top-left, like SwiftUI),
+    /// so the notch region hugs y = 0. Slightly larger than the visible shape
+    /// so tiny pointer overshoots don't collapse the panel.
+    func interactiveRect(in bounds: CGRect, flipped: Bool) -> CGRect {
         let size = visualSize
         let width = size.width + Self.apron * 2
         let height = size.height + Self.apron
         return CGRect(
             x: (bounds.width - width) / 2,
-            y: bounds.height - height,
+            y: flipped ? 0 : bounds.height - height,
             width: width,
             height: height
         )

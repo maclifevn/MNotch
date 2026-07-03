@@ -29,7 +29,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        guard viewModel.interactiveRect(in: bounds).contains(local) else { return nil }
+        guard viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local) else { return nil }
         return super.hitTest(point)
     }
 
@@ -44,7 +44,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     override func mouseUp(with event: NSEvent) {
         super.mouseUp(with: event)
         let local = convert(event.locationInWindow, from: nil)
-        if viewModel.interactiveRect(in: bounds).contains(local) {
+        if viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local) {
             viewModel.handleTap()
         }
     }
