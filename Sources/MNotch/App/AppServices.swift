@@ -52,6 +52,18 @@ final class AppServices {
         brightness.start()
         backlight.start()
 
+        // Observe-mode brightness HUD (mirrors the system OSD until the
+        // event tap has Accessibility and consumes the keys itself).
+        brightness.onChanged = { [weak self] value in
+            guard let self,
+                  SettingsStore.shared.displayHUDEnabled,
+                  !self.keys.tapActive,
+                  self.allowedNow(.display)
+            else { return }
+            self.showHUD?(.brightness, value, false)
+        }
+        brightness.startObserving()
+
         keys.handler = { [weak self] key, keyDown, isRepeat, modifiers in
             self?.handleSystemKey(key, keyDown: keyDown, modifiers: modifiers) ?? false
         }

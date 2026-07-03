@@ -14,7 +14,31 @@ final class BrightnessService {
 
     private(set) var brightness: Double = 0.5
 
+    /// Observe-mode: fires when brightness changes externally (F1/F2 handled
+    /// by the system while we don't have the event tap).
+    @ObservationIgnored var onChanged: ((Double) -> Void)?
+    @ObservationIgnored private var lastPolled: Double?
+    @ObservationIgnored private var pollTimer: Timer?
+
     var available: Bool { getFn != nil && setFn != nil }
+
+    /// Cheap 0.5s poll (one C call) so brightness-key presses show our HUD
+    /// even without Accessibility.
+    func startObserving() {
+        guard pollTimer == nil, available else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.refresh() else { return }
+                if let last = self.lastPolled, abs(last - self.brightness) > 0.004 {
+                    self.onChanged?(self.brightness)
+                }
+                self.lastPolled = self.brightness
+            }
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
 
     func start() {
         guard let handle = dlopen(
