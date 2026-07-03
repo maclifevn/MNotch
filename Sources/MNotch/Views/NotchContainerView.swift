@@ -31,18 +31,23 @@ struct NotchBodyView: View {
 
         content
             .frame(width: size.width, height: size.height, alignment: .top)
+            // Opaque black notch: fill behind the content, clipped to the
+            // shape so the interior always reads solid — never washed out.
+            .background(.black, in: shape)
+            .clipShape(shape)
             .background {
-                // Progressive blur: soft behind-window halo fading downward,
-                // mounted only while expanded so the closed notch costs
-                // nothing to composite.
+                // Progressive blur: a soft behind-window halo extending past
+                // the panel's bottom edge onto the desktop. Applied AFTER the
+                // clip so it overflows freely and never tints the black fill.
+                // Expanded only.
                 if viewModel.status.isExpanded, SettingsStore.shared.progressiveBlur {
                     VisualEffectView()
-                        .frame(width: size.width + 70, height: size.height + 60)
+                        .frame(width: size.width + 60, height: size.height + 80)
                         .mask(
                             LinearGradient(
                                 stops: [
                                     .init(color: .black, location: 0),
-                                    .init(color: .black.opacity(0.5), location: 0.55),
+                                    .init(color: .black.opacity(0.4), location: 0.6),
                                     .init(color: .clear, location: 1),
                                 ],
                                 startPoint: .top,
@@ -52,8 +57,6 @@ struct NotchBodyView: View {
                         .transition(.opacity)
                 }
             }
-            .background(.black, in: shape)
-            .clipShape(shape)
             .overlay {
                 if SettingsStore.shared.contrastOutline {
                     shape
