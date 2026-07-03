@@ -35,7 +35,9 @@ final class CalendarService {
             settings.use(for: item.calendarID) != .notifications
         }
         return today.first { !$0.isAllDay && $0.end > now && usable($0) }
-            ?? today.first(where: usable)
+            // All-day only — a timed event that already ended must not
+            // resurface as "next" for the rest of the day.
+            ?? today.first { $0.isAllDay && usable($0) }
             ?? upcoming.first?.items.first(where: usable)
     }
 
@@ -144,10 +146,9 @@ final class CalendarService {
                 )
             }
 
-        today = events
-            .filter { $0.start < startOfTomorrow }
-            .prefix(3)
-            .map { $0 }
+        // Uncapped: peeks/ongoing-event checks need every timed event even
+        // when several all-day events sort first; views cap for display.
+        today = events.filter { $0.start < startOfTomorrow }
 
         let byDay = Dictionary(grouping: events.filter { $0.start >= startOfTomorrow }) {
             calendar.startOfDay(for: $0.start)

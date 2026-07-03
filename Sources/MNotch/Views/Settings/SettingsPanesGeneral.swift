@@ -53,6 +53,19 @@ struct GeneralPane: View {
                     }
                 )
                 .disabled(settings.idleMostRecent)
+                .onChange(of: settings.idleActivity) { _, activity in
+                    // Picking Calendar/Duo must kick off the EventKit access
+                    // request, or on a fresh install the choice silently does
+                    // nothing until the calendar tab happens to open.
+                    if activity == .calendar || activity == .duo {
+                        AppServices.shared.calendar.ensureStarted()
+                    }
+                }
+                .onChange(of: settings.idleMostRecent) { _, on in
+                    if on {
+                        AppServices.shared.calendar.ensureStarted()
+                    }
+                }
             }
 
             Section("Behaviour") {

@@ -163,6 +163,10 @@ struct NotchBodyView: View {
             )
         case .device(let name, let symbol, let battery):
             DevicePopView(name: name, symbol: symbol, battery: battery, geometry: viewModel.geometry)
+                // Distinct identity per device+level: consecutive device pops
+                // stay in the same structural branch, and without this the
+                // ring's @State keeps the previous device's fill.
+                .id("device-\(name)-\(battery ?? -1)")
         case .focus(let name, let symbol, let on):
             FocusPopView(name: name, symbol: symbol, on: on, geometry: viewModel.geometry)
         case .event(let title, let red, let green, let blue, let startingNow, let start):

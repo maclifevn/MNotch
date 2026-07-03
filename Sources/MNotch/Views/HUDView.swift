@@ -57,8 +57,16 @@ struct HUDView: View {
         }
     }
 
+    /// User-selected speed for THIS HUD kind (bar movement honors it too,
+    /// including "Instant").
+    private var speed: AnimSpeed {
+        isVolume ? settings.soundAnimSpeed : settings.displayAnimSpeed
+    }
+
     var body: some View {
-        HStack {
+        // Fixed wings (matching hudExtraWidth 160 = 2×(72+14) minus the
+        // cutout) so the bar + percentage can never tuck under the camera.
+        PopWings(geometry: geometry, wingWidth: 72) {
             if !hideLabel {
                 Image(systemName: symbol, variableValue: value)
                     .font(.system(size: 12, weight: .semibold))
@@ -66,30 +74,27 @@ struct HUDView: View {
                     .frame(width: 22, alignment: .leading)
                     .contentTransition(.symbolEffect(.replace))
             }
-
-            Spacer(minLength: geometry.notchWidth)
-
+        } right: {
             HStack(spacing: 6) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.25))
                         Capsule()
                             .fill(fill)
-                            .frame(width: max(geo.size.height, geo.size.width * value))
+                            .frame(width: max(geo.size.height, geo.size.width * min(max(value, 0), 1)))
                     }
                 }
-                .frame(width: showPercentage ? 46 : 60, height: 5)
+                .frame(height: 5)
                 if showPercentage {
                     Text("\(Int((value * 100).rounded()))%")
                         .font(.system(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.white.opacity(0.7))
                         .contentTransition(.numericText())
+                        .fixedSize()
                 }
             }
-            .animation(Anim.hud, value: value)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .animation(Anim.hud(speed), value: value)
         }
-        .padding(.horizontal, 14)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
     }
 }

@@ -44,7 +44,7 @@ struct CalendarStripView: View {
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(calendar.today) { item in
+                ForEach(calendar.today.prefix(3)) { item in
                     EventChip(item: item)
                 }
             }
@@ -60,7 +60,7 @@ struct CalendarStripView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .kerning(0.5)
                 ForEach(section.items) { item in
-                    EventChip(item: item)
+                    EventChip(item: item, alignment: .trailing)
                 }
             }
         }
@@ -87,8 +87,11 @@ struct CalendarStripView: View {
 }
 
 /// Rounded event pill tinted with the calendar's color, like Alcove's.
+/// `alignment` pins the pill inside its 165pt slot (leading in the today
+/// column, trailing in the right-aligned upcoming column).
 struct EventChip: View {
     let item: CalendarService.Item
+    var alignment: Alignment = .leading
 
     private var tint: Color {
         SettingsStore.shared.calendarUseColor
@@ -114,6 +117,6 @@ struct EventChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(tint.opacity(0.18), in: Capsule())
-        .frame(maxWidth: 165, alignment: .leading)
+        .frame(maxWidth: 165, alignment: alignment)
     }
 }

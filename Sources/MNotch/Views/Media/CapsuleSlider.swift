@@ -12,7 +12,9 @@ struct CapsuleSlider: View {
     @State private var hovering = false
     @State private var dragValue: Double?
 
-    private var displayed: Double { dragValue ?? value }
+    /// Clamped: sources without a duration report raw elapsed seconds as the
+    /// fraction, which would render a fill hundreds of times the track width.
+    private var displayed: Double { min(max(dragValue ?? value, 0), 1) }
     private var thick: Bool { hovering || dragValue != nil }
 
     var body: some View {

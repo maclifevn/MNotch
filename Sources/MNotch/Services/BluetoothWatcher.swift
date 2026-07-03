@@ -113,6 +113,9 @@ final class BluetoothWatcher: NSObject {
         _ notification: IOBluetoothUserNotification,
         device: IOBluetoothDevice
     ) {
+        // Each connect registered one disconnect notification; retire it now
+        // or registrations accumulate unboundedly across reconnects.
+        notification.unregister()
         let key = device.addressString ?? device.name ?? ""
         Task { @MainActor [weak self] in
             self?.connected.removeValue(forKey: key)

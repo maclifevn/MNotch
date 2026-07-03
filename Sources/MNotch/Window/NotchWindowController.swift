@@ -26,13 +26,29 @@ final class NotchWindowController {
         viewModels = []
 
         let settings = SettingsStore.shared
+        let locked = AppServices.shared.lockScreen.isLocked
+        let hidden = AppServices.shared.occlusion.shouldHide
+
         for screen in NSScreen.screens
         where (screen.safeAreaInsets.top > 0 || settings.forceSimulatedNotch)
             && Self.isTargeted(screen, target: settings.displayTarget) {
             let viewModel = NotchViewModel(geometry: .forScreen(screen))
             let panel = NotchPanel(screen: screen, viewModel: viewModel)
             panel.sharingType = settings.hideFromScreenCapture ? .none : .readOnly
+            // Rebuilds can happen mid-lock (display sleep/wake fires screen
+            // parameter changes) or while hidden for a fullscreen app; new
+            // panels must adopt the CURRENT state, not the default one.
+            if locked {
+                panel.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
+            }
+            if hidden {
+                panel.alphaValue = 0
+                panel.ignoresMouseEvents = true
+            }
             panel.orderFrontRegardless()
+            if locked {
+                SkyLightOperator.shared.addToLockSpace(panel)
+            }
             panels.append(panel)
             viewModels.append(viewModel)
         }
@@ -48,6 +64,10 @@ final class NotchWindowController {
         }
         // While locked, move the notch panels into the SkyLight lock-screen
         // space so HUDs/pops stay visible over the shield (Alcove behavior).
+        // SLSSpaceAddWindowsAndRemoveFromSpaces REMOVES windows from their
+        // normal spaces permanently, so unlocking rebuilds the panels from
+        // scratch — a level reset alone would leave them parked in the
+        // level-400 lock space forever.
         AppServices.shared.lockScreen.onLockStateChanged = { [weak self] locked in
             guard let self else { return }
             if locked {
@@ -56,7 +76,7 @@ final class NotchWindowController {
                     SkyLightOperator.shared.addToLockSpace($0)
                 }
             } else {
-                self.panels.forEach { $0.level = NotchPanel.notchLevel }
+                self.rebuild()
             }
         }
         AppServices.shared.occlusion.onHideChanged = { [weak self] hide in
@@ -79,7 +99,9 @@ final class NotchWindowController {
         case "all":
             return true
         case "main":
-            return screen == NSScreen.main || screen == NSScreen.screens.first
+            // Primary display only — NSScreen.main follows key-window focus
+            // and would nondeterministically match a second screen.
+            return screen == NSScreen.screens.first
         case "builtIn":
             return screen.safeAreaInsets.top > 0 || CGDisplayIsBuiltin(screen.displayID) != 0
         default:

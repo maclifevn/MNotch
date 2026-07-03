@@ -369,8 +369,10 @@ final class SettingsStore {
         mediaKnownSources.append(bundleID)
     }
 
+    @ObservationIgnored private var applyingLoginItem = false
+
     private func applyLaunchAtLogin() {
-        guard !loading else { return }
+        guard !loading, !applyingLoginItem else { return }
         do {
             if launchAtLogin {
                 try SMAppService.mainApp.register()
@@ -379,7 +381,12 @@ final class SettingsStore {
             }
         } catch {
             mnotchLog.error("launch-at-login toggle failed: \(error)")
+            // Revert to the real status without re-entering this method —
+            // didSet fires even on same-value assignment, and unregister()
+            // throwing again would otherwise recurse unboundedly.
+            applyingLoginItem = true
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            applyingLoginItem = false
         }
     }
 }

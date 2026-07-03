@@ -49,7 +49,14 @@ struct VisualizerView: View {
                 }
             }
         }
-        .onChange(of: isPlaying, initial: true) {
+        .onAppear {
+            // No ramp on first render: a fresh view while paused must show
+            // flat bars, not a frozen full-amplitude frame (distantPast makes
+            // the ramp already complete in whichever direction applies).
+            playStateChangedAt = .distantPast
+            engineRunning = isPlaying
+        }
+        .onChange(of: isPlaying) {
             playStateChangedAt = Date()
             stopTask?.cancel()
             if isPlaying {

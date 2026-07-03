@@ -39,7 +39,7 @@ final class AppServices {
             guard lockAllowed else { return false }
         }
 
-        guard focus.isFocused else { return true }
+        guard settings.focusEnabled, focus.isFocused else { return true }
         return switch category {
         case .battery: settings.focusAllowBattery
         case .connectivity: settings.focusAllowConnectivity
@@ -55,6 +55,7 @@ final class AppServices {
 
     private var startedAt = Date.distantPast
     private var lastObservedVolume: Double?
+    private var lastObservedMuted: Bool?
 
     private init() {}
 
@@ -161,12 +162,13 @@ final class AppServices {
         audio.onVolumeChanged = { [weak self] volume, muted in
             guard let self, SettingsStore.shared.soundHUDEnabled else { return }
             guard Date().timeIntervalSince(self.startedAt) > 3 else { return }
-            guard self.lastObservedVolume != volume || muted else {
-                self.lastObservedVolume = volume
-                return
-            }
+            // Key on BOTH values so a mute-only transition (unmute at the
+            // same volume) still shows the HUD.
+            let changed = self.lastObservedVolume != volume
+                || self.lastObservedMuted != muted
             self.lastObservedVolume = volume
-            guard self.allowedNow(.sound) else { return }
+            self.lastObservedMuted = muted
+            guard changed, self.allowedNow(.sound) else { return }
             self.showHUD?(.volume, muted ? 0 : volume, muted)
         }
     }

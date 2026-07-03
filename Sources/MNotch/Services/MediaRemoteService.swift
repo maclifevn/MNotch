@@ -395,6 +395,15 @@ final class MediaRemoteService {
         } catch {
             return nil
         }
+        // Watchdog: a wedged adapter (stuck mediaremoted) would otherwise
+        // block this await forever and freeze the entire poll loop on stale
+        // now-playing state. Terminating closes the pipe → the read returns.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            proc.terminate()
+        }
+        defer { watchdog.cancel() }
         var first: String?
         do {
             for try await line in pipe.fileHandleForReading.bytes.lines {

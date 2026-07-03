@@ -1,5 +1,30 @@
 import SwiftUI
 
+/// Two fixed-width wings flanking the camera cutout. Hard-frames both sides
+/// so long content truncates inside its wing instead of stretching the
+/// layout and sliding under the physical cutout (the overflow class already
+/// fixed once in CalendarCompactView).
+struct PopWings<Left: View, Right: View>: View {
+    let geometry: NotchGeometry
+    var wingWidth: CGFloat = 86
+    var sidePadding: CGFloat = 14
+    @ViewBuilder let left: Left
+    @ViewBuilder let right: Right
+
+    var body: some View {
+        HStack(spacing: 0) {
+            left
+                .frame(width: wingWidth, alignment: .leading)
+            Spacer(minLength: geometry.notchWidth)
+            right
+                .frame(width: wingWidth, alignment: .trailing)
+        }
+        .padding(.horizontal, sidePadding)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .padding(.top, 2)
+    }
+}
+
 /// Charging / low-battery / low-power pop: glyph (+ optional label) on the
 /// left wing, percentage counting on the right.
 struct BatteryPopView: View {
@@ -40,7 +65,7 @@ struct BatteryPopView: View {
     }
 
     var body: some View {
-        HStack {
+        PopWings(geometry: geometry) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .semibold))
@@ -53,9 +78,7 @@ struct BatteryPopView: View {
                         .lineLimit(1)
                 }
             }
-
-            Spacer(minLength: geometry.notchWidth)
-
+        } right: {
             if !settings.batteryHidePercentage {
                 Text("\(percentage)%")
                     .font(.system(size: 13, weight: .semibold).monospacedDigit())
@@ -67,9 +90,6 @@ struct BatteryPopView: View {
                     .foregroundStyle(tint)
             }
         }
-        .padding(.horizontal, 16)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
     }
 }
 
@@ -83,7 +103,7 @@ struct FocusPopView: View {
     private var tint: Color { on ? .indigo : .white.opacity(0.6) }
 
     var body: some View {
-        HStack {
+        PopWings(geometry: geometry) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
@@ -96,16 +116,11 @@ struct FocusPopView: View {
                         .lineLimit(1)
                 }
             }
-
-            Spacer(minLength: geometry.notchWidth)
-
+        } right: {
             Text(on ? "On" : "Off")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
         }
-        .padding(.horizontal, 15)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
     }
 }
 
@@ -122,7 +137,7 @@ struct EventPopView: View {
     }
 
     var body: some View {
-        HStack {
+        PopWings(geometry: geometry) {
             HStack(spacing: 6) {
                 Capsule()
                     .fill(indicator)
@@ -132,9 +147,7 @@ struct EventPopView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
             }
-
-            Spacer(minLength: geometry.notchWidth)
-
+        } right: {
             if startingNow {
                 Text("Now")
                     .font(.system(size: 12, weight: .bold))
@@ -146,9 +159,6 @@ struct EventPopView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 15)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
     }
 }
 
@@ -162,52 +172,47 @@ struct DevicePopView: View {
     @State private var ringProgress: Double = 0
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .symbolEffect(.bounce, options: .nonRepeating)
-            Text(shortName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
-                .lineLimit(1)
-
-            Spacer(minLength: geometry.notchWidth)
-
-            if let battery {
-                ZStack {
-                    Circle()
-                        .stroke(.white.opacity(0.2), lineWidth: 2.5)
-                    Circle()
-                        .trim(from: 0, to: ringProgress)
-                        .stroke(
-                            batteryColor(battery),
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                }
-                .frame(width: 15, height: 15)
-                Text("\(battery)%")
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.85))
-            } else {
-                Image(systemName: "checkmark.circle.fill")
+        PopWings(geometry: geometry) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.white)
+                    .symbolEffect(.bounce, options: .nonRepeating)
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+            }
+        } right: {
+            HStack(spacing: 6) {
+                if let battery {
+                    ZStack {
+                        Circle()
+                            .stroke(.white.opacity(0.2), lineWidth: 2.5)
+                        Circle()
+                            .trim(from: 0, to: ringProgress)
+                            .stroke(
+                                batteryColor(battery),
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 15, height: 15)
+                    Text("\(battery)%")
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.85))
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
         .onAppear {
             withAnimation(.easeOut(duration: 0.8).delay(0.15)) {
                 ringProgress = Double(battery ?? 0) / 100
             }
         }
-    }
-
-    private var shortName: String {
-        name.count > 14 ? String(name.prefix(13)) + "…" : name
     }
 
     private func batteryColor(_ level: Int) -> Color {

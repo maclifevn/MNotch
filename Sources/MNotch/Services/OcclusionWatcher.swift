@@ -115,9 +115,17 @@ final class OcclusionWatcher {
     }
 
     private static func missionControlActive(in windows: [[String: Any]]) -> Bool {
-        windows.contains { window in
-            (window[kCGWindowOwnerName as String] as? String) == "Dock"
-                && (window[kCGWindowName as String] as? String) == "Mission Control"
+        // kCGWindowName is only populated with Screen Recording permission,
+        // so the name match alone would never fire. Fallback heuristic: during
+        // Mission Control the Dock process owns a burst of thumbnail windows
+        // (one per app window + per space); normal operation has only a few.
+        var dockWindows = 0
+        for window in windows where (window[kCGWindowOwnerName as String] as? String) == "Dock" {
+            if (window[kCGWindowName as String] as? String) == "Mission Control" {
+                return true
+            }
+            dockWindows += 1
         }
+        return dockWindows > 8
     }
 }

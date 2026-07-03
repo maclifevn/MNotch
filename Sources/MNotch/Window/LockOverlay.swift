@@ -12,6 +12,10 @@ final class LockOverlayController {
 
     func setVisible(_ visible: Bool) {
         if visible {
+            // Screensaver start/stop notifications re-fire this while locked;
+            // rebuilding a visible overlay would flicker and restart the idle
+            // timer, so a live overlay stays put.
+            guard panel == nil else { return }
             show()
         } else {
             hide()

@@ -102,22 +102,27 @@ struct MediaExpandedView: View {
 
     private var seekRow: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { timeline in
+            // Live streams / some browser videos report no duration; show a
+            // full static bar and ignore seeks rather than divide by ~0.
+            let seekable = media.playback.duration > 1
             let duration = max(media.playback.duration, 1)
             let elapsed = scrubValue.map { $0 * duration }
                 ?? media.playback.elapsed(at: timeline.date)
             HStack(spacing: 10) {
-                Text(Self.timeString(elapsed))
+                Text(seekable ? Self.timeString(elapsed) : "LIVE")
                 CapsuleSlider(
-                    value: elapsed / duration,
+                    value: seekable ? elapsed / duration : 1,
                     fill: .white,
-                    onScrub: { scrubValue = $0 },
+                    onScrub: { if seekable { scrubValue = $0 } },
                     onCommit: { fraction in
-                        media.seek(to: fraction * duration)
+                        if seekable {
+                            media.seek(to: fraction * duration)
+                        }
                         scrubValue = nil
                     }
                 )
                 .frame(height: 9)
-                Text("-" + Self.timeString(max(duration - elapsed, 0)))
+                Text(seekable ? "-" + Self.timeString(max(duration - elapsed, 0)) : "")
             }
             .font(.system(size: 11, weight: .medium).monospacedDigit())
             .foregroundStyle(.white.opacity(0.5))

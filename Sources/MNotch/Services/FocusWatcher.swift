@@ -39,7 +39,15 @@ final class FocusWatcher {
     }
 
     private func poll() {
-        guard SettingsStore.shared.focusEnabled else { return }
+        guard SettingsStore.shared.focusEnabled else {
+            // Feature turned off while a Focus was active: clear the state,
+            // or isFocused stays true forever and keeps filtering every
+            // notification through the focus allow-list.
+            if current != nil {
+                current = nil
+            }
+            return
+        }
 
         guard let assertions = try? Data(
             contentsOf: Self.dbDirectory.appending(path: "Assertions.json")
