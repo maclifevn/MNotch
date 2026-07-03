@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppServices.shared.startAll()
         notchController = NotchWindowController()
         notchController?.showAll()
+        if let notchController {
+            DebugProbe.install(controller: notchController)
+        }
 
         NotificationCenter.default.addObserver(
             self,

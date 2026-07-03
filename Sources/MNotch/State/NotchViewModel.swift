@@ -236,6 +236,7 @@ final class NotchViewModel {
         let speed = isVolume ? settings.soundAnimSpeed : settings.displayAnimSpeed
         let duration = isVolume ? settings.soundHUDDuration : settings.displayHUDDuration
 
+        mnotchLog.notice("showHUD \(String(describing: kind), privacy: .public) value=\(value)")
         hudValue = value
         hudMuted = muted
         hudDismissTask?.cancel()
@@ -268,6 +269,7 @@ final class NotchViewModel {
         case .event: settings.calendarPeekDuration
         }
 
+        mnotchLog.notice("showPop \(String(describing: kind), privacy: .public)")
         withAnimation(Anim.pop) { status = .pop(kind) }
         popDismissTask?.cancel()
         popDismissTask = Task { [weak self] in

@@ -7,6 +7,9 @@ final class NotchWindowController {
     private var panels: [NotchPanel] = []
     private var viewModels: [NotchViewModel] = []
 
+    var debugPanels: [NotchPanel] { panels }
+    var debugViewModels: [NotchViewModel] { viewModels }
+
     func showAll() {
         rebuild()
     }

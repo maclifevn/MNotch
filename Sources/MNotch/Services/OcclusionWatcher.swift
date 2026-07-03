@@ -77,17 +77,38 @@ final class OcclusionWatcher {
         return category.contains("games")
     }
 
-    /// A layer-0 window of the frontmost app covering an entire screen.
+    /// Fullscreen = a layer-0 window of the frontmost app covering a screen
+    /// (allowing a menu-bar-sized shortfall — QuickTime presentation is
+    /// screenHeight − 33), OR any app's frontmost layer-0 window covering a
+    /// screen edge-to-edge (survives small system dialogs stealing frontmost;
+    /// the exact-height requirement avoids matching merely-maximized windows).
     private static func hasFullscreenWindow(in windows: [[String: Any]], pid: pid_t) -> Bool {
         let screenSizes = NSScreen.screens.map(\.frame.size)
-        for window in windows {
-            guard (window[kCGWindowOwnerPID as String] as? pid_t) == pid,
-                  (window[kCGWindowLayer as String] as? Int) == 0,
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        var seenTopmostLayerZero = false
+        for window in windows { // CGWindowList is ordered front-to-back
+            guard (window[kCGWindowLayer as String] as? Int) == 0,
+                  let ownerPID = window[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPID != pid_t(ownPID),
                   let boundsDict = window[kCGWindowBounds as String] as? [String: CGFloat],
                   let width = boundsDict["Width"], let height = boundsDict["Height"]
             else { continue }
-            if screenSizes.contains(where: { abs($0.width - width) < 2 && abs($0.height - height) < 2 }) {
+
+            if ownerPID == pid,
+               screenSizes.contains(where: {
+                   abs($0.width - width) < 2 && height >= $0.height - 40
+               }) {
                 return true
+            }
+
+            if !seenTopmostLayerZero {
+                seenTopmostLayerZero = true
+                if screenSizes.contains(where: {
+                    abs($0.width - width) < 2 && height >= $0.height - 1
+                }) {
+                    return true
+                }
             }
         }
         return false
