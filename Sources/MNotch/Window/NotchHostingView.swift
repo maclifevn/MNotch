@@ -49,6 +49,76 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         }
     }
 
+    // MARK: - Two-finger swipe gestures
+
+    private var accumX: CGFloat = 0
+    private var accumY: CGFloat = 0
+    private var gestureConsumed = false
+
+    override func scrollWheel(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        guard viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local),
+              event.momentumPhase == []
+        else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        switch event.phase {
+        case .began:
+            accumX = 0
+            accumY = 0
+            gestureConsumed = false
+        case .changed:
+            accumX += event.scrollingDeltaX
+            accumY += event.scrollingDeltaY
+            handleSwipeIfReady()
+        case .ended, .cancelled:
+            accumX = 0
+            accumY = 0
+            gestureConsumed = false
+        default:
+            break
+        }
+    }
+
+    private func handleSwipeIfReady() {
+        guard !gestureConsumed else { return }
+        let settings = SettingsStore.shared
+
+        // scrollingDeltaY > 0 = fingers swiping down (with system natural
+        // scrolling pre-applied); the Natural toggle flips it.
+        let downward = settings.gestureNatural ? -accumY : accumY
+
+        if abs(accumX) > 35, abs(accumX) > abs(accumY) * 1.5 {
+            gestureConsumed = true
+            guard !viewModel.status.isExpanded else { return }
+            let media = AppServices.shared.media
+            if viewModel.mediaActive, settings.gestureSkipMedia {
+                media.send(accumX < 0 ? .nextTrack : .previousTrack)
+            } else if settings.gestureCycleActivity {
+                viewModel.cycleActivity()
+            }
+            return
+        }
+
+        if downward > 25 {
+            gestureConsumed = true
+            if !viewModel.status.isExpanded, settings.gestureToggleOpen {
+                viewModel.expand(viewModel.lastTab)
+            }
+        } else if downward < -25 {
+            gestureConsumed = true
+            if viewModel.status.isExpanded {
+                if settings.gestureToggleOpen {
+                    viewModel.collapse()
+                }
+            } else if settings.gestureDismissActivity {
+                viewModel.dismissActivity()
+            }
+        }
+    }
+
     // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

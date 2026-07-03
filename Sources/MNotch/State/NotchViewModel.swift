@@ -52,8 +52,68 @@ final class NotchViewModel {
     var topRadius: CGFloat { status.isExpanded ? 12 : 6 }
     var bottomRadius: CGFloat { status.isExpanded ? 24 : 13 }
 
-    /// Extra width added to each side of the closed notch while media plays.
-    static let mediaWingWidth: CGFloat = 26
+    /// What the closed notch is currently showing in its wings.
+    enum ResolvedIdle: Equatable {
+        case empty, playing, calendar, duo
+    }
+
+    /// Swipe-up dismissal hides the current activity until new content lands.
+    private(set) var activityDismissed = false
+
+    var resolvedIdle: ResolvedIdle {
+        guard !activityDismissed else { return .empty }
+        let settings = SettingsStore.shared
+        let calendar = AppServices.shared.calendar
+        let mediaOK = mediaActive
+        var calendarOK = settings.calendarEnabled
+            && calendar.authorized
+            && (calendar.today.first != nil || calendar.upcoming.first != nil)
+        if settings.calendarDisableDuringEvents, calendar.hasOngoingEvent {
+            calendarOK = false
+        }
+
+        var choice = settings.idleActivity
+        if settings.idleMostRecent {
+            choice = mediaOK ? .playing : (calendarOK ? .calendar : .none)
+        }
+
+        switch choice {
+        case .none: return .empty
+        case .playing: return mediaOK ? .playing : .empty
+        case .calendar: return calendarOK ? .calendar : .empty
+        case .duo:
+            if mediaOK && calendarOK { return .duo }
+            if mediaOK { return .playing }
+            if calendarOK { return .calendar }
+            return .empty
+        }
+    }
+
+    func dismissActivity() {
+        withAnimation(Anim.close) { activityDismissed = true }
+    }
+
+    func reviveActivity() {
+        guard activityDismissed else { return }
+        withAnimation(Anim.open) { activityDismissed = false }
+    }
+
+    /// Horizontal swipe with no media: flip the idle activity choice.
+    func cycleActivity() {
+        let settings = SettingsStore.shared
+        withAnimation(Anim.open) {
+            settings.idleActivity = settings.idleActivity == .calendar ? .playing : .calendar
+        }
+    }
+
+    /// Extra width added to each side of the closed notch per activity.
+    private var wingWidth: CGFloat {
+        switch resolvedIdle {
+        case .empty: 0
+        case .playing: 26
+        case .calendar, .duo: 62
+        }
+    }
 
     /// Alcove's expanded panel is ~2.05:1.
     static let expandedSize = CGSize(width: 420, height: 205)
@@ -73,9 +133,8 @@ final class NotchViewModel {
     static let hoverGrowth = CGSize(width: 18, height: 4)
 
     var closedSize: CGSize {
-        let wings = mediaActive ? Self.mediaWingWidth * 2 : 0
-        return CGSize(
-            width: geometry.notchWidth + topRadius * 2 + wings,
+        CGSize(
+            width: geometry.notchWidth + topRadius * 2 + wingWidth * 2,
             height: geometry.notchHeight
         )
     }

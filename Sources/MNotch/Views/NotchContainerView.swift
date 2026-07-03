@@ -48,8 +48,19 @@ struct NotchBodyView: View {
                 viewModel.handleTap()
             }
             .animation(Anim.open, value: viewModel.mediaActive)
+            .animation(Anim.open, value: viewModel.resolvedIdle)
             .onChange(of: mediaVisible, initial: true) { _, active in
                 viewModel.mediaActive = active
+            }
+            .onChange(of: services.media.playback.trackIdentity) {
+                // Fresh content revives a swiped-away activity.
+                viewModel.reviveActivity()
+            }
+            .onAppear {
+                if SettingsStore.shared.idleActivity == .calendar
+                    || SettingsStore.shared.idleActivity == .duo {
+                    services.calendar.ensureStarted()
+                }
             }
     }
 
@@ -69,14 +80,26 @@ struct NotchBodyView: View {
     private var content: some View {
         switch viewModel.status {
         case .closed:
-            if viewModel.mediaActive {
+            switch viewModel.resolvedIdle {
+            case .playing:
                 MediaCompactView(
                     viewModel: viewModel,
                     media: services.media,
                     namespace: notchSpace
                 )
                 .transition(Anim.contentSwap)
-            } else {
+            case .calendar:
+                CalendarCompactView(viewModel: viewModel, calendar: services.calendar)
+                    .transition(Anim.contentSwap)
+                    .onAppear { services.calendar.ensureStarted() }
+            case .duo:
+                DuoCompactView(
+                    viewModel: viewModel,
+                    media: services.media,
+                    calendar: services.calendar
+                )
+                .transition(Anim.contentSwap)
+            case .empty:
                 Color.clear
             }
         case .pop(let kind):

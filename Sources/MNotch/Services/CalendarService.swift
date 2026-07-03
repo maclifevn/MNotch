@@ -12,10 +12,25 @@ final class CalendarService {
         let id: String
         let title: String
         let start: Date
+        let end: Date
         let isAllDay: Bool
         let colorRed: Double
         let colorGreen: Double
         let colorBlue: Double
+    }
+
+    /// A timed event is happening right now.
+    var hasOngoingEvent: Bool {
+        let now = Date()
+        return today.contains { !$0.isAllDay && $0.start <= now && $0.end > now }
+    }
+
+    /// Next timed event today (for the compact idle chrome and peeks).
+    var nextEvent: Item? {
+        let now = Date()
+        return today.first { !$0.isAllDay && $0.end > now }
+            ?? today.first
+            ?? upcoming.first?.items.first
     }
 
     struct DaySection: Identifiable, Equatable {
@@ -80,8 +95,13 @@ final class CalendarService {
         let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
         let windowEnd = calendar.date(byAdding: .day, value: 8, to: startOfToday) ?? now
 
+        let disabled = SettingsStore.shared.calendarDisabledCalendars
+        let enabledCalendars = store.calendars(for: .event)
+            .filter { !disabled.contains($0.calendarIdentifier) }
         let predicate = store.predicateForEvents(
-            withStart: startOfToday, end: windowEnd, calendars: nil
+            withStart: startOfToday,
+            end: windowEnd,
+            calendars: enabledCalendars.isEmpty ? nil : enabledCalendars
         )
         let events = store.events(matching: predicate)
             .sorted {
@@ -95,6 +115,7 @@ final class CalendarService {
                         + "\(event.startDate.timeIntervalSince1970)",
                     title: event.title ?? "Untitled",
                     start: event.startDate,
+                    end: event.endDate ?? event.startDate,
                     isAllDay: event.isAllDay,
                     colorRed: Double(color.count > 0 ? color[0] : 0.6),
                     colorGreen: Double(color.count > 1 ? color[1] : 0.5),
