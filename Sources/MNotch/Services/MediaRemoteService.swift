@@ -18,9 +18,25 @@ struct MediaPlayback: Equatable {
     var trackIdentity = ""
     /// nil when the source doesn't support shuffle (browsers/video).
     var shuffleMode: Int?
+    /// MRARepeatMode: 1 off, 2 one, 3 all; nil when unsupported.
+    var repeatMode: Int?
     var isVideo = false
 
     var isShuffled: Bool { (shuffleMode ?? 1) != 1 }
+
+    /// Title with "(Official MV)", "[4K]", "feat.…", "- Topic" noise removed.
+    var cleanTitle: String {
+        var t = title
+        for pattern in [
+            #"\s*[(\[][^)\]]*(?i:official|video|audio|lyric|visuali[sz]er|remaster|mv|hd|4k)[^)\]]*[)\]]"#,
+            #"\s*[(\[](?i:feat|ft)\.[^)\]]*[)\]]"#,
+            #"\s*-\s*Topic$"#,
+        ] {
+            t = t.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        let trimmed = t.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? title : trimmed
+    }
 
     func elapsed(at date: Date = Date()) -> TimeInterval {
         guard isPlaying else { return elapsedTime }
@@ -57,6 +73,15 @@ final class MediaRemoteService {
     private var pollTask: Task<Void, Never>?
     private var missCount = 0
     private var artworkIdentity = ""
+    private(set) var lastPlayingAt = Date.distantPast
+
+    /// Idle-duration rule for the compact chrome: visible while playing, and
+    /// for N seconds after pausing. Re-evaluated on every poll tick.
+    func idleVisible(after idleDuration: Double) -> Bool {
+        guard hasActiveMedia else { return false }
+        if playback.isPlaying { return true }
+        return Date().timeIntervalSince(lastPlayingAt) < idleDuration
+    }
 
     private static let pollInterval: Duration = .seconds(2)
 
@@ -77,6 +102,7 @@ final class MediaRemoteService {
         var bundleIdentifier: String?
         var contentItemIdentifier: String?
         var shuffleMode: Int?
+        var repeatMode: Int?
         var mediaType: String?
 
         private struct AnyKey: CodingKey {
@@ -120,6 +146,7 @@ final class MediaRemoteService {
             bundleIdentifier = str("bundleIdentifier")
             contentItemIdentifier = str("contentItemIdentifier")
             shuffleMode = num("shuffleMode").map(Int.init)
+            repeatMode = num("repeatMode").map(Int.init)
             mediaType = str("mediaType")
         }
     }
@@ -164,6 +191,17 @@ final class MediaRemoteService {
             return
         }
 
+        // Per-app source toggle (Settings → Now Playing → Source).
+        let sourceBundle = payload.parentApplicationBundleIdentifier
+            ?? payload.bundleIdentifier ?? ""
+        if !sourceBundle.isEmpty {
+            SettingsStore.shared.rememberSource(sourceBundle)
+            guard SettingsStore.shared.isSourceEnabled(sourceBundle) else {
+                registerMiss()
+                return
+            }
+        }
+
         missCount = 0
         apply(payload)
 
@@ -190,7 +228,12 @@ final class MediaRemoteService {
         new.elapsedTime = p.elapsedTimeNow ?? p.elapsedTime ?? 0
         new.timestamp = Date()
         new.shuffleMode = p.shuffleMode
+        new.repeatMode = p.repeatMode
         new.isVideo = p.mediaType?.localizedCaseInsensitiveContains("video") ?? false
+        if new.isPlaying {
+            lastPlayingAt = Date()
+        }
+        SettingsStore.shared.rememberSource(new.bundleIdentifier)
         if playback != new {
             playback = new
         }
@@ -264,6 +307,42 @@ final class MediaRemoteService {
         playback = p
         runAdapter(["seek", String(Int(seconds * 1_000_000))])
         pollSoon()
+    }
+
+    /// Cycle repeat: off (1) → all (3) → one (2) → off.
+    func cycleRepeat() {
+        let next: Int = switch playback.repeatMode ?? 1 {
+        case 1: 3
+        case 3: 2
+        default: 1
+        }
+        var p = playback
+        p.repeatMode = next
+        playback = p
+        runAdapter(["repeat", String(next)])
+        pollSoon()
+    }
+
+    func copyTrackInfo() {
+        let text = playback.artist.isEmpty
+            ? playback.title
+            : "\(playback.title) — \(playback.artist)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Favorite the current track (Apple Music only, via AppleScript).
+    func favoriteCurrentTrack() {
+        guard playback.bundleIdentifier == "com.apple.Music" else { return }
+        let script = NSAppleScript(source: """
+        tell application "Music"
+            try
+                set favorited of current track to not (favorited of current track)
+            end try
+        end tell
+        """)
+        var error: NSDictionary?
+        script?.executeAndReturnError(&error)
     }
 
     func toggleShuffle() {

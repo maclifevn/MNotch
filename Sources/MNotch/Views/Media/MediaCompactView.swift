@@ -19,11 +19,15 @@ struct MediaCompactView: View {
 
             Spacer(minLength: viewModel.geometry.notchWidth)
 
-            VisualizerView(
-                isPlaying: media.playback.isPlaying,
-                color: media.accentColor
-            )
-            .frame(width: 18, height: 14)
+            if SettingsStore.shared.mediaDisableCompactWaveform {
+                Color.clear.frame(width: 18, height: 14)
+            } else {
+                StyledVisualizer(
+                    isPlaying: media.playback.isPlaying,
+                    accent: media.accentColor
+                )
+                .frame(width: 18, height: 14)
+            }
         }
         .padding(.horizontal, viewModel.topRadius + 5)
         .frame(height: viewModel.geometry.notchHeight)
@@ -35,11 +39,19 @@ struct MediaCompactView: View {
 }
 
 /// Album artwork with a music-note placeholder while empty. `identity`
-/// (track title/artist) keys the blur-replace transition between tracks.
+/// (track title/artist) keys the flip / blur-replace transition between
+/// tracks; `badgeBundleID` overlays the source app icon when enabled.
 struct ArtworkView: View {
     let image: NSImage?
     var cornerRadius: CGFloat
     var identity: String = ""
+    var badgeBundleID: String = ""
+
+    private var transition: AnyTransition {
+        SettingsStore.shared.mediaDisableArtworkFlip
+            ? AnyTransition(.blurReplace)
+            : .artworkFlip
+    }
 
     var body: some View {
         ZStack {
@@ -54,7 +66,8 @@ struct ArtworkView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     }
-                    .transition(.blurReplace)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                    .transition(transition)
                     .id(identity)
             } else {
                 Image(systemName: "music.note")
@@ -63,6 +76,17 @@ struct ArtworkView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .overlay(alignment: .bottomTrailing) {
+            if SettingsStore.shared.mediaBadge == .appIcon,
+               !badgeBundleID.isEmpty,
+               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: badgeBundleID) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                    .resizable()
+                    .frame(width: cornerRadius > 10 ? 22 : 10, height: cornerRadius > 10 ? 22 : 10)
+                    .offset(x: 3, y: 3)
+                    .shadow(radius: 2)
+            }
+        }
         .animation(.easeInOut(duration: 0.45), value: identity)
     }
 }

@@ -7,6 +7,8 @@ import SwiftUI
 struct VisualizerView: View {
     var isPlaying: Bool
     var color: Color
+    /// Per-bar colors (cycled); overrides `color` when set (gradient style).
+    var gradient: [Color]? = nil
     var barCount = 4
 
     @State private var playStateChangedAt = Date.distantPast
@@ -39,9 +41,10 @@ struct VisualizerView: View {
                         width: barWidth,
                         height: height
                     )
+                    let barColor = gradient.map { $0[i % $0.count] } ?? color
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                        with: .color(color)
+                        with: .color(barColor)
                     )
                 }
             }

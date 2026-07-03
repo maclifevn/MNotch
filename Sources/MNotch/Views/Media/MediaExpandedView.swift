@@ -17,6 +17,13 @@ struct MediaExpandedView: View {
         media.playback.title + media.playback.artist
     }
 
+    private var displayTitle: String {
+        if media.playback.title.isEmpty { return "Not Playing" }
+        return SettingsStore.shared.mediaHideTitleExtras
+            ? media.playback.cleanTitle
+            : media.playback.title
+    }
+
     private var isWide: Bool {
         if media.playback.isVideo { return true }
         if let artwork = media.artwork, artwork.size.height > 0 {
@@ -42,7 +49,7 @@ struct MediaExpandedView: View {
         HStack(alignment: .center, spacing: 14) {
             artwork
             VStack(alignment: .leading, spacing: 1) {
-                Text(media.playback.title.isEmpty ? "Not Playing" : media.playback.title)
+                Text(displayTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -54,9 +61,9 @@ struct MediaExpandedView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .animation(.easeInOut(duration: 0.3), value: trackIdentity)
 
-            VisualizerView(
+            StyledVisualizer(
                 isPlaying: media.playback.isPlaying,
-                color: media.accentColor
+                accent: media.accentColor
             )
             .frame(width: 22, height: 16)
         }
@@ -69,7 +76,8 @@ struct MediaExpandedView: View {
         ArtworkView(
             image: media.artwork,
             cornerRadius: isWide ? 10 : 14,
-            identity: trackIdentity
+            identity: trackIdentity,
+            badgeBundleID: media.playback.bundleIdentifier
         )
         .frame(width: isWide ? 86 : 62, height: isWide ? 48 : 62)
         .matchedGeometryEffect(id: "artwork", in: namespace)
@@ -120,17 +128,7 @@ struct MediaExpandedView: View {
 
     private var controlsRow: some View {
         HStack {
-            if media.playback.shuffleMode != nil {
-                SideButton(
-                    symbol: "shuffle",
-                    active: media.playback.isShuffled,
-                    tint: media.accentColor
-                ) {
-                    media.toggleShuffle()
-                }
-            } else {
-                Color.clear.frame(width: 30, height: 30)
-            }
+            quickActionButton
 
             Spacer()
             TransportButton(symbol: "backward.fill", size: 17) {
@@ -153,6 +151,49 @@ struct MediaExpandedView: View {
                 .foregroundStyle(.white.opacity(0.45))
                 .frame(width: 30, height: 30)
                 .help(audio.outputName)
+        }
+    }
+
+    /// Left control slot, chosen in Settings → Now Playing → Quick action.
+    @ViewBuilder
+    private var quickActionButton: some View {
+        switch SettingsStore.shared.mediaQuickAction {
+        case .shuffle:
+            if media.playback.shuffleMode != nil {
+                SideButton(
+                    symbol: "shuffle",
+                    active: media.playback.isShuffled,
+                    tint: media.accentColor
+                ) {
+                    media.toggleShuffle()
+                }
+            } else {
+                Color.clear.frame(width: 30, height: 30)
+            }
+        case .repeatMode:
+            if let mode = media.playback.repeatMode {
+                SideButton(
+                    symbol: mode == 2 ? "repeat.1" : "repeat",
+                    active: mode != 1,
+                    tint: media.accentColor
+                ) {
+                    media.cycleRepeat()
+                }
+            } else {
+                Color.clear.frame(width: 30, height: 30)
+            }
+        case .copy:
+            SideButton(symbol: "link", active: false, tint: media.accentColor) {
+                media.copyTrackInfo()
+            }
+        case .favorite:
+            if media.playback.bundleIdentifier == "com.apple.Music" {
+                SideButton(symbol: "star.fill", active: false, tint: media.accentColor) {
+                    media.favoriteCurrentTrack()
+                }
+            } else {
+                Color.clear.frame(width: 30, height: 30)
+            }
         }
     }
 

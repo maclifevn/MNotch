@@ -68,7 +68,9 @@ struct NotchBodyView: View {
     /// app isn't frontmost.
     private var mediaVisible: Bool {
         let settings = SettingsStore.shared
-        guard settings.mediaEnabled, services.media.hasActiveMedia else { return false }
+        guard settings.mediaEnabled,
+              services.media.idleVisible(after: settings.mediaIdleDuration)
+        else { return false }
         if settings.mediaHideWhileSourceActive,
            services.occlusion.frontmostBundleID == services.media.playback.bundleIdentifier {
             return false
