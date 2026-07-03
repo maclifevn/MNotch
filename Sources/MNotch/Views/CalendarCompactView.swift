@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// Closed-state calendar chrome: day number on the left wing, next event
-/// (time + truncated title) on the right wing.
+/// (time + truncated title) on the right wing. Both sides are FIXED-width
+/// (viewModel.calendarWingContentWidth) so content can never overflow into
+/// the camera cutout.
 struct CalendarCompactView: View {
     let viewModel: NotchViewModel
     let calendar: CalendarService
@@ -9,7 +11,8 @@ struct CalendarCompactView: View {
     private var settings: SettingsStore { .shared }
 
     var body: some View {
-        HStack {
+        let wing = viewModel.calendarWingContentWidth
+        HStack(spacing: 0) {
             HStack(spacing: 3) {
                 Text(Date().formatted(.dateTime.day()))
                     .font(.system(size: 13, weight: .bold))
@@ -23,10 +26,12 @@ struct CalendarCompactView: View {
                         .frame(width: 4, height: 4)
                 }
             }
+            .frame(width: wing, alignment: .leading)
 
             Spacer(minLength: viewModel.geometry.notchWidth)
 
-            eventSide
+            CalendarCompactEventOnly(calendar: calendar)
+                .frame(width: wing, alignment: .trailing)
         }
         .padding(.horizontal, viewModel.topRadius + 6)
         .frame(height: viewModel.geometry.notchHeight)
@@ -35,12 +40,47 @@ struct CalendarCompactView: View {
             viewModel.expand(.calendar)
         }
     }
+}
 
-    @ViewBuilder
-    private var eventSide: some View {
+/// Duo idle: media artwork on the left wing, next event on the right.
+struct DuoCompactView: View {
+    let viewModel: NotchViewModel
+    let media: MediaRemoteService
+    let calendar: CalendarService
+
+    var body: some View {
+        let wing = viewModel.calendarWingContentWidth
+        HStack(spacing: 0) {
+            ArtworkView(
+                image: media.artwork,
+                cornerRadius: 5,
+                identity: media.playback.title + media.playback.artist
+            )
+            .frame(width: 20, height: 20)
+            .frame(width: wing, alignment: .leading)
+
+            Spacer(minLength: viewModel.geometry.notchWidth)
+
+            CalendarCompactEventOnly(calendar: calendar)
+                .frame(width: wing, alignment: .trailing)
+        }
+        .padding(.horizontal, viewModel.topRadius + 6)
+        .frame(height: viewModel.geometry.notchHeight)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.expand(.media)
+        }
+    }
+}
+
+/// Next-event capsule: colored indicator + optional time + truncated title.
+struct CalendarCompactEventOnly: View {
+    let calendar: CalendarService
+
+    var body: some View {
         if let event = calendar.nextEvent {
             HStack(spacing: 4) {
-                if settings.calendarUseColor {
+                if SettingsStore.shared.calendarUseColor {
                     Capsule()
                         .fill(Color(
                             red: event.colorRed,
@@ -61,64 +101,10 @@ struct CalendarCompactView: View {
                         .lineLimit(1)
                 }
             }
-            .frame(maxWidth: 90, alignment: .leading)
         } else {
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.4))
-        }
-    }
-}
-
-/// Duo idle: media artwork on the left wing, next event on the right.
-struct DuoCompactView: View {
-    let viewModel: NotchViewModel
-    let media: MediaRemoteService
-    let calendar: CalendarService
-
-    var body: some View {
-        HStack {
-            ArtworkView(
-                image: media.artwork,
-                cornerRadius: 5,
-                identity: media.playback.title + media.playback.artist
-            )
-            .frame(width: 20, height: 20)
-
-            Spacer(minLength: viewModel.geometry.notchWidth)
-
-            CalendarCompactEventOnly(calendar: calendar)
-        }
-        .padding(.horizontal, viewModel.topRadius + 6)
-        .frame(height: viewModel.geometry.notchHeight)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            viewModel.expand(.media)
-        }
-    }
-}
-
-struct CalendarCompactEventOnly: View {
-    let calendar: CalendarService
-
-    var body: some View {
-        if let event = calendar.nextEvent {
-            VStack(alignment: .leading, spacing: 0) {
-                if !event.isAllDay {
-                    Text(event.start, style: .time)
-                        .font(.system(size: 7.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-                Text(event.title)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: 90, alignment: .leading)
-        } else {
-            Text(Date().formatted(.dateTime.day()))
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.red)
         }
     }
 }

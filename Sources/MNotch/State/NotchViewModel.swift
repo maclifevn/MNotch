@@ -113,9 +113,13 @@ final class NotchViewModel {
         switch resolvedIdle {
         case .empty: 0
         case .playing: 26
-        case .calendar, .duo: 62
+        case .calendar, .duo: 96
         }
     }
+
+    /// Fixed content width inside a calendar/duo wing (wing minus padding),
+    /// so wing content can never overflow into the camera cutout.
+    var calendarWingContentWidth: CGFloat { 84 }
 
     /// Alcove's expanded panel is ~2.05:1.
     static let expandedSize = CGSize(width: 420, height: 205)
