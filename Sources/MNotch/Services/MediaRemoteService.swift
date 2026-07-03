@@ -170,6 +170,9 @@ final class MediaRemoteService {
         if playback.trackIdentity != artworkIdentity {
             artworkIdentity = playback.trackIdentity
             mnotchLog.notice("track: \"\(self.playback.title, privacy: .public)\" — \(self.playback.artist, privacy: .public) [\(self.playback.bundleIdentifier, privacy: .public)] video=\(self.playback.isVideo)")
+            // Never show the previous track's artwork on the new one.
+            artwork = nil
+            accentColor = .white
             await fetchArtwork()
         }
     }
@@ -205,19 +208,35 @@ final class MediaRemoteService {
         }
     }
 
-    private func fetchArtwork() async {
+    /// Browsers often publish artwork a few seconds after the metadata, so a
+    /// miss retries a few times while the track is still the same.
+    private func fetchArtwork(attempt: Int = 0) async {
         guard let paths = Self.adapterPaths else { return }
+        let identity = playback.trackIdentity
         let line = await Self.captureFirstLine([paths.script, paths.framework, "get"])
+
+        // The track may have changed while the adapter ran.
+        guard playback.trackIdentity == identity else { return }
+
         guard let line, line != "null",
               let data = line.data(using: .utf8),
               let payload = try? JSONDecoder().decode(GetPayload.self, from: data),
               let artworkString = payload.artworkData,
               let imageData = Data(base64Encoded: artworkString.trimmingCharacters(in: .whitespacesAndNewlines)),
               let image = NSImage(data: imageData)
-        else { return }
+        else {
+            if attempt < 4 {
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    guard let self, self.playback.trackIdentity == identity else { return }
+                    await self.fetchArtwork(attempt: attempt + 1)
+                }
+            }
+            return
+        }
         artwork = image
         accentColor = DominantColor.accent(from: image)
-        mnotchLog.notice("artwork loaded for \(self.playback.title, privacy: .public)")
+        mnotchLog.notice("artwork loaded for \(self.playback.title, privacy: .public) (attempt \(attempt))")
     }
 
     // MARK: - Commands
