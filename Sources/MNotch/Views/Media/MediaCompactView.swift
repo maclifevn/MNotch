@@ -46,9 +46,14 @@ struct ArtworkView: View {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .fill(.white.opacity(0.12))
             if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                // Color.clear adopts the proposed frame, so the filling image
+                // is clipped at the real bounds instead of overflowing them.
+                Color.clear
+                    .overlay {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
                     .transition(.blurReplace)
                     .id(identity)
             } else {
