@@ -19,7 +19,14 @@ struct MediaCompactView: View {
 
             Spacer(minLength: viewModel.geometry.notchWidth)
 
-            if SettingsStore.shared.mediaDisableCompactWaveform {
+            if SettingsStore.shared.focusReplaceWaveform,
+               AppServices.shared.focus.isFocused,
+               let mode = AppServices.shared.focus.current {
+                Image(systemName: mode.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                    .frame(width: 18, height: 14)
+            } else if SettingsStore.shared.mediaDisableCompactWaveform {
                 Color.clear.frame(width: 18, height: 14)
             } else {
                 StyledVisualizer(

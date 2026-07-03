@@ -17,6 +17,7 @@ enum PopKind: Equatable {
     case lowBattery(percentage: Int)
     case lowPower(on: Bool)
     case device(name: String, symbol: String, battery: Int?)
+    case focus(name: String, symbol: String, on: Bool)
 }
 
 enum NotchStatus: Equatable {
@@ -262,6 +263,7 @@ final class NotchViewModel {
         let duration: Double = switch kind {
         case .charging, .lowBattery, .lowPower: settings.batteryDuration
         case .device: settings.connectivityDuration
+        case .focus: settings.focusDuration
         }
 
         withAnimation(Anim.pop) { status = .pop(kind) }

@@ -186,6 +186,19 @@ struct FocusPane: View {
                 Toggle(isOn: $settings.focusEnabled) {
                     Label("Focus", systemImage: "moon.fill")
                 }
+                if !AppServices.shared.focus.available {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Needs Full Disk Access to read Focus state.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Button("Open Privacy Settings") {
+                            NSWorkspace.shared.open(URL(
+                                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+                            )!)
+                        }
+                        .controlSize(.small)
+                    }
+                }
                 SliderRow(
                     title: "Duration",
                     value: $settings.focusDuration,

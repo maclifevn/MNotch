@@ -73,6 +73,42 @@ struct BatteryPopView: View {
     }
 }
 
+/// Focus mode change pop: mode glyph + name left, on/off state right.
+struct FocusPopView: View {
+    let name: String
+    let symbol: String
+    let on: Bool
+    let geometry: NotchGeometry
+
+    private var tint: Color { on ? .indigo : .white.opacity(0.6) }
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(on ? Color.indigo : .white.opacity(0.6))
+                    .symbolEffect(.bounce, options: .nonRepeating)
+                if !SettingsStore.shared.focusHideLabel {
+                    Text(name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: geometry.notchWidth)
+
+            Text(on ? "On" : "Off")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, 15)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .padding(.top, 2)
+    }
+}
+
 /// Bluetooth device connect pop: device glyph + name left, battery ring right.
 struct DevicePopView: View {
     let name: String

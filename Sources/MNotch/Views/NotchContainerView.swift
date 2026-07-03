@@ -139,6 +139,8 @@ struct NotchBodyView: View {
             )
         case .device(let name, let symbol, let battery):
             DevicePopView(name: name, symbol: symbol, battery: battery, geometry: viewModel.geometry)
+        case .focus(let name, let symbol, let on):
+            FocusPopView(name: name, symbol: symbol, on: on, geometry: viewModel.geometry)
         }
     }
 

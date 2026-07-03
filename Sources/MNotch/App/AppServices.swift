@@ -15,6 +15,23 @@ final class AppServices {
     let bluetooth = BluetoothWatcher()
     let calendar = CalendarService()
     let occlusion = OcclusionWatcher()
+    let focus = FocusWatcher()
+
+    enum NotificationCategory {
+        case battery, connectivity, display, sound
+    }
+
+    /// Allowed-notifications filter (Settings → Focus) while a focus is on.
+    func allowedNow(_ category: NotificationCategory) -> Bool {
+        guard focus.isFocused else { return true }
+        let settings = SettingsStore.shared
+        return switch category {
+        case .battery: settings.focusAllowBattery
+        case .connectivity: settings.focusAllowConnectivity
+        case .display: settings.focusAllowDisplay
+        case .sound: settings.focusAllowSound
+        }
+    }
 
     /// Set by NotchWindowController; fans HUDs out to every panel.
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
@@ -40,7 +57,7 @@ final class AppServices {
 
         power.onPowerEvent = { [weak self] event in
             let settings = SettingsStore.shared
-            guard settings.batteryEnabled else { return }
+            guard settings.batteryEnabled, self?.allowedNow(.battery) != false else { return }
             switch event {
             case .pluggedIn(let percentage):
                 self?.showPop?(.charging(percentage: percentage))
@@ -60,11 +77,27 @@ final class AppServices {
         power.start()
 
         bluetooth.onConnect = { [weak self] name, symbol, battery in
-            guard SettingsStore.shared.connectivityEnabled else { return }
+            guard SettingsStore.shared.connectivityEnabled,
+                  self?.allowedNow(.connectivity) != false else { return }
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
         bluetooth.start()
         occlusion.start()
+
+        focus.onChange = { [weak self] old, new in
+            let settings = SettingsStore.shared
+            guard settings.focusEnabled else { return }
+            if let new {
+                self?.showPop?(.focus(name: new.name, symbol: new.symbol, on: true))
+                if settings.focusSoundOnSleep,
+                   new.identifier.localizedCaseInsensitiveContains("sleep") {
+                    SoundPlayer.play(.sleep)
+                }
+            } else if let old {
+                self?.showPop?(.focus(name: old.name, symbol: old.symbol, on: false))
+            }
+        }
+        focus.start()
 
         // Observe-only fallback (no Accessibility yet): mirror volume changes
         // from any source as a HUD. Redundant-but-harmless when the tap is
@@ -77,6 +110,7 @@ final class AppServices {
                 return
             }
             self.lastObservedVolume = volume
+            guard self.allowedNow(.sound) else { return }
             self.showHUD?(.volume, muted ? 0 : volume, muted)
         }
     }
@@ -95,14 +129,18 @@ final class AppServices {
                 let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
                 let newVolume = min(max(audio.volume + step, 0), 1)
                 audio.setVolume(newVolume)
-                showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
+                if allowedNow(.sound) {
+                    showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
+                }
             }
             return true
         case .mute:
             guard settings.soundHUDEnabled else { return false }
             if keyDown {
                 audio.setMuted(!audio.muted)
-                showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
+                if allowedNow(.sound) {
+                    showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
+                }
             }
             return true
         case .brightnessUp, .brightnessDown:
@@ -111,14 +149,18 @@ final class AppServices {
             guard settings.displayHUDEnabled, brightness.available else { return false }
             if keyDown {
                 let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
-                showHUD?(.brightness, newValue, false)
+                if allowedNow(.display) {
+                    showHUD?(.brightness, newValue, false)
+                }
             }
             return true
         case .illuminationUp, .illuminationDown:
             guard settings.displayHUDEnabled, backlight.available else { return false }
             if keyDown {
                 let newValue = backlight.step(up: key == .illuminationUp)
-                showHUD?(.keyboardBacklight, newValue, false)
+                if allowedNow(.display) {
+                    showHUD?(.keyboardBacklight, newValue, false)
+                }
             }
             return true
         }
