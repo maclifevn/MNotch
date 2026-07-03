@@ -25,8 +25,21 @@ final class AppServices {
 
     /// Allowed-notifications filter (Settings → Focus) while a focus is on.
     func allowedNow(_ category: NotificationCategory) -> Bool {
-        guard focus.isFocused else { return true }
         let settings = SettingsStore.shared
+
+        // While the screen is locked, Settings → Lock Screen → Allowed
+        // Notifications decides what may appear over the shield.
+        if lockScreen.isLocked {
+            let lockAllowed = switch category {
+            case .battery: settings.lockAllowBattery
+            case .connectivity: settings.lockAllowConnectivity
+            case .display: settings.lockAllowDisplay
+            case .sound: settings.lockAllowSound
+            }
+            guard lockAllowed else { return false }
+        }
+
+        guard focus.isFocused else { return true }
         return switch category {
         case .battery: settings.focusAllowBattery
         case .connectivity: settings.focusAllowConnectivity
@@ -106,6 +119,7 @@ final class AppServices {
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared
             guard settings.focusEnabled else { return }
+            if self?.lockScreen.isLocked == true, !settings.lockAllowFocus { return }
             if let new {
                 self?.showPop?(.focus(name: new.name, symbol: new.symbol, on: true))
                 if settings.focusSoundOnSleep,

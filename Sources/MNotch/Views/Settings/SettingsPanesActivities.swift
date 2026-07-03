@@ -276,12 +276,16 @@ struct LockScreenPane: View {
     var body: some View {
         Form {
             Section {
+                Toggle(isOn: $settings.lockEnabled) {
+                    Label("Lock Screen", systemImage: "lock.fill")
+                }
                 SliderRow(
                     title: "Keep awake",
                     value: $settings.lockKeepAwake,
                     range: 0...60,
                     step: 5
                 ) { "\(Int($0)) m" }
+                Toggle("Show on screen saver", isOn: $settings.lockShowOnScreenSaver)
                 SoundToggleRow(
                     title: "Play sound on lock",
                     isOn: $settings.lockSoundOnLock,
@@ -293,10 +297,81 @@ struct LockScreenPane: View {
                     effect: .unlock
                 )
             }
+
             Section("Widgets") {
-                Text("Third-party apps cannot draw on the macOS lock screen, so Alcove-style lock screen widgets aren't possible here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: $settings.lockWidgetBattery) {
+                    Label("Battery", systemImage: "bolt.fill")
+                }
+                Toggle(isOn: $settings.lockWidgetConnectivity) {
+                    Label("Connectivity", systemImage: "headphones")
+                }
+                Toggle(isOn: $settings.lockWidgetFocus) {
+                    Label("Focus", systemImage: "moon.fill")
+                }
+                Toggle(isOn: $settings.lockWidgetCalendar) {
+                    Label("Calendar", systemImage: "calendar")
+                }
+            }
+
+            Section {
+                Toggle(isOn: $settings.lockNowPlaying) {
+                    Label("Now Playing", systemImage: "play.fill")
+                }
+                OptionCardPicker(
+                    selection: $settings.lockNowPlayingStyle,
+                    options: LockCardStyle.allCases,
+                    label: { style in
+                        switch style {
+                        case .glass: "Glass"
+                        case .clear: "Clear"
+                        case .frosted: "Frosted"
+                        }
+                    }
+                ) { style in
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(.blue.opacity(style == .clear ? 0.25 : 0.5))
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 11)
+                        .background(.blue.opacity(style == .frosted ? 0.35 : 0.12))
+                }
+                SliderRow(
+                    title: "Idle duration",
+                    value: $settings.lockIdleDuration,
+                    range: 1...30,
+                    step: 1
+                ) { "\(Int($0)) m" }
+                Toggle("Show volume control", isOn: $settings.lockShowVolume)
+                SliderRow(
+                    title: "Offset tuning",
+                    value: $settings.lockOffset,
+                    range: -200...200,
+                    step: 10
+                ) { "\(Int($0)) px" }
+            }
+
+            Section {
+                UnavailableRow(
+                    title: "Weather",
+                    note: "Needs a weather data source; not available."
+                )
+            }
+
+            Section("Allowed Notifications") {
+                Toggle(isOn: $settings.lockAllowBattery) {
+                    Label("Battery", systemImage: "bolt.fill")
+                }
+                Toggle(isOn: $settings.lockAllowConnectivity) {
+                    Label("Connectivity", systemImage: "headphones")
+                }
+                Toggle(isOn: $settings.lockAllowFocus) {
+                    Label("Focus", systemImage: "moon.fill")
+                }
+                Toggle(isOn: $settings.lockAllowDisplay) {
+                    Label("Display", systemImage: "sun.max.fill")
+                }
+                Toggle(isOn: $settings.lockAllowSound) {
+                    Label("Sound", systemImage: "speaker.wave.2.fill")
+                }
             }
         }
         .formStyle(.grouped)

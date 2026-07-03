@@ -1,12 +1,20 @@
 import AppKit
 import IOKit.pwr_mgt
 
-/// Lock/unlock sounds and the keep-awake assertion (keeps the display on for
-/// N minutes after locking, timeout-released automatically).
+/// Lock/unlock sounds, the keep-awake assertion, and the lock screen overlay
+/// (widgets + Now Playing card drawn above the shield window).
 @MainActor
 final class LockScreenWatcher {
     private var assertionID: IOPMAssertionID = 0
     private var assertionActive = false
+
+    private(set) var isLocked = false
+    private(set) var saverRunning = false
+
+    private let overlay = LockOverlayController()
+
+    /// Fired on lock/unlock so the notch panels can (un)elevate above the shield.
+    var onLockStateChanged: ((Bool) -> Void)?
 
     func start() {
         let center = DistributedNotificationCenter.default()
@@ -24,9 +32,40 @@ final class LockScreenWatcher {
         ) { _ in
             Task { @MainActor [weak self] in self?.screenUnlocked() }
         }
+        center.addObserver(
+            forName: NSNotification.Name("com.apple.screensaver.didstart"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in
+                self?.saverRunning = true
+                self?.refreshOverlay()
+            }
+        }
+        center.addObserver(
+            forName: NSNotification.Name("com.apple.screensaver.didstop"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in
+                self?.saverRunning = false
+                self?.refreshOverlay()
+            }
+        }
+    }
+
+    private func refreshOverlay() {
+        let settings = SettingsStore.shared
+        let wanted = settings.lockEnabled
+            && (isLocked || (saverRunning && settings.lockShowOnScreenSaver))
+        overlay.setVisible(wanted)
     }
 
     private func screenLocked() {
+        isLocked = true
+        onLockStateChanged?(true)
+        refreshOverlay()
+
         let settings = SettingsStore.shared
         if settings.lockSoundOnLock {
             SoundPlayer.play(.lock)
@@ -50,6 +89,10 @@ final class LockScreenWatcher {
     }
 
     private func screenUnlocked() {
+        isLocked = false
+        onLockStateChanged?(false)
+        refreshOverlay()
+
         if SettingsStore.shared.lockSoundOnUnlock {
             SoundPlayer.play(.unlock)
         }

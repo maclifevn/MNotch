@@ -17,6 +17,11 @@ final class BluetoothWatcher: NSObject {
     }
 
     private var connected: [String: Connected] = [:]
+
+    /// For the lock screen connectivity widget.
+    var connectedDeviceSummaries: [(name: String, symbol: String)] {
+        connected.values.map { ($0.name, $0.symbol) }.sorted { $0.name < $1.name }
+    }
     private var warnedLow: Set<String> = []
 
     func start() {

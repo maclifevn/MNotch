@@ -8,6 +8,12 @@ enum IdleActivity: String, CaseIterable {
     case none, playing, calendar, duo
 }
 
+enum LockCardStyle: String, CaseIterable {
+    case glass
+    case clear
+    case frosted
+}
+
 enum HUDBarStyle: String, CaseIterable {
     case white, accent, decibel
 }
@@ -197,6 +203,22 @@ final class SettingsStore {
     var lockSoundOnLock: Bool { didSet { save("lock.soundLock", lockSoundOnLock) } }
     var lockSoundOnUnlock: Bool { didSet { save("lock.soundUnlock", lockSoundOnUnlock) } }
     var lockKeepAwake: Double { didSet { save("lock.keepAwake", lockKeepAwake) } }
+    var lockEnabled: Bool { didSet { save("lock.enabled", lockEnabled) } }
+    var lockShowOnScreenSaver: Bool { didSet { save("lock.screensaver", lockShowOnScreenSaver) } }
+    var lockWidgetBattery: Bool { didSet { save("lock.widget.battery", lockWidgetBattery) } }
+    var lockWidgetConnectivity: Bool { didSet { save("lock.widget.connectivity", lockWidgetConnectivity) } }
+    var lockWidgetFocus: Bool { didSet { save("lock.widget.focus", lockWidgetFocus) } }
+    var lockWidgetCalendar: Bool { didSet { save("lock.widget.calendar", lockWidgetCalendar) } }
+    var lockNowPlaying: Bool { didSet { save("lock.nowPlaying", lockNowPlaying) } }
+    var lockNowPlayingStyle: LockCardStyle { didSet { save("lock.npStyle", lockNowPlayingStyle.rawValue) } }
+    var lockIdleDuration: Double { didSet { save("lock.idle", lockIdleDuration) } }
+    var lockShowVolume: Bool { didSet { save("lock.volume", lockShowVolume) } }
+    var lockOffset: Double { didSet { save("lock.offset", lockOffset) } }
+    var lockAllowBattery: Bool { didSet { save("lock.allow.battery", lockAllowBattery) } }
+    var lockAllowConnectivity: Bool { didSet { save("lock.allow.connectivity", lockAllowConnectivity) } }
+    var lockAllowFocus: Bool { didSet { save("lock.allow.focus", lockAllowFocus) } }
+    var lockAllowDisplay: Bool { didSet { save("lock.allow.display", lockAllowDisplay) } }
+    var lockAllowSound: Bool { didSet { save("lock.allow.sound", lockAllowSound) } }
 
     // MARK: - Init / load
 
@@ -312,6 +334,22 @@ final class SettingsStore {
         lockSoundOnLock = flag("lock.soundLock", false)
         lockSoundOnUnlock = flag("lock.soundUnlock", false)
         lockKeepAwake = num("lock.keepAwake", 0)
+        lockEnabled = flag("lock.enabled", true)
+        lockShowOnScreenSaver = flag("lock.screensaver", false)
+        lockWidgetBattery = flag("lock.widget.battery", true)
+        lockWidgetConnectivity = flag("lock.widget.connectivity", true)
+        lockWidgetFocus = flag("lock.widget.focus", true)
+        lockWidgetCalendar = flag("lock.widget.calendar", false)
+        lockNowPlaying = flag("lock.nowPlaying", true)
+        lockNowPlayingStyle = opt("lock.npStyle", LockCardStyle.glass)
+        lockIdleDuration = num("lock.idle", 10)
+        lockShowVolume = flag("lock.volume", false)
+        lockOffset = num("lock.offset", 0)
+        lockAllowBattery = flag("lock.allow.battery", true)
+        lockAllowConnectivity = flag("lock.allow.connectivity", true)
+        lockAllowFocus = flag("lock.allow.focus", true)
+        lockAllowDisplay = flag("lock.allow.display", true)
+        lockAllowSound = flag("lock.allow.sound", true)
 
         loading = false
     }
