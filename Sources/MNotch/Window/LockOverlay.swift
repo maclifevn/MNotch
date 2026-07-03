@@ -47,14 +47,15 @@ final class LockOverlayController {
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.animationBehavior = .none
-        panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
+        panel.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        // The modern lock screen composites in a secure context; without this
-        // flag the window stays in the user session underneath it.
+        // The modern lock screen composites in a secure WindowServer space;
+        // this flag plus SkyLight space delegation are what put us on it.
         panel.canBecomeVisibleWithoutLogin = true
         panel.contentView = NSHostingView(rootView: LockOverlayView())
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        SkyLightOperator.shared.addToLockSpace(panel)
 
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.5

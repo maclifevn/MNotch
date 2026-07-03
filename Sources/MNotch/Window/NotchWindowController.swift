@@ -46,13 +46,18 @@ final class NotchWindowController {
         AppServices.shared.showPop = { [weak self] kind in
             self?.viewModels.forEach { $0.showPop(kind) }
         }
-        // While locked, lift the notch panels above the shield window so
-        // HUDs/pops stay visible on the lock screen (Alcove behavior).
+        // While locked, move the notch panels into the SkyLight lock-screen
+        // space so HUDs/pops stay visible over the shield (Alcove behavior).
         AppServices.shared.lockScreen.onLockStateChanged = { [weak self] locked in
-            let level = locked
-                ? NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
-                : NotchPanel.notchLevel
-            self?.panels.forEach { $0.level = level }
+            guard let self else { return }
+            if locked {
+                self.panels.forEach {
+                    $0.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
+                    SkyLightOperator.shared.addToLockSpace($0)
+                }
+            } else {
+                self.panels.forEach { $0.level = NotchPanel.notchLevel }
+            }
         }
         AppServices.shared.occlusion.onHideChanged = { [weak self] hide in
             guard let self else { return }
