@@ -18,6 +18,7 @@ enum PopKind: Equatable {
     case lowPower(on: Bool)
     case device(name: String, symbol: String, battery: Int?)
     case focus(name: String, symbol: String, on: Bool)
+    case event(title: String, red: Double, green: Double, blue: Double, startingNow: Bool, start: Date)
 }
 
 enum NotchStatus: Equatable {
@@ -264,6 +265,7 @@ final class NotchViewModel {
         case .charging, .lowBattery, .lowPower: settings.batteryDuration
         case .device: settings.connectivityDuration
         case .focus: settings.focusDuration
+        case .event: settings.calendarPeekDuration
         }
 
         withAnimation(Anim.pop) { status = .pop(kind) }

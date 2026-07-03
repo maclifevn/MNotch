@@ -1,3 +1,4 @@
+import EventKit
 import AppKit
 
 /// Single owner of all long-lived services; shared across notch panels.
@@ -98,6 +99,29 @@ final class AppServices {
             }
         }
         focus.start()
+
+        calendar.onPeek = { [weak self] item, startingNow in
+            self?.showPop?(.event(
+                title: item.title,
+                red: item.colorRed,
+                green: item.colorGreen,
+                blue: item.colorBlue,
+                startingNow: startingNow,
+                start: item.start
+            ))
+            if SettingsStore.shared.calendarSoundOnEvent {
+                SoundPlayer.play(.event)
+            }
+        }
+        calendar.onChime = {
+            SoundPlayer.play(.chime)
+        }
+        // Start eagerly only when access was already granted (no TCC prompt
+        // at launch); otherwise the first calendar UI touch requests it.
+        if SettingsStore.shared.calendarEnabled,
+           EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+            calendar.ensureStarted()
+        }
 
         // Observe-only fallback (no Accessibility yet): mirror volume changes
         // from any source as a HUD. Redundant-but-harmless when the tap is

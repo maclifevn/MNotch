@@ -32,13 +32,17 @@ struct CalendarStripView: View {
 
     private var todayColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.red)
-                .kerning(0.5)
-            Text(Date().formatted(.dateTime.day()))
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(.white)
+            if SettingsStore.shared.calendarMonthView {
+                MonthGridView(eventDays: calendar.monthEventDays)
+            } else {
+                Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.red)
+                    .kerning(0.5)
+                Text(Date().formatted(.dateTime.day()))
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.white)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(calendar.today) { item in
                     EventChip(item: item)
@@ -87,7 +91,9 @@ struct EventChip: View {
     let item: CalendarService.Item
 
     private var tint: Color {
-        Color(red: item.colorRed, green: item.colorGreen, blue: item.colorBlue)
+        SettingsStore.shared.calendarUseColor
+            ? Color(red: item.colorRed, green: item.colorGreen, blue: item.colorBlue)
+            : .white.opacity(0.75)
     }
 
     var body: some View {

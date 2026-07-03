@@ -141,6 +141,14 @@ struct NotchBodyView: View {
             DevicePopView(name: name, symbol: symbol, battery: battery, geometry: viewModel.geometry)
         case .focus(let name, let symbol, let on):
             FocusPopView(name: name, symbol: symbol, on: on, geometry: viewModel.geometry)
+        case .event(let title, let red, let green, let blue, let startingNow, let start):
+            EventPopView(
+                title: title,
+                color: Color(red: red, green: green, blue: blue),
+                startingNow: startingNow,
+                start: start,
+                geometry: viewModel.geometry
+            )
         }
     }
 

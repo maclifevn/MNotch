@@ -109,6 +109,49 @@ struct FocusPopView: View {
     }
 }
 
+/// Calendar Quick Peek pop: event title left, countdown right.
+struct EventPopView: View {
+    let title: String
+    let color: Color
+    let startingNow: Bool
+    let start: Date
+    let geometry: NotchGeometry
+
+    private var indicator: Color {
+        SettingsStore.shared.calendarColoredIndicator ? color : .white.opacity(0.7)
+    }
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Capsule()
+                    .fill(indicator)
+                    .frame(width: 3, height: 14)
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: geometry.notchWidth)
+
+            if startingNow {
+                Text("Now")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(indicator)
+            } else {
+                Text(start, style: .relative)
+                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 15)
+        .frame(maxHeight: .infinity, alignment: .center)
+        .padding(.top, 2)
+    }
+}
+
 /// Bluetooth device connect pop: device glyph + name left, battery ring right.
 struct DevicePopView: View {
     let name: String

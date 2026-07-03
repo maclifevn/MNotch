@@ -14,6 +14,7 @@ final class CalendarService {
         let start: Date
         let end: Date
         let isAllDay: Bool
+        let calendarID: String
         let colorRed: Double
         let colorGreen: Double
         let colorBlue: Double
@@ -25,12 +26,17 @@ final class CalendarService {
         return today.contains { !$0.isAllDay && $0.start <= now && $0.end > now }
     }
 
-    /// Next timed event today (for the compact idle chrome and peeks).
+    /// Next event for the compact idle chrome (calendars set to
+    /// notifications-only are excluded here).
     var nextEvent: Item? {
         let now = Date()
-        return today.first { !$0.isAllDay && $0.end > now }
-            ?? today.first
-            ?? upcoming.first?.items.first
+        let settings = SettingsStore.shared
+        func usable(_ item: Item) -> Bool {
+            settings.use(for: item.calendarID) != .notifications
+        }
+        return today.first { !$0.isAllDay && $0.end > now && usable($0) }
+            ?? today.first(where: usable)
+            ?? upcoming.first?.items.first(where: usable)
     }
 
     struct DaySection: Identifiable, Equatable {
@@ -50,10 +56,18 @@ final class CalendarService {
     private(set) var today: [Item] = []
     private(set) var upcoming: [DaySection] = []
     private(set) var calendars: [CalendarInfo] = []
+    /// Day numbers of the current month that have events (for the mini grid).
+    private(set) var monthEventDays: Set<Int> = []
     private(set) var authorized = false
     private(set) var requested = false
 
+    /// Quick Peek: (event, isStartingNow).
+    @ObservationIgnored var onPeek: ((Item, Bool) -> Void)?
+    @ObservationIgnored var onChime: (() -> Void)?
+
     @ObservationIgnored private var store: EKEventStore?
+    @ObservationIgnored private var peekTimers: [Timer] = []
+    @ObservationIgnored private var chimeTimer: Timer?
 
     func ensureStarted() {
         guard !requested else { return }
@@ -72,6 +86,12 @@ final class CalendarService {
             ) { _ in
                 Task { @MainActor in self?.reload() }
             }
+            // Keep peeks/idle fresh as time passes.
+            let refresh = Timer(timeInterval: 600, repeats: true) { _ in
+                Task { @MainActor in self?.reload() }
+            }
+            refresh.tolerance = 60
+            RunLoop.main.add(refresh, forMode: .common)
         }
     }
 
@@ -117,6 +137,7 @@ final class CalendarService {
                     start: event.startDate,
                     end: event.endDate ?? event.startDate,
                     isAllDay: event.isAllDay,
+                    calendarID: event.calendar?.calendarIdentifier ?? "",
                     colorRed: Double(color.count > 0 ? color[0] : 0.6),
                     colorGreen: Double(color.count > 1 ? color[1] : 0.5),
                     colorBlue: Double(color.count > 2 ? color[2] : 1)
@@ -136,5 +157,83 @@ final class CalendarService {
             .map { day in
                 DaySection(day: day, items: Array(byDay[day]!.prefix(2)))
             }
+
+        reloadMonthDays(store: store, calendars: enabledCalendars)
+        schedulePeeks()
+        scheduleChime()
+    }
+
+    private func reloadMonthDays(store: EKEventStore, calendars: [EKCalendar]) {
+        let cal = Calendar.current
+        guard let interval = cal.dateInterval(of: .month, for: Date()) else { return }
+        let predicate = store.predicateForEvents(
+            withStart: interval.start,
+            end: interval.end,
+            calendars: calendars.isEmpty ? nil : calendars
+        )
+        monthEventDays = Set(
+            store.events(matching: predicate).map { cal.component(.day, from: $0.startDate) }
+        )
+    }
+
+    // MARK: - Quick Peek & chime
+
+    private func schedulePeeks() {
+        peekTimers.forEach { $0.invalidate() }
+        peekTimers = []
+
+        let settings = SettingsStore.shared
+        guard settings.calendarEnabled, settings.calendarQuickPeek else { return }
+
+        let now = Date()
+        let peekable = today.filter { item in
+            !item.isAllDay
+                && item.start > now
+                && settings.use(for: item.calendarID) != .activity
+        }.prefix(3)
+
+        for item in peekable {
+            if settings.calendarPeekBeforeStart {
+                let fireAt = item.start.addingTimeInterval(-settings.calendarTimeBefore * 60)
+                if fireAt > now {
+                    schedulePeek(at: fireAt, item: item, starting: false)
+                }
+            }
+            if settings.calendarPeekWhenStarting {
+                schedulePeek(at: item.start, item: item, starting: true)
+            }
+        }
+    }
+
+    private func schedulePeek(at date: Date, item: Item, starting: Bool) {
+        let timer = Timer(fire: date, interval: 0, repeats: false) { _ in
+            Task { @MainActor [weak self] in
+                self?.onPeek?(item, starting)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        peekTimers.append(timer)
+    }
+
+    private func scheduleChime() {
+        chimeTimer?.invalidate()
+        chimeTimer = nil
+        guard SettingsStore.shared.calendarHourlyChime else { return }
+
+        let cal = Calendar.current
+        guard let nextHour = cal.nextDate(
+            after: Date(),
+            matching: DateComponents(minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ) else { return }
+
+        let timer = Timer(fire: nextHour, interval: 3600, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                guard SettingsStore.shared.calendarHourlyChime else { return }
+                self?.onChime?()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        chimeTimer = timer
     }
 }
