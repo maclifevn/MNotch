@@ -49,6 +49,9 @@ final class LockOverlayController {
         panel.animationBehavior = .none
         panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // The modern lock screen composites in a secure context; without this
+        // flag the window stays in the user session underneath it.
+        panel.canBecomeVisibleWithoutLogin = true
         panel.contentView = NSHostingView(rootView: LockOverlayView())
         panel.alphaValue = 0
         panel.orderFrontRegardless()

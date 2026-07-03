@@ -32,6 +32,8 @@ final class NotchPanel: NSPanel {
         becomesKeyOnlyIfNeeded = true
         animationBehavior = .none
         acceptsMouseMovedEvents = true
+        // Allows the panel to stay visible when elevated over the lock screen.
+        canBecomeVisibleWithoutLogin = true
         level = Self.notchLevel
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         contentView = NotchHostingView(viewModel: viewModel)
