@@ -15,6 +15,7 @@ enum HUDKind: Equatable {
 enum PopKind: Equatable {
     case charging(percentage: Int)
     case lowBattery(percentage: Int)
+    case lowPower(on: Bool)
     case device(name: String, symbol: String, battery: Int?)
 }
 
@@ -137,6 +138,14 @@ final class NotchViewModel {
 
         withAnimation(inside ? Anim.open : Anim.close) { isHovering = inside }
 
+        if inside, SettingsStore.shared.expandOnHover, !status.isExpanded {
+            hoverTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled, let self, self.pointerInside else { return }
+                self.expand(self.lastTab)
+            }
+        }
+
         if !inside, status.isExpanded {
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: Self.closeDelay)
@@ -161,14 +170,19 @@ final class NotchViewModel {
     func showHUD(_ kind: HUDKind, value: Double, muted: Bool = false) {
         // Never interrupt an open panel; the action still happened.
         if status.isExpanded { return }
+        let settings = SettingsStore.shared
+        let isVolume = kind == .volume
+        let speed = isVolume ? settings.soundAnimSpeed : settings.displayAnimSpeed
+        let duration = isVolume ? settings.soundHUDDuration : settings.displayHUDDuration
+
         hudValue = value
         hudMuted = muted
         hudDismissTask?.cancel()
         if status != .hud(kind) {
-            withAnimation(Anim.hud) { status = .hud(kind) }
+            withAnimation(Anim.hud(speed)) { status = .hud(kind) }
         }
         hudDismissTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(1300))
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))
             guard !Task.isCancelled, let self else { return }
             if case .hud = self.status {
                 withAnimation(Anim.close) { self.status = .closed }
@@ -184,10 +198,17 @@ final class NotchViewModel {
         // Priority: user hover/expanded > HUD > pop.
         guard !status.isExpanded else { return }
         if case .hud = status { return }
+
+        let settings = SettingsStore.shared
+        let duration: Double = switch kind {
+        case .charging, .lowBattery, .lowPower: settings.batteryDuration
+        case .device: settings.connectivityDuration
+        }
+
         withAnimation(Anim.pop) { status = .pop(kind) }
         popDismissTask?.cancel()
         popDismissTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(2600))
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))
             guard !Task.isCancelled, let self else { return }
             if case .pop = self.status {
                 withAnimation(Anim.close) { self.status = .closed }
@@ -201,7 +222,7 @@ final class NotchViewModel {
         lastTab = tab
         let wasExpanded = status.isExpanded
         withAnimation(Anim.open) { status = .expanded(tab) }
-        if !wasExpanded {
+        if !wasExpanded, SettingsStore.shared.hapticFeedback {
             NSHapticFeedbackManager.defaultPerformer.perform(
                 .alignment, performanceTime: .default
             )

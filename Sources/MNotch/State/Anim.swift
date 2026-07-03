@@ -29,6 +29,15 @@ enum Anim {
         .snappy(duration: 0.25)
     }
 
+    /// User-selectable HUD speed (Settings → Display/Sound).
+    static func hud(_ speed: AnimSpeed) -> Animation {
+        switch speed {
+        case .smooth: .spring(response: 0.45, dampingFraction: 0.85)
+        case .fast: .snappy(duration: 0.25)
+        case .instant: .linear(duration: 0.01)
+        }
+    }
+
     /// Pops (battery, device connect).
     static var pop: Animation {
         reduceMotion

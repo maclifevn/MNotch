@@ -38,14 +38,22 @@ final class AppServices {
         keys.start()
 
         power.onPowerEvent = { [weak self] event in
-            guard SettingsStore.shared.batteryEnabled else { return }
+            let settings = SettingsStore.shared
+            guard settings.batteryEnabled else { return }
             switch event {
             case .pluggedIn(let percentage):
                 self?.showPop?(.charging(percentage: percentage))
             case .unplugged(let percentage):
                 _ = percentage // No pop on unplug; matches Alcove's restraint.
             case .lowBattery(let percentage):
+                guard settings.batteryWarnLow else { return }
                 self?.showPop?(.lowBattery(percentage: percentage))
+                if settings.batterySoundOnLow {
+                    SoundPlayer.play(.lowBattery)
+                }
+            case .lowPowerMode(let on):
+                guard settings.batteryNotifyLowPower else { return }
+                self?.showPop?(.lowPower(on: on))
             }
         }
         power.start()

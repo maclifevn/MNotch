@@ -33,6 +33,13 @@ struct NotchBodyView: View {
             .frame(width: size.width, height: size.height, alignment: .top)
             .background(.black, in: shape)
             .clipShape(shape)
+            .overlay {
+                if SettingsStore.shared.contrastOutline {
+                    shape
+                        .stroke(.white.opacity(0.14), lineWidth: 1)
+                        .padding(.top, 1)
+                }
+            }
             .contentShape(Rectangle())
             .onHover { inside in
                 viewModel.setPointerInside(inside)
@@ -87,9 +94,15 @@ struct NotchBodyView: View {
     private func popView(_ kind: PopKind) -> some View {
         switch kind {
         case .charging(let percentage):
-            BatteryPopView(percentage: percentage, low: false, geometry: viewModel.geometry)
+            BatteryPopView(percentage: percentage, kind: .charging, geometry: viewModel.geometry)
         case .lowBattery(let percentage):
-            BatteryPopView(percentage: percentage, low: true, geometry: viewModel.geometry)
+            BatteryPopView(percentage: percentage, kind: .low, geometry: viewModel.geometry)
+        case .lowPower(let on):
+            BatteryPopView(
+                percentage: AppServices.shared.power.percentage,
+                kind: .lowPower(on: on),
+                geometry: viewModel.geometry
+            )
         case .device(let name, let symbol, let battery):
             DevicePopView(name: name, symbol: symbol, battery: battery, geometry: viewModel.geometry)
         }

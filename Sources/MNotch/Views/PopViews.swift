@@ -1,27 +1,71 @@
 import SwiftUI
 
-/// Charging / low-battery pop: bolt or battery glyph on the left wing,
-/// percentage counting on the right.
+/// Charging / low-battery / low-power pop: glyph (+ optional label) on the
+/// left wing, percentage counting on the right.
 struct BatteryPopView: View {
+    enum Kind {
+        case charging
+        case low
+        case lowPower(on: Bool)
+    }
+
     let percentage: Int
-    let low: Bool
+    let kind: Kind
     let geometry: NotchGeometry
 
-    private var tint: Color { low ? .red : .green }
+    private var settings: SettingsStore { .shared }
+
+    private var tint: Color {
+        switch kind {
+        case .charging: .green
+        case .low: .red
+        case .lowPower: .yellow
+        }
+    }
+
+    private var symbol: String {
+        switch kind {
+        case .charging: "bolt.fill"
+        case .low: "battery.25percent"
+        case .lowPower: "battery.75percent"
+        }
+    }
+
+    private var label: String {
+        switch kind {
+        case .charging: "Charging"
+        case .low: "Low Battery"
+        case .lowPower(let on): on ? "Low Power On" : "Low Power Off"
+        }
+    }
 
     var body: some View {
         HStack {
-            Image(systemName: low ? "battery.25percent" : "bolt.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(tint)
-                .symbolEffect(.bounce, options: .nonRepeating)
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .symbolEffect(.bounce, options: .nonRepeating)
+                if !settings.batteryHideLabel {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(tint.opacity(0.9))
+                        .lineLimit(1)
+                }
+            }
 
             Spacer(minLength: geometry.notchWidth)
 
-            Text("\(percentage)%")
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                .foregroundStyle(tint)
-                .contentTransition(.numericText())
+            if !settings.batteryHidePercentage {
+                Text("\(percentage)%")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
         }
         .padding(.horizontal, 16)
         .frame(maxHeight: .infinity, alignment: .center)

@@ -6,6 +6,7 @@ enum PowerEvent: Equatable {
     case pluggedIn(percentage: Int)
     case unplugged(percentage: Int)
     case lowBattery(percentage: Int)
+    case lowPowerMode(on: Bool)
 }
 
 /// Watches power source changes via IOKit run-loop notifications.
@@ -20,12 +21,21 @@ final class PowerSourceService {
     var onPowerEvent: ((PowerEvent) -> Void)?
 
     @ObservationIgnored private var lastOnAC: Bool?
-    @ObservationIgnored private var firedLowThresholds: Set<Int> = []
-
-    private static let lowThresholds = [20, 10]
+    @ObservationIgnored private var firedLowWarning = false
 
     func start() {
         readSources(fireEvents: false)
+
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            let on = ProcessInfo.processInfo.isLowPowerModeEnabled
+            Task { @MainActor in
+                self?.onPowerEvent?(.lowPowerMode(on: on))
+            }
+        }
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let service = Unmanaged<PowerSourceService>.fromOpaque(context).takeUnretainedValue()
@@ -66,16 +76,17 @@ final class PowerSourceService {
                 ? .pluggedIn(percentage: percentage)
                 : .unplugged(percentage: percentage))
             if onAC {
-                firedLowThresholds.removeAll()
+                firedLowWarning = false
             }
         }
 
         if !onAC {
-            for threshold in Self.lowThresholds
-            where percentage <= threshold && !firedLowThresholds.contains(threshold) {
-                firedLowThresholds.insert(threshold)
+            let threshold = Int(SettingsStore.shared.batteryLowThreshold)
+            if percentage <= threshold, !firedLowWarning {
+                firedLowWarning = true
                 onPowerEvent?(.lowBattery(percentage: percentage))
-                break
+            } else if percentage > threshold {
+                firedLowWarning = false
             }
         }
     }
