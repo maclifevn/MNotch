@@ -23,6 +23,10 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         fatalError("init(rootView:) is not supported")
     }
 
+    /// The panel never becomes key, so without this the first click is
+    /// swallowed as window activation and gestures never fire.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard viewModel.interactiveRect(in: bounds).contains(local) else { return nil }
@@ -33,6 +37,17 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     // tracking areas follow the animated layout automatically, which raw
     // NSTrackingArea + mouseMoved did not do reliably in a non-activating
     // panel. This view only handles click pass-through (hitTest) and drops.
+
+    /// Fallback for SwiftUI gestures being unreliable in a never-key panel:
+    /// a click on the closed notch expands it. No-op when already expanded
+    /// (handleTap guards), so a SwiftUI tap firing too costs nothing.
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        let local = convert(event.locationInWindow, from: nil)
+        if viewModel.interactiveRect(in: bounds).contains(local) {
+            viewModel.handleTap()
+        }
+    }
 
     // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
 
