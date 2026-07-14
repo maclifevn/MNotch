@@ -74,13 +74,15 @@ final class MediaRemoteService {
     private var missCount = 0
     private var artworkIdentity = ""
     private(set) var lastPlayingAt = Date.distantPast
+    private(set) var lastActiveAt = Date.distantPast
 
-    /// Idle-duration rule for the compact chrome: visible while playing, and
-    /// for N seconds after pausing. Re-evaluated on every poll tick.
+    /// Compact-chrome visibility. A loaded track shows whether playing or
+    /// paused — many apps (MMusic, some browsers) misreport `isPlaying`, and
+    /// a paused track should stay visible to resume anyway. `idleDuration` is
+    /// the grace kept after the track fully clears (player closed).
     func idleVisible(after idleDuration: Double) -> Bool {
-        guard hasActiveMedia else { return false }
-        if playback.isPlaying { return true }
-        return Date().timeIntervalSince(lastPlayingAt) < idleDuration
+        if hasActiveMedia { return true }
+        return Date().timeIntervalSince(lastActiveAt) < idleDuration
     }
 
     private static let pollInterval: Duration = .seconds(2)
@@ -233,6 +235,7 @@ final class MediaRemoteService {
         if new.isPlaying {
             lastPlayingAt = Date()
         }
+        lastActiveAt = Date()   // a track is present this poll
         SettingsStore.shared.rememberSource(new.bundleIdentifier)
         if playback != new {
             playback = new
