@@ -145,6 +145,8 @@ final class AppServices {
             self?.collapseIfIdle?()
         }
         agents.start()
+        // Keep the deployed relay in sync with this app build.
+        ClaudeHookInstaller.refreshScripts()
         if SettingsStore.shared.agentEnabled {
             quota.start()
         }

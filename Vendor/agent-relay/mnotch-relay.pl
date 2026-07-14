@@ -17,6 +17,7 @@ use IO::Select;
 
 # --- read the hook payload -------------------------------------------------
 my $stdin = do { local $/; <STDIN> } // '';
+$stdin =~ s/\s+\z//;   # strip the trailing newline so it can't land mid-envelope
 
 # --- MNotch connection details ---------------------------------------------
 my $home = $ENV{HOME} // '';

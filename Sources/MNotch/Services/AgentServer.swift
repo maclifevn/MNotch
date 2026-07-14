@@ -112,7 +112,7 @@ final class AgentServer {
     private(set) var port: UInt16 = 0
     private var listener: NWListener?
     private var token = ""
-    private var pending: [Int: NWConnection] = [:]
+    private var pending: [Int: (connection: NWConnection, event: String)] = [:]
     private var nextID = 1
 
     static var supportDirectory: URL {
@@ -161,17 +161,21 @@ final class AgentServer {
         receiveLine(on: connection, buffer: Data())
     }
 
+    /// Each connection sends exactly one JSON envelope. Rather than framing on
+    /// a delimiter (a stray newline inside the hook JSON broke that), just
+    /// accumulate bytes and process as soon as the buffer decodes as a full
+    /// envelope. Caps the buffer to avoid unbounded growth on garbage input.
     private func receiveLine(on connection: NWConnection, buffer: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) {
             [weak self] data, _, isComplete, error in
             var buffer = buffer
             if let data { buffer.append(data) }
-            if let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
-                Task { @MainActor in self?.handleLine(lineData, on: connection) }
+
+            if let envelope = try? JSONDecoder().decode(Envelope.self, from: buffer) {
+                Task { @MainActor in self?.handle(envelope, on: connection) }
                 return
             }
-            if isComplete || error != nil {
+            if isComplete || error != nil || buffer.count > 1_000_000 {
                 connection.cancel()
                 return
             }
@@ -184,19 +188,21 @@ final class AgentServer {
         let event: AgentEvent
     }
 
-    private func handleLine(_ data: Data, on connection: NWConnection) {
-        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
-              envelope.token == token
-        else {
+    private func handle(_ envelope: Envelope, on connection: NWConnection) {
+        guard envelope.token == token else {
+            mnotchLog.error("AgentServer token mismatch")
             connection.cancel()
             return
         }
+        mnotchLog.notice("AgentServer event=\(envelope.event.event, privacy: .public) perm=\(envelope.event.isPermissionRequest)")
+        dispatch(envelope.event, on: connection)
+    }
 
-        let event = envelope.event
+    private func dispatch(_ event: AgentEvent, on connection: NWConnection) {
         if event.isPermissionRequest {
             let id = nextID
             nextID += 1
-            pending[id] = connection
+            pending[id] = (connection, event.event)
             onEvent?(event, id)
         } else {
             onEvent?(event, nil)
@@ -206,15 +212,31 @@ final class AgentServer {
 
     /// Answer a pending permission request; sends the hook JSON back and
     /// closes the connection. `decision` is "allow" | "deny" | "ask".
+    /// PreToolUse and PermissionRequest expect different output shapes.
     func respond(_ id: Int, decision: String, reason: String = "") {
-        guard let connection = pending.removeValue(forKey: id) else { return }
-        let payload: [String: Any] = [
-            "hookSpecificOutput": [
-                "hookEventName": "PreToolUse",
-                "permissionDecision": decision,
-                "permissionDecisionReason": reason,
-            ],
-        ]
+        guard let entry = pending.removeValue(forKey: id) else { return }
+        let connection = entry.connection
+
+        let payload: [String: Any]
+        if entry.event == "PermissionRequest" {
+            // behavior must be allow/deny; "ask" degrades to leaving the dialog.
+            let behavior = decision == "deny" ? "deny" : "allow"
+            payload = [
+                "hookSpecificOutput": [
+                    "hookEventName": "PermissionRequest",
+                    "decision": ["behavior": behavior],
+                ],
+            ]
+        } else {
+            payload = [
+                "hookSpecificOutput": [
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": decision,
+                    "permissionDecisionReason": reason,
+                ],
+            ]
+        }
+
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
             connection.cancel()
             return
@@ -229,7 +251,7 @@ final class AgentServer {
     /// Drop a pending request without answering (relay will time out to the
     /// terminal). Used when a request is superseded or the session ends.
     func drop(_ id: Int) {
-        pending.removeValue(forKey: id)?.cancel()
+        pending.removeValue(forKey: id)?.connection.cancel()
     }
 
     private static func loadOrCreateToken() -> String {

@@ -38,6 +38,14 @@ enum ClaudeHookInstaller {
         return false
     }
 
+    /// Keep the deployed relay + notifier in sync with the running app, so a
+    /// rebuilt app doesn't leave a stale relay behind the installed hooks.
+    /// No settings.json change — safe to call on every launch.
+    static func refreshScripts() {
+        try? copyRelay()
+        ensureNotifyHelper()
+    }
+
     /// Copy the generic notifier next to the relay so the path shown in
     /// settings (for Codex/Gemini) actually exists.
     static func ensureNotifyHelper() {
