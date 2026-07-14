@@ -22,6 +22,15 @@ struct NotchBodyView: View {
     private let services = AppServices.shared
     @Namespace private var notchSpace
 
+    /// Agent request card + confirmation pill use an opaque shadow float
+    /// instead of the behind-window blur halo (which bleeds white).
+    private var isAgentSurface: Bool {
+        switch viewModel.status {
+        case .expanded(.agent), .pop(.agentConfirm): true
+        default: false
+        }
+    }
+
     var body: some View {
         let size = viewModel.visualSize
         let shape = NotchShape(
@@ -36,11 +45,16 @@ struct NotchBodyView: View {
             .background(.black, in: shape)
             .clipShape(shape)
             .background {
-                // Progressive blur: a soft behind-window halo extending past
-                // the panel's bottom edge onto the desktop. Applied AFTER the
-                // clip so it overflows freely and never tints the black fill.
-                // Expanded only.
-                if viewModel.status.isExpanded, SettingsStore.shared.progressiveBlur {
+                if isAgentSurface {
+                    // Opaque, wallpaper-independent float: the black notch shape
+                    // casting a soft dark shadow. No behind-window sampling → no
+                    // white halo on any desktop (matches the reference cards).
+                    shape.fill(.black)
+                        .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 11)
+                } else if viewModel.status.isExpanded, SettingsStore.shared.progressiveBlur {
+                    // Progressive blur: a soft behind-window halo extending past
+                    // the panel's bottom edge onto the desktop. Applied AFTER the
+                    // clip so it overflows freely and never tints the black fill.
                     VisualEffectView()
                         .frame(width: size.width + 60, height: size.height + 80)
                         .mask(
@@ -179,6 +193,8 @@ struct NotchBodyView: View {
             )
         case .agent(let name, let kind, let needsInput):
             AgentPopView(name: name, kind: kind, needsInput: needsInput, geometry: viewModel.geometry)
+        case .agentConfirm(let approved):
+            AgentConfirmView(approved: approved, geometry: viewModel.geometry)
         }
     }
 

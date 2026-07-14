@@ -38,6 +38,8 @@ struct PendingRequest: Equatable {
     /// Extracted plan / summary Markdown to preview (may be empty).
     let markdown: String
     let toolSummary: String
+    /// Typed tool_input for rich per-tool rendering.
+    let detail: RequestDetail
 }
 
 /// Owns agent session state fed by `AgentServer`, and drives the notch:
@@ -62,6 +64,7 @@ final class AgentMonitorService {
     var hasPendingRequest: Bool { sessions.contains { $0.request != nil } }
     var firstPending: AgentSession? { sessions.first { $0.request != nil } }
     var activeCount: Int { sessions.filter { $0.status != .done }.count }
+    var pendingCount: Int { sessions.filter { $0.request != nil }.count }
 
     func start() {
         server.onEvent = { [weak self] event, requestID in
@@ -100,7 +103,8 @@ final class AgentMonitorService {
                 id: requestID,
                 toolName: event.toolName ?? "tool",
                 markdown: Self.extractMarkdown(event),
-                toolSummary: Self.summarize(event)
+                toolSummary: Self.summarize(event),
+                detail: Self.detail(event)
             )
             session.status = .waiting
             session.request = request
@@ -246,6 +250,32 @@ final class AgentMonitorService {
     }
 
     // MARK: - Content extraction
+
+    /// Typed per-tool detail from tool_input; degrades to `.generic`.
+    private static func detail(_ event: AgentEvent) -> RequestDetail {
+        guard let json = event.toolInputJSON,
+              let data = json.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .generic }
+        func s(_ k: String) -> String { (o[k] as? String) ?? "" }
+        switch event.toolName {
+        case "Edit":
+            return .edit(path: s("file_path"), old: s("old_string"), new: s("new_string"))
+        case "MultiEdit":
+            let edits = (o["edits"] as? [[String: Any]] ?? []).map {
+                EditPair(old: ($0["old_string"] as? String) ?? "", new: ($0["new_string"] as? String) ?? "")
+            }
+            return .multiEdit(path: s("file_path"), edits: edits)
+        case "Write":
+            return .write(path: s("file_path"), content: s("content"))
+        case "Bash":
+            return .bash(command: s("command"))
+        case "ExitPlanMode":
+            return .plan(markdown: s("plan"))
+        default:
+            return .generic
+        }
+    }
 
     private static func summarize(_ event: AgentEvent) -> String {
         let tool = event.toolName ?? "tool"

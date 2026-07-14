@@ -28,9 +28,14 @@ enum DebugProbe {
             queue: .main
         ) { _ in
             Task { @MainActor in
-                if let s = AppServices.shared.agents.firstPending {
-                    AppServices.shared.agents.approve(s)
+                let agents = AppServices.shared.agents
+                guard let s = agents.firstPending else { return }
+                // Mirror AgentRequestCard.resolve so the confirm pill fires.
+                if agents.pendingCount <= 1,
+                   let vm = controller.debugViewModels.first {
+                    vm.confirmAgentDecision(approved: true)
                 }
+                agents.approve(s)
             }
         }
         center.addObserver(

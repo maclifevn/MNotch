@@ -197,6 +197,29 @@ struct AgentPopView: View {
     }
 }
 
+/// Compact confirmation pill shown briefly after Approve/Reject (reference 2).
+struct AgentConfirmView: View {
+    let approved: Bool
+    let geometry: NotchGeometry
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: approved ? "checkmark" : "xmark")
+                .font(.system(size: 12, weight: .bold))
+                .symbolEffect(.bounce, options: .nonRepeating)
+            Text(approved ? "Approved" : "Rejected")
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(
+            approved
+                ? Color(red: 0.40, green: 0.90, blue: 0.50)
+                : Color(red: 0.95, green: 0.45, blue: 0.45)
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.top, geometry.notchHeight - 4)
+    }
+}
+
 /// Bluetooth device connect pop: device glyph + name left, battery ring right.
 struct DevicePopView: View {
     let name: String

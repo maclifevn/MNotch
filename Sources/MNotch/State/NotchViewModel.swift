@@ -21,6 +21,7 @@ enum PopKind: Equatable {
     case focus(name: String, symbol: String, on: Bool)
     case event(title: String, red: Double, green: Double, blue: Double, startingNow: Bool, start: Date)
     case agent(name: String, kind: String, needsInput: Bool)
+    case agentConfirm(approved: Bool)
 }
 
 enum NotchStatus: Equatable {
@@ -130,8 +131,53 @@ final class NotchViewModel {
     static let popExtraWidth: CGFloat = 190
     static let popExtraHeight: CGFloat = 6
 
-    /// Fixed panel (window) size — never animated, big enough for max expansion.
-    static let panelSize = CGSize(width: 700, height: 300)
+    /// Fixed panel (window) size — never animated, big enough for max
+    /// expansion (400 tall so a full-height agent diff + drop shadow render
+    /// unclipped; interactiveRect uses visualSize so the extra canvas is
+    /// invisible and non-interactive).
+    static let panelSize = CGSize(width: 700, height: 400)
+
+    // Agent panel: fixed per-detail width, MEASURED height.
+    static let agentNarrowWidth: CGFloat = 380   // .generic
+    static let agentWideWidth: CGFloat = 460     // everything else
+    static let agentMinHeight: CGFloat = 92
+    static let agentMaxHeight: CGFloat = 340
+
+    /// Floor so the flared top edge always spans the physical cutout.
+    var minAgentWidth: CGFloat { geometry.notchWidth + topRadius * 2 + 48 }
+
+    static func agentWidth(for d: RequestDetail) -> CGFloat {
+        if case .generic = d { return agentNarrowWidth }
+        return agentWideWidth
+    }
+
+    /// Class-default seed so the open animation targets ~final height at once.
+    static func seedHeight(for d: RequestDetail) -> CGFloat {
+        switch d {
+        case .generic: 118
+        case .bash: 150
+        case .write: 230
+        case .edit, .multiEdit: 250
+        case .plan: 240
+        }
+    }
+
+    /// Live natural height of the agent card, measured from the view and fed
+    /// back here. Epsilon-guarded so a sub-pixel delta can't re-spring forever.
+    private(set) var agentContentHeight: CGFloat = 0
+
+    func setAgentContentHeight(_ h: CGFloat) {
+        let clamped = min(max(h, Self.agentMinHeight), Self.agentMaxHeight)
+        guard abs(clamped - agentContentHeight) > 0.5 else { return }
+        withAnimation(Anim.open) { agentContentHeight = clamped }
+    }
+
+    var agentConfirmSize: CGSize {
+        CGSize(
+            width: max(minAgentWidth, geometry.notchWidth + 150),
+            height: geometry.notchHeight + 36
+        )
+    }
 
     /// Hover apron: interactive region extends this far past the visible shape.
     static let apron: CGFloat = 8
@@ -161,13 +207,20 @@ final class NotchViewModel {
                 width: closedSize.width + Self.hudExtraWidth,
                 height: closedSize.height + Self.hudExtraHeight
             )
+        case .pop(.agentConfirm):
+            return agentConfirmSize
         case .pop:
             return CGSize(
                 width: closedSize.width + Self.popExtraWidth,
                 height: closedSize.height + Self.popExtraHeight
             )
-        case .expanded:
-            return Self.expandedSize
+        case .expanded(let tab):
+            guard tab == .agent else { return Self.expandedSize }
+            let d = AppServices.shared.agents.firstPending?.request?.detail ?? .generic
+            let h = agentContentHeight == 0
+                ? Self.seedHeight(for: d)
+                : min(max(agentContentHeight, Self.agentMinHeight), Self.agentMaxHeight)
+            return CGSize(width: max(Self.agentWidth(for: d), minAgentWidth), height: h)
         }
     }
 
@@ -229,10 +282,33 @@ final class NotchViewModel {
     }
 
     /// Open the Agent tab for a permission request; stays open (sticky) until
-    /// the request is answered.
+    /// the request is answered. Seeds the height to the detail's default so
+    /// the open animation targets ~final size in one step.
     func openAgentRequest() {
         lastTab = .agent
-        withAnimation(Anim.open) { status = .expanded(.agent) }
+        let seed = AppServices.shared.agents.firstPending?.request
+            .map { Self.seedHeight(for: $0.detail) } ?? Self.agentMinHeight
+        withAnimation(Anim.open) {
+            agentContentHeight = seed
+            status = .expanded(.agent)
+        }
+    }
+
+    /// After Approve/Reject: show a compact confirmation pill for 1.2s. Set
+    /// BEFORE responding so the synchronous collapseAgentIfIdle no-ops (its
+    /// guard checks `status == .expanded(.agent)`, already replaced here).
+    func confirmAgentDecision(approved: Bool) {
+        // A pending hover-exit close task would otherwise collapse the pill.
+        hoverTask?.cancel()
+        popDismissTask?.cancel()
+        withAnimation(Anim.pop) { status = .pop(.agentConfirm(approved: approved)) }
+        popDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard !Task.isCancelled, let self else { return }
+            if case .pop(.agentConfirm) = self.status {
+                withAnimation(Anim.close) { self.status = .closed }
+            }
+        }
     }
 
     /// Called after a request resolves; collapse if the pointer is away and
@@ -297,6 +373,7 @@ final class NotchViewModel {
         case .focus: settings.focusDuration
         case .event: settings.calendarPeekDuration
         case .agent: settings.agentDuration
+        case .agentConfirm: 1.2   // driven by confirmAgentDecision, not showPop
         }
 
         mnotchLog.notice("showPop \(String(describing: kind), privacy: .public)")
