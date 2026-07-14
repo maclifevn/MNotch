@@ -38,8 +38,23 @@ enum ClaudeHookInstaller {
         return false
     }
 
+    /// Copy the generic notifier next to the relay so the path shown in
+    /// settings (for Codex/Gemini) actually exists.
+    static func ensureNotifyHelper() {
+        guard let bundled = Bundle.main.url(
+            forResource: "mnotch-notify", withExtension: "pl"
+        ) else { return }
+        let dest = AgentServer.supportDirectory.appending(path: "mnotch-notify.pl")
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.copyItem(at: bundled, to: dest)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: dest.path
+        )
+    }
+
     static func install() throws {
         try copyRelay()
+        ensureNotifyHelper()
 
         var root = readSettings() ?? [:]
         var hooks = root["hooks"] as? [String: Any] ?? [:]

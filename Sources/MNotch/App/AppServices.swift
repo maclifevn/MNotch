@@ -19,6 +19,7 @@ final class AppServices {
     let focus = FocusWatcher()
     let lockScreen = LockScreenWatcher()
     let agents = AgentMonitorService()
+    let quota = QuotaService()
 
     /// Set by NotchWindowController; opens the Agent tab for a request.
     var expandAgent: (() -> Void)?
@@ -144,6 +145,9 @@ final class AppServices {
             self?.collapseIfIdle?()
         }
         agents.start()
+        if SettingsStore.shared.agentEnabled {
+            quota.start()
+        }
 
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared

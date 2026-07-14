@@ -181,11 +181,12 @@ final class AgentMonitorService {
         sessions.removeAll { $0.id == sessionID && $0.status == .done }
     }
 
-    /// Bring the agent's terminal to the front. Best-effort: activate the app
-    /// by its TERM_PROGRAM; precise pane targeting (iTerm/Terminal/tmux) is a
-    /// later refinement.
+    /// Bring the agent's terminal to the front, targeting the exact tab/pane
+    /// where possible (iTerm2 & Terminal by session id, tmux by pane), else
+    /// just activating the app.
     func jump(_ session: AgentSession) {
-        let bundleID: String? = switch session.terminal.program {
+        let term = session.terminal
+        let bundleID: String? = switch term.program {
         case "iTerm.app": "com.googlecode.iterm2"
         case "Apple_Terminal": "com.apple.Terminal"
         case "vscode": "com.microsoft.VSCode"
@@ -195,9 +196,52 @@ final class AgentMonitorService {
         case "WezTerm": "com.github.wez.wezterm"
         default: nil
         }
+
         if let bundleID,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        }
+
+        // Precise tmux pane switch (works regardless of the outer terminal).
+        if let pane = term.tmuxPane, !pane.isEmpty {
+            runShell("/usr/bin/env", ["tmux", "select-pane", "-t", pane])
+        }
+
+        // Focus the exact iTerm2 session, if we captured its id.
+        if term.program == "iTerm.app", let sid = term.itermSession, !sid.isEmpty {
+            let script = """
+            tell application "iTerm2"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        repeat with s in sessions of t
+                            if (id of s) is "\(sid)" then
+                                select w
+                                select t
+                                select s
+                                return
+                            end if
+                        end repeat
+                    end repeat
+                end repeat
+            end tell
+            """
+            runAppleScript(script)
+        }
+    }
+
+    private func runShell(_ launch: String, _ args: [String]) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: launch)
+        proc.arguments = args
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+    }
+
+    private func runAppleScript(_ source: String) {
+        Task.detached {
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
         }
     }
 

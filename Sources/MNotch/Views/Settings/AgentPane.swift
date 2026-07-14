@@ -58,6 +58,19 @@ struct AgentPane: View {
                 ) { "\(Int($0)) s" }
             }
 
+            Section("Usage (estimate)") {
+                let quota = AppServices.shared.quota
+                LabeledContent("Last 5 hours") {
+                    Text("\(quota.tokensInWindow / 1000)K tokens")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                ProgressView(value: quota.fraction)
+                Text("Summed from ~/.claude transcripts. Anthropic doesn't publish remaining limits, so this is an estimate against a configurable ceiling.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
             Section("Other agents (Codex, Gemini, …)") {
                 Text("These tools don't expose a blocking permission hook, so they can only send status notifications (not remote approval). Point their notify command at:")
                     .font(.caption)
@@ -69,7 +82,10 @@ struct AgentPane: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { hooksInstalled = ClaudeHookInstaller.isInstalled }
+        .onAppear {
+            hooksInstalled = ClaudeHookInstaller.isInstalled
+            ClaudeHookInstaller.ensureNotifyHelper()
+        }
     }
 
     private var notifyPath: String {
