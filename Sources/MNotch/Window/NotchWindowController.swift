@@ -62,6 +62,14 @@ final class NotchWindowController {
         AppServices.shared.showPop = { [weak self] kind in
             self?.viewModels.forEach { $0.showPop(kind) }
         }
+        // Agent permission request → open the Agent tab on every panel; the
+        // built-in (or first) notch is where the user acts.
+        AppServices.shared.expandAgent = { [weak self] in
+            self?.viewModels.forEach { $0.openAgentRequest() }
+        }
+        AppServices.shared.collapseIfIdle = { [weak self] in
+            self?.viewModels.forEach { $0.collapseAgentIfIdle() }
+        }
         // While locked, move the notch panels into the SkyLight lock-screen
         // space so HUDs/pops stay visible over the shield (Alcove behavior).
         // SLSSpaceAddWindowsAndRemoveFromSpaces REMOVES windows from their

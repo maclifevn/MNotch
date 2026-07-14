@@ -11,6 +11,9 @@ enum SoundPlayer {
         case sleep = "Submarine"
         case lock = "Bottle"
         case unlock = "Pop"
+        case agentAttention = "Blow"
+        case agentApproved = "Morse"
+        case agentDone = "Hero"
     }
 
     static func play(_ effect: Effect) {

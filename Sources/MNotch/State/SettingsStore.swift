@@ -220,6 +220,12 @@ final class SettingsStore {
     var lockAllowDisplay: Bool { didSet { save("lock.allow.display", lockAllowDisplay) } }
     var lockAllowSound: Bool { didSet { save("lock.allow.sound", lockAllowSound) } }
 
+    // Agent monitor
+    var agentEnabled: Bool { didSet { save("agent.enabled", agentEnabled) } }
+    var agentSound: Bool { didSet { save("agent.sound", agentSound) } }
+    var agentDuration: Double { didSet { save("agent.duration", agentDuration) } }
+    var agentAutoExpand: Bool { didSet { save("agent.autoExpand", agentAutoExpand) } }
+
     // MARK: - Init / load
 
     private init() {
@@ -350,6 +356,11 @@ final class SettingsStore {
         lockAllowFocus = flag("lock.allow.focus", true)
         lockAllowDisplay = flag("lock.allow.display", true)
         lockAllowSound = flag("lock.allow.sound", true)
+
+        agentEnabled = flag("agent.enabled", false)
+        agentSound = flag("agent.sound", true)
+        agentDuration = num("agent.duration", 4)
+        agentAutoExpand = flag("agent.autoExpand", true)
 
         loading = false
     }

@@ -18,6 +18,12 @@ final class AppServices {
     let occlusion = OcclusionWatcher()
     let focus = FocusWatcher()
     let lockScreen = LockScreenWatcher()
+    let agents = AgentMonitorService()
+
+    /// Set by NotchWindowController; opens the Agent tab for a request.
+    var expandAgent: (() -> Void)?
+    /// Set by NotchWindowController; collapses if no request remains.
+    var collapseIfIdle: (() -> Void)?
 
     enum NotificationCategory {
         case battery, connectivity, display, sound
@@ -116,6 +122,28 @@ final class AppServices {
         bluetooth.start()
         occlusion.start()
         lockScreen.start()
+
+        // Agent monitor: permission requests auto-expand the notch into the
+        // Agent tab; idle prompts and turn-completions fire pops + sounds.
+        agents.onRequest = { [weak self] _ in
+            guard SettingsStore.shared.agentEnabled else { return }
+            SoundPlayer.play(.agentAttention)
+            self?.expandAgent?()
+        }
+        agents.onAttention = { [weak self] session in
+            guard SettingsStore.shared.agentEnabled else { return }
+            if SettingsStore.shared.agentSound { SoundPlayer.play(.agentAttention) }
+            self?.showPop?(.agent(name: session.folderName, kind: session.kind, needsInput: true))
+        }
+        agents.onDone = { [weak self] session in
+            guard SettingsStore.shared.agentEnabled else { return }
+            if SettingsStore.shared.agentSound { SoundPlayer.play(.agentDone) }
+            self?.showPop?(.agent(name: session.folderName, kind: session.kind, needsInput: false))
+        }
+        agents.onRequestResolved = { [weak self] in
+            self?.collapseIfIdle?()
+        }
+        agents.start()
 
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared

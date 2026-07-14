@@ -177,6 +177,8 @@ struct NotchBodyView: View {
                 start: start,
                 geometry: viewModel.geometry
             )
+        case .agent(let name, let kind, let needsInput):
+            AgentPopView(name: name, kind: kind, needsInput: needsInput, geometry: viewModel.geometry)
         }
     }
 
@@ -194,6 +196,8 @@ struct NotchBodyView: View {
             ShelfView(viewModel: viewModel)
         case .calendar:
             CalendarStripView(viewModel: viewModel, calendar: services.calendar)
+        case .agent:
+            AgentTabView(viewModel: viewModel)
         }
     }
 }
@@ -212,6 +216,9 @@ struct TabStrip: View {
             }
             if settings.calendarEnabled {
                 tabButton(.calendar, symbol: "calendar")
+            }
+            if settings.agentEnabled {
+                tabButton(.agent, symbol: "terminal.fill")
             }
             Button {
                 SettingsWindowController.shared.show()

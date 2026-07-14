@@ -162,6 +162,41 @@ struct EventPopView: View {
     }
 }
 
+/// Agent status pop: agent glyph + project name left, state right.
+struct AgentPopView: View {
+    let name: String
+    let kind: String
+    let needsInput: Bool
+    let geometry: NotchGeometry
+
+    private var symbol: String {
+        switch kind {
+        case "codex": "chevron.left.forwardslash.chevron.right"
+        case "gemini": "sparkle"
+        default: "terminal.fill"
+        }
+    }
+
+    var body: some View {
+        PopWings(geometry: geometry) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(needsInput ? Color.orange : .green)
+                    .symbolEffect(.bounce, options: .nonRepeating)
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+            }
+        } right: {
+            Text(needsInput ? "Needs input" : "Done")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(needsInput ? Color.orange : .green)
+        }
+    }
+}
+
 /// Bluetooth device connect pop: device glyph + name left, battery ring right.
 struct DevicePopView: View {
     let name: String

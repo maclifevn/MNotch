@@ -4,6 +4,7 @@ enum NotchTab: String, CaseIterable {
     case media
     case shelf
     case calendar
+    case agent
 }
 
 enum HUDKind: Equatable {
@@ -19,6 +20,7 @@ enum PopKind: Equatable {
     case device(name: String, symbol: String, battery: Int?)
     case focus(name: String, symbol: String, on: Bool)
     case event(title: String, red: Double, green: Double, blue: Double, startingNow: Bool, start: Date)
+    case agent(name: String, kind: String, needsInput: Bool)
 }
 
 enum NotchStatus: Equatable {
@@ -215,9 +217,32 @@ final class NotchViewModel {
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: Self.closeDelay)
                 guard !Task.isCancelled, let self, !self.pointerInside else { return }
+                // Keep the Agent tab pinned open while a permission request is
+                // pending — it needs an approve/reject, not an auto-close.
+                if self.status == .expanded(.agent),
+                   AppServices.shared.agents.hasPendingRequest {
+                    return
+                }
                 self.collapse()
             }
         }
+    }
+
+    /// Open the Agent tab for a permission request; stays open (sticky) until
+    /// the request is answered.
+    func openAgentRequest() {
+        lastTab = .agent
+        withAnimation(Anim.open) { status = .expanded(.agent) }
+    }
+
+    /// Called after a request resolves; collapse if the pointer is away and
+    /// nothing else pends.
+    func collapseAgentIfIdle() {
+        guard status == .expanded(.agent),
+              !AppServices.shared.agents.hasPendingRequest,
+              !pointerInside
+        else { return }
+        collapse()
     }
 
     /// Click on the closed (or hovered) notch opens the panel.
@@ -271,6 +296,7 @@ final class NotchViewModel {
         case .device: settings.connectivityDuration
         case .focus: settings.focusDuration
         case .event: settings.calendarPeekDuration
+        case .agent: settings.agentDuration
         }
 
         mnotchLog.notice("showPop \(String(describing: kind), privacy: .public)")

@@ -42,6 +42,9 @@ cp -R "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" "$APP/Contents/Framework
 cp "$ADAPTER_DIR/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
 cp "$ADAPTER_DIR/build/MediaRemoteAdapterTestClient" "$APP/Contents/Resources/"
 
+# Agent hook relay (installed into ~/.claude/settings.json at runtime)
+cp "$ROOT/Vendor/agent-relay/mnotch-relay.pl" "$APP/Contents/Resources/"
+
 codesign --force --deep -s "$SIGN_ID" "$APP"
 
 echo "Built $APP (version $VERSION build $BUILD_NUM, signed: $SIGN_ID)"

@@ -4,7 +4,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case battery, connectivity, focus, display, sound
-    case nowPlaying, calendar, fileTray, lockScreen
+    case nowPlaying, calendar, fileTray, lockScreen, agent
     case about
 
     var id: String { rawValue }
@@ -21,6 +21,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .calendar: "Calendar"
         case .fileTray: "File Tray"
         case .lockScreen: "Lock Screen"
+        case .agent: "Agents"
         case .about: "About"
         }
     }
@@ -37,6 +38,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .calendar: "calendar"
         case .fileTray: "tray.fill"
         case .lockScreen: "lock.fill"
+        case .agent: "terminal.fill"
         case .about: "info"
         }
     }
@@ -53,6 +55,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .calendar: .red
         case .fileTray: Color(white: 0.45)
         case .lockScreen: .black
+        case .agent: .teal
         case .about: .gray
         }
     }
@@ -77,6 +80,9 @@ struct SettingsView: View {
                     sidebarRow(.calendar)
                     sidebarRow(.fileTray)
                     sidebarRow(.lockScreen)
+                }
+                Section("Developer") {
+                    sidebarRow(.agent)
                 }
                 Section("MNotch") {
                     sidebarRow(.about)
@@ -115,6 +121,7 @@ struct SettingsView: View {
         case .calendar: CalendarPane()
         case .fileTray: FileTrayPane()
         case .lockScreen: LockScreenPane()
+        case .agent: AgentPane()
         case .about: AboutPane()
         }
     }

@@ -22,6 +22,28 @@ enum DebugProbe {
         ) { _ in
             Task { @MainActor in SettingsWindowController.shared.show() }
         }
+        center.addObserver(
+            forName: NSNotification.Name("mnotch.debug.agent-approve"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                if let s = AppServices.shared.agents.firstPending {
+                    AppServices.shared.agents.approve(s)
+                }
+            }
+        }
+        center.addObserver(
+            forName: NSNotification.Name("mnotch.debug.agent-reject"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                if let s = AppServices.shared.agents.firstPending {
+                    AppServices.shared.agents.reject(s)
+                }
+            }
+        }
     }
 
     private static func dump(controller: NotchWindowController) {
