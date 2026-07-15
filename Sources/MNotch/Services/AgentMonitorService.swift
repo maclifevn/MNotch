@@ -372,20 +372,32 @@ final class AgentMonitorService {
         }
     }
 
-    private static func summarize(_ event: AgentEvent) -> String {
-        let tool = event.toolName ?? "tool"
+    /// A preview line for the request card. The card header already shows the
+    /// tool name, so this returns the *arguments* — never the bare tool name
+    /// (which would just duplicate the header, as an unknown tool used to).
+    static func summarize(_ event: AgentEvent) -> String {
         guard let json = event.toolInputJSON,
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return tool }
+        else { return "" }
 
-        // Show the most useful field per common tool.
         if let command = obj["command"] as? String { return command }
-        if let path = obj["file_path"] as? String {
-            return "\(tool) \((path as NSString).lastPathComponent)"
+        if let path = obj["file_path"] as? String { return path }
+        if let url = obj["url"] as? String { return url }
+        // Unknown tool: a compact "key: value" list of its arguments.
+        return obj.keys.sorted().compactMap { key in
+            obj[key].map { "\(key): \(Self.compactValue($0))" }
+        }.joined(separator: "  ·  ")
+    }
+
+    private static func compactValue(_ value: Any) -> String {
+        switch value {
+        case let s as String: return s.count > 80 ? String(s.prefix(80)) + "…" : s
+        case let n as NSNumber: return n.stringValue
+        case is [Any]: return "[…]"
+        case is [String: Any]: return "{…}"
+        default: return String(describing: value)
         }
-        if let url = obj["url"] as? String { return "\(tool) \(url)" }
-        return tool
     }
 
     /// Plan preview: ExitPlanMode carries the plan in tool_input.plan;

@@ -54,6 +54,16 @@ final class CoreLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testGenericToolSummaryShowsArgsNotDuplicatedName() throws {
+        let json = #"{"event":"PermissionRequest","tool_name":"DatabaseMigrate","tool_input":{"target":"users","direction":"up"}}"#
+        let event = try JSONDecoder().decode(AgentEvent.self, from: try XCTUnwrap(json.data(using: .utf8)))
+        let summary = AgentMonitorService.summarize(event)
+        XCTAssertFalse(summary.contains("DatabaseMigrate"))   // header already shows the name
+        XCTAssertTrue(summary.contains("target: users"))
+        XCTAssertTrue(summary.contains("direction: up"))
+    }
+
+    @MainActor
     func testAskUserQuestionIsNotApprovableFromNotch() {
         // Interactive-UI tools must never surface as a notch Allow/Deny card.
         XCTAssertFalse(AgentMonitorService.canApproveFromNotch("AskUserQuestion"))
