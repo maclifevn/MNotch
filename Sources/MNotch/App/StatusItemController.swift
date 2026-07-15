@@ -18,6 +18,7 @@ final class StatusItemController: NSObject {
             keyEquivalent: ","
         )
         settings.target = self
+        settings.image = Self.menuIcon("gearshape")
         menu.addItem(settings)
         let welcome = NSMenuItem(
             title: "Welcome…",
@@ -25,6 +26,7 @@ final class StatusItemController: NSObject {
             keyEquivalent: ""
         )
         welcome.target = self
+        welcome.image = Self.menuIcon("hand.wave")
         menu.addItem(welcome)
         menu.addItem(.separator())
         let quit = NSMenuItem(
@@ -33,6 +35,7 @@ final class StatusItemController: NSObject {
             keyEquivalent: "q"
         )
         quit.target = self
+        quit.image = Self.menuIcon("power")
         menu.addItem(quit)
         item.menu = menu
 
@@ -43,6 +46,15 @@ final class StatusItemController: NSObject {
             guard let item else { return }
             mnotchLog.notice("status item after 2s visible=\(item.isVisible) window=\(String(describing: item.button?.window?.frame), privacy: .public) onScreen=\(item.button?.window?.isVisible ?? false)")
         }
+    }
+
+    /// Consistently-sized template SF Symbol for a menu item's leading icon.
+    private static func menuIcon(_ name: String) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image
     }
 
     @objc private func openSettings() {
