@@ -15,6 +15,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItem.install()
 
+        // First launch: greet the user and walk them through the one permission
+        // (Accessibility) that needs a manual grant.
+        if !SettingsStore.shared.hasSeenWelcome {
+            WelcomeWindowController.shared.show()
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screensChanged),

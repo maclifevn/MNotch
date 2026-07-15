@@ -22,6 +22,8 @@ final class SettingsStore {
     // MARK: General
 
     var launchAtLogin: Bool { didSet { applyLaunchAtLogin() } }
+    /// Set once the first-launch Welcome window has been dismissed.
+    var hasSeenWelcome: Bool { didSet { save("general.seenWelcome", hasSeenWelcome) } }
     var hideInFullscreen: Bool { didSet { save("general.hideFullscreen", hideInFullscreen) } }
     var hideInMissionControl: Bool { didSet { save("general.hideMissionControl", hideInMissionControl) } }
     var hideWhileGaming: Bool { didSet { save("general.hideGaming", hideWhileGaming) } }
@@ -213,6 +215,7 @@ final class SettingsStore {
         }
 
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        hasSeenWelcome = flag("general.seenWelcome", false)
         hideInFullscreen = flag("general.hideFullscreen", true)
         hideInMissionControl = flag("general.hideMissionControl", true)
         hideWhileGaming = flag("general.hideGaming", false)
