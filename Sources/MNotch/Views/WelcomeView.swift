@@ -5,9 +5,9 @@ import SwiftUI
 
 // MARK: - Welcome
 
-/// First-launch onboarding. A two-column layout: a brand hero rail on the left
-/// (logo + name + tagline on a tinted panel) and a setup column on the right —
-/// the one manual permission, two quick toggles, and the CTA.
+/// First-launch onboarding: a clean, centered single column — brand hero, the
+/// one manual permission (full-width so its description never crams), two quick
+/// toggles, and the CTA. Adapts to light and dark.
 ///
 /// Integration surface it must keep: `var onFinish: () -> Void`.
 struct WelcomeView: View {
@@ -16,53 +16,54 @@ struct WelcomeView: View {
     @Bindable private var settings = SettingsStore.shared
     @State private var trusted = AXIsProcessTrusted()
 
-    // 1 Hz Accessibility poll so the status pill flips to "Granted" live the
-    // moment the user allows MNotch in System Settings — no window reopen.
+    // 1 Hz Accessibility poll so the status flips to "Granted" live the moment
+    // the user allows MNotch in System Settings — no window reopen.
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        HStack(spacing: 0) {
-            HeroRail()
-                .frame(width: 208)
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .background(Color(nsColor: .windowBackgroundColor))
+        VStack(spacing: 22) {
+            hero
+            VStack(alignment: .leading, spacing: 22) {
+                permissionSection
+                setupSection
+            }
+            footer
         }
-        .frame(width: 560, height: 640)
+        .padding(.horizontal, 30)
+        .padding(.top, 40)
+        .padding(.bottom, 26)
+        .frame(width: 460)
+        .background(background)
         .onReceive(ticker) { _ in refreshTrust() }
     }
 
-    // MARK: Right column
+    // MARK: Hero
 
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Let's get set up")
-                    .font(.system(size: 20, weight: .bold))
-                Text("One quick permission and you're ready to go.")
-                    .font(.subheadline)
+    private var hero: some View {
+        VStack(spacing: 14) {
+            LogoPlate()
+            VStack(spacing: 5) {
+                Text("Welcome to MNotch")
+                    .font(.system(size: 24, weight: .bold))
+                Text("A Dynamic Island for your Mac")
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
-
-            permissionsSection
-            setupSection
-
-            Spacer(minLength: 8)
-
-            footer
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 36)
-        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
     }
 
-    private var permissionsSection: some View {
+    // MARK: Permission
+
+    private var permissionSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             SectionLabel("Permission")
             AccessibilityCard(trusted: trusted, onGrant: requestAccessibility)
             OtherPermissionsNote()
         }
     }
+
+    // MARK: Quick setup
 
     private var setupSection: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -73,15 +74,13 @@ struct WelcomeView: View {
                     subtitle: "Open MNotch automatically after you sign in.",
                     isOn: $settings.launchAtLogin
                 )
-                Divider().padding(.leading, 14)
+                Divider().padding(.leading, 16)
                 SetupToggleRow(
                     title: "AI-agent quota & approvals",
                     subtitle: "Live Claude & Codex usage, plus inline approvals.",
                     isOn: $settings.agentEnabled
                 )
                 .onChange(of: settings.agentEnabled) { _, on in
-                    // Mirror Settings → Agents: flipping the toggle actually
-                    // starts/stops the monitor + quota services.
                     AppServices.shared.setAgentMonitoringEnabled(on)
                 }
             }
@@ -89,11 +88,13 @@ struct WelcomeView: View {
         }
     }
 
+    // MARK: Footer
+
     private var footer: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             Button(action: onFinish) {
                 Text("Get Started")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
             .controlSize(.large)
@@ -109,15 +110,30 @@ struct WelcomeView: View {
         }
     }
 
+    // MARK: Background
+
+    private var background: some View {
+        ZStack(alignment: .top) {
+            Color(nsColor: .windowBackgroundColor)
+            // Soft brand glow behind the hero, fading into the window.
+            RadialGradient(
+                colors: [Color.mnBrand.opacity(0.16), .clear],
+                center: .top, startRadius: 0, endRadius: 260
+            )
+            .frame(height: 300)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .allowsHitTesting(false)
+        }
+        .ignoresSafeArea()
+    }
+
     // MARK: Actions
 
     private func requestAccessibility() {
-        // Open the exact pane…
         if let url = URL(string:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
-        // …and fire the system prompt so MNotch is pre-listed with a checkbox.
         let options = [
             kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
         ] as CFDictionary
@@ -128,141 +144,58 @@ struct WelcomeView: View {
         let now = AXIsProcessTrusted()
         guard now != trusted else { return }
         withAnimation(.smooth(duration: 0.35)) { trusted = now }
-        // The event tap can go live the instant the grant lands — no relaunch.
-        if now { AppServices.shared.keys.start() }
+        if now { AppServices.shared.keys.start() }   // light up the tap, no relaunch
     }
 }
 
-// MARK: - Hero rail (left column)
+// MARK: - Hero logo
 
-private struct HeroRail: View {
-    var body: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.16, green: 0.80, blue: 0.97),
-                Color(red: 0.05, green: 0.60, blue: 0.86),
-                Color(red: 0.03, green: 0.40, blue: 0.66),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        // Soft light bloom in the top-left corner.
-        .overlay(alignment: .topLeading) {
-            RadialGradient(
-                colors: [Color.white.opacity(0.30), .clear],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 230
-            )
-        }
-        // Oversized ghost peak anchored bottom-trailing for quiet depth.
-        .overlay(alignment: .bottomTrailing) {
-            MountainSilhouette()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 250, height: 214)
-                .offset(x: 74, y: 58)
-        }
-        .overlay { railContent }
-        .clipped()
-    }
-
-    private var railContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            LogoPlate()
-                .padding(.bottom, 20)
-
-            Text("MNotch")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(.white)
-            Text("A Dynamic Island for your Mac")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.82))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
-
-            Spacer(minLength: 24)
-
-            FeatureGlyphs()
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 52) // clear the window's traffic-light buttons
-        .padding(.bottom, 26)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-}
-
-/// Near-white "app icon" plate holding the faceted brand mountain.
+/// The app-icon look: a light rounded plate holding the faceted brand mountain.
 private struct LogoPlate: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 17, style: .continuous)
+        RoundedRectangle(cornerRadius: 21, style: .continuous)
             .fill(
                 LinearGradient(
-                    colors: [Color(white: 1.0), Color(white: 0.90)],
-                    startPoint: .top,
-                    endPoint: .bottom
+                    colors: [Color(white: 1.0), Color(white: 0.92)],
+                    startPoint: .top, endPoint: .bottom
                 )
             )
-            .frame(width: 74, height: 74)
-            .overlay {
-                FacetedMark()
-                    .frame(width: 46, height: 39)
-            }
+            .frame(width: 88, height: 88)
+            .overlay { FacetedMark().frame(width: 54, height: 46) }
             .overlay(
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                RoundedRectangle(cornerRadius: 21, style: .continuous)
                     .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.22), radius: 9, x: 0, y: 5)
+            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
     }
 }
 
-/// A subtle translucent strip hinting at what MNotch does.
-private struct FeatureGlyphs: View {
-    private let glyphs = ["music.note", "sun.max.fill", "battery.100", "sparkles"]
-
-    var body: some View {
-        HStack(spacing: 15) {
-            ForEach(glyphs, id: \.self) { name in
-                Image(systemName: name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(.white.opacity(0.14), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-    }
-}
-
-// MARK: - Right-column pieces
+// MARK: - Permission pieces
 
 private struct AccessibilityCard: View {
     let trusted: Bool
     let onGrant: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 13) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.mnBrand.opacity(0.16))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Image(systemName: "accessibility")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Color.mnBrand)
-                }
-
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.mnBrand.opacity(0.16))
+                    .frame(width: 34, height: 34)
+                    .overlay {
+                        Image(systemName: "accessibility")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.mnBrand)
+                    }
                 Text("Accessibility")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("So the volume and brightness keys show only MNotch's HUD instead of the system's.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer(minLength: 8)
+                statusControl
             }
-
-            Spacer(minLength: 6)
-
-            statusControl
+            Text("So the volume and brightness keys show only MNotch's HUD, not the system's.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .cardBackground()
@@ -274,15 +207,15 @@ private struct AccessibilityCard: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.green)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 5)
                 .background(Color.green.opacity(0.15), in: Capsule())
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
         } else {
             Button("Grant", action: onGrant)
                 .font(.system(size: 12, weight: .semibold))
                 .buttonStyle(.borderedProminent)
                 .tint(.mnBrand)
-                .controlSize(.small)
+                .controlSize(.regular)
         }
     }
 }
@@ -310,8 +243,7 @@ private struct SetupToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .medium))
+                Text(title).font(.system(size: 14, weight: .medium))
                 Text(subtitle)
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
@@ -332,7 +264,6 @@ private struct SetupToggleRow: View {
 private struct SectionLabel: View {
     let text: String
     init(_ text: String) { self.text = text }
-
     var body: some View {
         Text(text.uppercased())
             .font(.system(size: 11, weight: .semibold))
@@ -344,29 +275,20 @@ private struct SectionLabel: View {
 
 // MARK: - Brand mountain mark
 
-/// The three favicon polygons, in the artwork's own 64 × 54.75 top-left-origin
-/// space. SwiftUI shares that origin (y grows downward), so the coordinates map
-/// straight through and the range reads peaks-up.
+/// The three favicon polygons in the artwork's own 64 × 54.75 top-left-origin
+/// space (SwiftUI shares that origin, so coords map straight through, peaks-up).
 private enum Mountain {
     static let src = CGSize(width: 64, height: 54.75)
-
-    static let backPeak: [CGPoint] = [ // tall main peak (favicon p2)
-        CGPoint(x: 43.12, y: 2.94),
-        CGPoint(x: 27.56, y: 26.78),
-        CGPoint(x: 62.16, y: 50.15),
+    static let backPeak: [CGPoint] = [
+        CGPoint(x: 43.12, y: 2.94), CGPoint(x: 27.56, y: 26.78), CGPoint(x: 62.16, y: 50.15),
     ]
-    static let leftPeak: [CGPoint] = [ // foothill (favicon p1)
-        CGPoint(x: 13.77, y: 17.46),
-        CGPoint(x: 1.29, y: 50.15),
-        CGPoint(x: 12.29, y: 50.15),
-        CGPoint(x: 27.56, y: 26.78),
+    static let leftPeak: [CGPoint] = [
+        CGPoint(x: 13.77, y: 17.46), CGPoint(x: 1.29, y: 50.15),
+        CGPoint(x: 12.29, y: 50.15), CGPoint(x: 27.56, y: 26.78),
     ]
-    static let frontFace: [CGPoint] = [ // front base (favicon p3)
-        CGPoint(x: 27.56, y: 26.78),
-        CGPoint(x: 12.29, y: 50.15),
-        CGPoint(x: 62.16, y: 50.15),
+    static let frontFace: [CGPoint] = [
+        CGPoint(x: 27.56, y: 26.78), CGPoint(x: 12.29, y: 50.15), CGPoint(x: 62.16, y: 50.15),
     ]
-    static let all: [[CGPoint]] = [frontFace, leftPeak, backPeak]
 
     static func point(_ p: CGPoint, in rect: CGRect) -> CGPoint {
         CGPoint(
@@ -375,39 +297,28 @@ private enum Mountain {
         )
     }
 
-    static func path(for polys: [[CGPoint]], in rect: CGRect) -> Path {
+    static func path(for poly: [CGPoint], in rect: CGRect) -> Path {
         var path = Path()
-        for poly in polys {
-            guard let first = poly.first else { continue }
-            path.move(to: point(first, in: rect))
-            for p in poly.dropFirst() { path.addLine(to: point(p, in: rect)) }
-            path.closeSubpath()
-        }
+        guard let first = poly.first else { return path }
+        path.move(to: point(first, in: rect))
+        for p in poly.dropFirst() { path.addLine(to: point(p, in: rect)) }
+        path.closeSubpath()
         return path
     }
 }
 
-/// One facet of the mountain (a single polygon), so each can carry its own tint.
 private struct FacetShape: Shape {
     let points: [CGPoint]
-    func path(in rect: CGRect) -> Path { Mountain.path(for: [points], in: rect) }
-}
-
-/// The full merged silhouette — used for the faint ghost peak on the rail.
-private struct MountainSilhouette: Shape {
-    func path(in rect: CGRect) -> Path { Mountain.path(for: Mountain.all, in: rect) }
+    func path(in rect: CGRect) -> Path { Mountain.path(for: points, in: rect) }
 }
 
 /// The brand mountain drawn as three overlapping facets in graded blues.
 private struct FacetedMark: View {
     var body: some View {
         ZStack {
-            FacetShape(points: Mountain.frontFace)
-                .fill(Color(red: 0.04, green: 0.50, blue: 0.76))
-            FacetShape(points: Mountain.leftPeak)
-                .fill(Color(red: 0.07, green: 0.66, blue: 0.90))
-            FacetShape(points: Mountain.backPeak)
-                .fill(Color(red: 0.16, green: 0.80, blue: 0.97))
+            FacetShape(points: Mountain.frontFace).fill(Color(red: 0.04, green: 0.50, blue: 0.76))
+            FacetShape(points: Mountain.leftPeak).fill(Color(red: 0.07, green: 0.66, blue: 0.90))
+            FacetShape(points: Mountain.backPeak).fill(Color(red: 0.16, green: 0.80, blue: 0.97))
         }
         .aspectRatio(Mountain.src.width / Mountain.src.height, contentMode: .fit)
     }
@@ -416,7 +327,7 @@ private struct FacetedMark: View {
 // MARK: - Shared styling
 
 private extension View {
-    /// Native, appearance-adaptive card surface used behind the setup groups.
+    /// Native, appearance-adaptive card surface.
     func cardBackground() -> some View {
         background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -424,7 +335,7 @@ private extension View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
     }
 }
@@ -443,7 +354,7 @@ final class WelcomeWindowController {
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 600),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -460,9 +371,8 @@ final class WelcomeWindowController {
             // Mark seen on first show so it never reappears, however it's closed.
             SettingsStore.shared.hasSeenWelcome = true
         }
-        // orderFrontRegardless (not just makeKeyAndOrderFront) so the window
-        // appears even though MNotch is an accessory app that can't self-activate
-        // when another app is frontmost at launch.
+        // orderFrontRegardless so the accessory app can surface it at launch even
+        // when another app is frontmost.
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
