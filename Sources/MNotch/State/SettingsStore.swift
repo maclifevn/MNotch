@@ -220,7 +220,9 @@ final class SettingsStore {
         hideInMissionControl = flag("general.hideMissionControl", true)
         hideWhileGaming = flag("general.hideGaming", false)
         hideFromScreenCapture = flag("general.hideCapture", false)
-        forceSimulatedNotch = flag("general.forceNotch", d.bool(forKey: "display.fakeNotch"))
+        // Default ON so the notch shows out of the box on every Mac (incl. mini/
+        // Studio/external-only), not just notched MacBooks.
+        forceSimulatedNotch = flag("general.forceNotch", true, legacy: "display.fakeNotch")
         displayTarget = str("general.displayTarget", "all")
         idleActivity = opt("general.idleActivity", IdleActivity.playing)
         idleMostRecent = flag("general.idleMostRecent", false)

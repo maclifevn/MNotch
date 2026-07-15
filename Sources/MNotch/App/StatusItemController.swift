@@ -19,6 +19,13 @@ final class StatusItemController: NSObject {
         )
         settings.target = self
         menu.addItem(settings)
+        let welcome = NSMenuItem(
+            title: "Welcome…",
+            action: #selector(showWelcome),
+            keyEquivalent: ""
+        )
+        welcome.target = self
+        menu.addItem(welcome)
         menu.addItem(.separator())
         let quit = NSMenuItem(
             title: "Quit MNotch",
@@ -40,6 +47,10 @@ final class StatusItemController: NSObject {
 
     @objc private func openSettings() {
         SettingsWindowController.shared.show()
+    }
+
+    @objc private func showWelcome() {
+        WelcomeWindowController.shared.show()
     }
 
     @objc private func quit() {
