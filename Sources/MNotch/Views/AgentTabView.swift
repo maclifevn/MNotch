@@ -20,7 +20,7 @@ struct AgentTabView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
-            AgentUsageStrip(quota: stripQuota)
+            AgentUsageHeader(claude: quota.claudeQuota, codex: quota.codexQuota)
             if let pending = agents.firstPending, let request = pending.request {
                 AgentRequestCard(
                     session: pending,
@@ -35,14 +35,6 @@ struct AgentTabView: View {
         .padding(.top, viewModel.geometry.notchHeight - 2)
         .padding(.horizontal, 16)
         .padding(.bottom, 13)
-    }
-
-    /// The strip reflects whichever agent you're interacting with: the pending
-    /// request's provider, else the most recent session's, else Claude.
-    private var stripQuota: ProviderQuota {
-        let kind = agents.firstPending?.kind
-            ?? agents.sessions.max(by: { $0.lastActivity < $1.lastActivity })?.kind
-        return kind?.lowercased() == "codex" ? quota.codexQuota : quota.claudeQuota
     }
 
     private var contentWidth: CGFloat {

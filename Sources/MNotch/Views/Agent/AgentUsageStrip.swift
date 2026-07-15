@@ -1,8 +1,26 @@
 import SwiftUI
 
-/// Compact one-line quota readout pinned to the top of the Agent panel —
-/// "✦ 5h 11% 4h1m | 7d 2% 6h1m". Mirrors the reference: provider glyph, then
-/// each rolling window as label · used% · time-to-reset.
+/// The usage header atop the Agent panel: one compact line per provider that
+/// has real data (Claude and/or Codex), so a user of both sees both at a
+/// glance. Falls back to a single explanatory line when nothing is available.
+struct AgentUsageHeader: View {
+    let claude: ProviderQuota
+    let codex: ProviderQuota
+
+    var body: some View {
+        let withData = [claude, codex].filter { !$0.windows.isEmpty }
+        VStack(alignment: .leading, spacing: 5) {
+            if withData.isEmpty {
+                AgentUsageStrip(quota: claude)   // shows the "why it's empty" message
+            } else {
+                ForEach(withData) { AgentUsageStrip(quota: $0) }
+            }
+        }
+    }
+}
+
+/// Compact one-line quota readout — "✦ 5h 11% 4h1m | 7d 2% 6h1m". Provider
+/// glyph, then each rolling window as label · used% · time-to-reset.
 struct AgentUsageStrip: View {
     let quota: ProviderQuota
 
