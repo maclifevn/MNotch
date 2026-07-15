@@ -382,33 +382,83 @@ struct AboutPane: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Version") {
-                    Text("\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))")
+                VStack(spacing: 11) {
+                    if let logo = Self.bundledImage("icon_mnotch") {
+                        logo.resizable().interpolation(.high)
+                            .frame(width: 78, height: 78)
+                            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 4)
+                    }
+                    VStack(spacing: 3) {
+                        Text("MNotch").font(.system(size: 20, weight: .bold))
+                        Text("A Dynamic Island for your Mac")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(Self.versionString)
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
-                LabeledContent("Build") {
-                    Text("SwiftPM, no Xcode")
-                }
-            }
-            Section("Credits") {
-                Text("Now-playing relay: mediaremote-adapter by Jonas van den Berg (BSD-3-Clause), built from vendored source.")
-                    .font(.caption)
-                Text("Claude usage readout: technique adapted from openhoangnc/claude-usage-stats.")
-                    .font(.caption)
-                Text("Inspired by Alcove (tryalcove.com).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
             }
 
-            Section("Third-party licenses") {
-                DisclosureGroup("mediaremote-adapter — BSD 3-Clause") {
+            Section("Ủng hộ") {
+                HStack(alignment: .top, spacing: 14) {
+                    if let qr = Self.bundledImage("donate-qr") {
+                        qr.resizable().interpolation(.high)
+                            .frame(width: 106, height: 106)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                            )
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Mời mình ly cà phê ☕").font(.system(size: 14, weight: .semibold))
+                        Text("Nếu MNotch hữu ích với bạn, một ly cà phê nhỏ giúp mình duy trì và phát triển dự án. Cảm ơn bạn! 🙏")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Quét bằng MoMo hoặc app ngân hàng (VietQR · Napas 247)")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Section {
+                HStack(spacing: 0) {
+                    Text("Made with ❤️ for ").foregroundStyle(.secondary)
+                    Link(
+                        "Maclife & Đồng Bọn",
+                        destination: URL(string: "https://www.facebook.com/groups/maclife.vn")!
+                    )
+                }
+                .font(.callout)
+                .frame(maxWidth: .infinity)
+            }
+
+            Section {
+                Text("mediaremote-adapter · BSD-3-Clause · Jonas van den Berg")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                DisclosureGroup("Licenses") {
                     Text(Self.mediaRemoteAdapterLicense)
-                        .font(.system(size: 10).monospaced())
+                        .font(.system(size: 9.5).monospaced())
                         .textSelection(.enabled)
                         .foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private static var versionString: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "Version \(v) (\(b)) · SwiftPM"
+    }
+
+    private static func bundledImage(_ name: String) -> Image? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        return Image(nsImage: image)
     }
 
     /// Reproduced per the BSD 3-Clause requirement that binary distributions
