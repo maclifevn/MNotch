@@ -111,6 +111,13 @@ final class AgentMonitorService {
         switch event.event {
         case "PreToolUse", "PermissionRequest":
             guard let requestID else { break }
+            // Tools with their own interactive UI (a question, etc.) can't be
+            // answered with Allow/Deny — hand them straight back to the terminal
+            // instead of showing a meaningless approval card on the notch.
+            guard Self.canApproveFromNotch(event.toolName) else {
+                server.respond(requestID, decision: "ask")
+                break
+            }
             // A session can emit a replacement request before the previous
             // relay has timed out. Never leave the superseded socket pending.
             if let previousID = session.request?.id, previousID != requestID {
@@ -320,6 +327,18 @@ final class AgentMonitorService {
               value.unicodeScalars.allSatisfy({ allowed.contains($0) })
         else { return nil }
         return value
+    }
+
+    // MARK: - Tool filtering
+
+    /// Tools that have their own interactive UI in the agent's terminal and so
+    /// can't be resolved with a notch Allow/Deny (answering the question / making
+    /// the choice happens in the terminal, not here).
+    private static let terminalOnlyTools: Set<String> = ["AskUserQuestion"]
+
+    static func canApproveFromNotch(_ toolName: String?) -> Bool {
+        guard let toolName else { return true }
+        return !terminalOnlyTools.contains(toolName)
     }
 
     // MARK: - Content extraction

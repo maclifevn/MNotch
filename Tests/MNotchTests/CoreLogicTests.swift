@@ -54,6 +54,15 @@ final class CoreLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testAskUserQuestionIsNotApprovableFromNotch() {
+        // Interactive-UI tools must never surface as a notch Allow/Deny card.
+        XCTAssertFalse(AgentMonitorService.canApproveFromNotch("AskUserQuestion"))
+        XCTAssertTrue(AgentMonitorService.canApproveFromNotch("Edit"))
+        XCTAssertTrue(AgentMonitorService.canApproveFromNotch("Bash"))
+        XCTAssertTrue(AgentMonitorService.canApproveFromNotch(nil))
+    }
+
+    @MainActor
     func testTerminalBundleIDMapsKnownProgramsForFrontmostCheck() {
         XCTAssertEqual(AgentMonitorService.terminalBundleID("iTerm.app"), "com.googlecode.iterm2")
         XCTAssertEqual(AgentMonitorService.terminalBundleID("Apple_Terminal"), "com.apple.Terminal")
