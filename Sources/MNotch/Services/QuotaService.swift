@@ -240,9 +240,9 @@ final class QuotaService {
     }
 
     private func configureClaudeCallbacksIfNeeded() {
-        guard claudeClient.onLimits == nil else { return }
-        claudeClient.onLimits = { [weak self] limits in
-            self?.ingestClaude(limits, updatedAt: .now, cached: false)
+        guard claudeClient.onWindows == nil else { return }
+        claudeClient.onWindows = { [weak self] windows in
+            self?.ingestClaudeWindows(windows)
         }
         claudeClient.onUnavailable = { [weak self] message in
             guard let self else { return }
@@ -253,6 +253,21 @@ final class QuotaService {
                 self.claudeQuota.state = .cached
             }
         }
+    }
+
+    /// Claude usage straight from the `claude` CLI (`claude -p /usage`) — the
+    /// session + weekly windows, no Keychain access involved.
+    func ingestClaudeWindows(_ windows: [QuotaWindow], updatedAt: Date = .now) {
+        guard !windows.isEmpty else { return }
+        claudeQuota = ProviderQuota(
+            provider: .claude,
+            state: .live,
+            windows: windows,
+            planName: nil,
+            creditsBalance: nil,
+            resetCredits: nil,
+            lastUpdated: updatedAt
+        )
     }
 
     private func applyCodex(_ snapshot: CodexQuotaSnapshot) {

@@ -70,45 +70,40 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertNil(AgentHookResponse.data(event: "PermissionRequest", decision: .ask))
     }
 
-    func testClaudeUsageEndpointResponseNormalizesWindows() throws {
-        let json = #"""
-        {"five_hour":{"utilization":48.0,"resets_at":"2026-03-02T11:00:00.521744+00:00"},
-         "seven_day":{"utilization":64.0,"resets_at":"2026-03-06T06:00:00.521764+00:00"},
-         "seven_day_opus":null,
-         "extra_usage":{"is_enabled":true,"monthly_limit":1000,"used_credits":0.0,"utilization":null}}
-        """#
-        let limits = try XCTUnwrap(
-            ClaudeUsageClient.parseUsage(try XCTUnwrap(json.data(using: .utf8)))
-        )
-        let windows = limits.normalizedWindows
-        XCTAssertEqual(windows.map(\.label), ["5h", "7d"])
-        XCTAssertEqual(windows[0].usedPercent, 48)
-        XCTAssertEqual(windows[1].usedPercent, 64)
+    func testClaudeCLIUsageParsesSessionAndWeeklyWindows() throws {
+        let output = """
+        You are currently using your subscription to power your Claude Code usage
+
+        Current session: 4% used · resets Jul 15 at 6:30pm (Asia/Saigon)
+        Current week (all models): 74% used · resets Jul 17 at 8pm (Asia/Saigon)
+        Current week (Fable): 57% used · resets Jul 17 at 8pm (Asia/Saigon)
+
+        What's contributing to your limits usage?
+        Last 24h · 540 requests · 3 sessions
+        """
+        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
+        XCTAssertEqual(windows.map(\.label), ["5h", "7d", "Fable"])
+        XCTAssertEqual(windows.map(\.id), ["claude-session", "claude-week", "claude-week-Fable"])
+        XCTAssertEqual(windows[0].usedPercent, 4)
+        XCTAssertEqual(windows[1].usedPercent, 74)
+        XCTAssertEqual(windows[2].usedPercent, 57)
+        XCTAssertEqual(windows[0].durationMinutes, 300)
+        XCTAssertEqual(windows[1].durationMinutes, 10_080)
         XCTAssertNotNil(windows[0].resetsAt)
     }
 
-    func testClaudeUsageParserRejectsEmptyResponse() throws {
-        let json = #"{"five_hour":null,"seven_day":null}"#
-        XCTAssertNil(ClaudeUsageClient.parseUsage(try XCTUnwrap(json.data(using: .utf8))))
+    func testClaudeCLIUsageIgnoresProseAndReturnsNilWhenNoBars() {
+        let output = """
+        Approximate, based on local sessions on this machine.
+        66% of your usage came from subagent-heavy sessions
+        Top subagents: workflow-subagent 11%
+        """
+        XCTAssertNil(ClaudeUsageClient.parse(output))
     }
 
-    func testClaudeCredentialsParseAccessTokenAndExpiry() throws {
-        let json = #"""
-        {"claudeAiOauth":{"accessToken":"sk-ant-oat01-abc","refreshToken":"sk-ant-ort01-xyz",
-          "expiresAt":1775000000000,"scopes":["user:inference","user:profile"],"subscriptionType":"max"}}
-        """#
-        let creds = try XCTUnwrap(
-            ClaudeUsageClient.parseCredentials(try XCTUnwrap(json.data(using: .utf8)))
-        )
-        XCTAssertEqual(creds.accessToken, "sk-ant-oat01-abc")
-        XCTAssertEqual(creds.expiresAt.timeIntervalSince1970, 1_775_000_000)
-        XCTAssertEqual(creds.scopes, ["user:inference", "user:profile"])
-    }
-
-    func testClaudeCredentialsRejectMcpOnlyBlob() throws {
-        // Some Claude Code installs store only mcpOAuth and no usable login.
-        let json = #"{"mcpOAuth":{"accessToken":"x"}}"#
-        XCTAssertNil(ClaudeUsageClient.parseCredentials(try XCTUnwrap(json.data(using: .utf8))))
+    func testClaudeCLIResetDateParsesDatedForm() {
+        let date = ClaudeUsageClient.parseCLIDate("resets Jul 17 at 8pm (Asia/Saigon)")
+        XCTAssertNotNil(date)
     }
 
     func testQuotaParserCountsBillableFieldsOnly() throws {
