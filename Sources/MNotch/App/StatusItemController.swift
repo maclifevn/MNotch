@@ -64,33 +64,32 @@ final class StatusItemController: NSObject {
 
             NSColor.black.setFill()
 
-            // Slim notch centered on the top edge (narrower + shorter than the
-            // display's rounded corners for a refined look).
+            // Notch centered on the top edge: ~5 wide, a touch taller.
             let notch = NSBezierPath()
-            notch.move(to: NSPoint(x: 7.05, y: 16.2))
-            notch.line(to: NSPoint(x: 10.95, y: 16.2))
-            notch.line(to: NSPoint(x: 10.8, y: 15.2))
+            notch.move(to: NSPoint(x: 6.5, y: 16.2))
+            notch.line(to: NSPoint(x: 11.5, y: 16.2))
+            notch.line(to: NSPoint(x: 11.32, y: 15.05))
             notch.curve(
-                to: NSPoint(x: 10.15, y: 14.8),
-                controlPoint1: NSPoint(x: 10.72, y: 14.95),
-                controlPoint2: NSPoint(x: 10.48, y: 14.8)
+                to: NSPoint(x: 10.6, y: 14.5),
+                controlPoint1: NSPoint(x: 11.22, y: 14.68),
+                controlPoint2: NSPoint(x: 10.95, y: 14.5)
             )
-            notch.line(to: NSPoint(x: 7.85, y: 14.8))
+            notch.line(to: NSPoint(x: 7.4, y: 14.5))
             notch.curve(
-                to: NSPoint(x: 7.2, y: 15.2),
-                controlPoint1: NSPoint(x: 7.52, y: 14.8),
-                controlPoint2: NSPoint(x: 7.28, y: 14.95)
+                to: NSPoint(x: 6.68, y: 15.05),
+                controlPoint1: NSPoint(x: 7.05, y: 14.5),
+                controlPoint2: NSPoint(x: 6.78, y: 14.68)
             )
             notch.close()
             notch.fill()
 
-            // Maclife mountain range (favicon-ml.svg), scaled to fill the frame
-            // down to the bottom edge so there's no hollow gap beneath it.
+            // Maclife mountain range (favicon-ml.svg), dropped so its base sits
+            // right on the frame's bottom edge — no hollow gap beneath it.
             func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
                 // SVG viewBox x∈[1.29,62.16], y∈[2.94,50.15] (top-down) → icon.
                 NSPoint(
-                    x: 3.4 + (x - 1.29) / 60.87 * 11.2,
-                    y: 3.1 + (50.15 - y) / 47.21 * 10.1
+                    x: 3.25 + (x - 1.29) / 60.87 * 11.5,
+                    y: 1.9 + (50.15 - y) / 47.21 * 11.3
                 )
             }
             let mark = NSBezierPath()
