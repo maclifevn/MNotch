@@ -28,6 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AppServices.shared.media.stop()
+        AppServices.shared.stopAll()
     }
 }

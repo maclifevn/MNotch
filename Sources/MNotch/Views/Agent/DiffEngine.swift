@@ -7,6 +7,7 @@ enum RequestDetail: Equatable {
     case multiEdit(path: String, edits: [EditPair])
     case write(path: String, content: String)
     case bash(command: String)
+    case patch(patch: String)
     case plan(markdown: String)
     case generic
 }
@@ -18,7 +19,7 @@ struct EditPair: Equatable {
 
 // MARK: - Line diff
 
-enum DiffKind { case equal, remove, add }
+enum DiffKind: Equatable { case equal, remove, add }
 
 struct DiffRow: Identifiable {
     let id = UUID()

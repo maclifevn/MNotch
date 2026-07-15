@@ -22,11 +22,14 @@ final class PowerSourceService {
 
     @ObservationIgnored private var lastOnAC: Bool?
     @ObservationIgnored private var firedLowWarning = false
+    @ObservationIgnored private var powerStateObserver: NSObjectProtocol?
+    @ObservationIgnored private var runLoopSource: CFRunLoopSource?
 
     func start() {
+        guard runLoopSource == nil else { return }
         readSources(fireEvents: false)
 
-        NotificationCenter.default.addObserver(
+        powerStateObserver = NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange,
             object: nil,
             queue: .main
@@ -48,6 +51,19 @@ final class PowerSourceService {
             Unmanaged.passUnretained(self).toOpaque()
         ).takeRetainedValue()
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        runLoopSource = source
+    }
+
+    func stop() {
+        if let powerStateObserver {
+            NotificationCenter.default.removeObserver(powerStateObserver)
+        }
+        powerStateObserver = nil
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .defaultMode)
+            CFRunLoopSourceInvalidate(runLoopSource)
+        }
+        runLoopSource = nil
     }
 
     private func readSources(fireEvents: Bool) {

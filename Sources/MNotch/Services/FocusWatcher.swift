@@ -29,6 +29,7 @@ final class FocusWatcher {
     }
 
     func start() {
+        guard timer == nil else { return }
         let timer = Timer(timeInterval: 4, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.poll() }
         }
@@ -36,6 +37,11 @@ final class FocusWatcher {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         poll()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
     }
 
     private func poll() {

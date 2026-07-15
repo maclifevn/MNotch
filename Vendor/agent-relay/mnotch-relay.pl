@@ -1,14 +1,14 @@
 #!/usr/bin/perl
 # MNotch agent hook relay.
 #
-# Installed as a Claude Code hook command. Reads the hook JSON from stdin,
+# Installed as a Claude Code or Codex hook command. Reads hook JSON from stdin,
 # enriches it with the terminal locator from the environment, and forwards it
 # to the MNotch agent server on 127.0.0.1. For blocking permission events it
 # waits for MNotch to send back a decision and prints that JSON as the hook
 # output; for all other events it fires and forgets.
 #
 # Degrades safely: if MNotch is not running (or replies slowly), it exits 0
-# with no output so Claude Code falls through to the normal terminal prompt.
+# with no output so the coding agent falls through to its normal prompt.
 
 use strict;
 use warnings;
@@ -18,6 +18,9 @@ use IO::Select;
 # --- read the hook payload -------------------------------------------------
 my $stdin = do { local $/; <STDIN> } // '';
 $stdin =~ s/\s+\z//;   # strip the trailing newline so it can't land mid-envelope
+my $agent_kind = $ARGV[0] // 'claude';
+my $term_program = $ENV{TERM_PROGRAM}
+    // ($agent_kind eq 'codex' ? 'codex' : undef);
 
 # --- MNotch connection details ---------------------------------------------
 my $home = $ENV{HOME} // '';
@@ -37,8 +40,8 @@ exit 0 unless $token ne '' && $port =~ /^\d+$/;
 # separately below. To keep it a single object, we splice fields into the
 # hook JSON string.
 my %extra = (
-    agent_kind   => 'claude',
-    term_program => $ENV{TERM_PROGRAM},
+    agent_kind   => $agent_kind,
+    term_program => $term_program,
     term_session => $ENV{TERM_SESSION_ID},
     iterm_session=> $ENV{ITERM_SESSION_ID},
     tmux         => $ENV{TMUX},
@@ -82,8 +85,12 @@ if ($select->can_read(55)) {
     }
 }
 close $sock;
-# Timed out with no answer → defer to the terminal prompt.
-print '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}';
+# Timed out with no answer. PreToolUse needs Claude's explicit `ask` output;
+# PermissionRequest accepts empty output in both Claude and Codex, preserving
+# the agent's built-in approval prompt.
+if ($stdin =~ /"hook_event_name"\s*:\s*"PreToolUse"/) {
+    print '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}';
+}
 exit 0;
 
 # --- helpers ---------------------------------------------------------------

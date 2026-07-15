@@ -15,6 +15,7 @@ final class AudioOutputService {
     var onVolumeChanged: ((Double, Bool) -> Void)?
 
     private var deviceID = AudioObjectID(kAudioObjectUnknown)
+    @ObservationIgnored private var started = false
 
     // 'vmvc' — virtual main volume (same selector AudioHardwareService used).
     private static let volumeSelector = AudioObjectPropertySelector(0x766D_7663)
@@ -50,17 +51,41 @@ final class AudioOutputService {
     private(set) var outputSymbol = "laptopcomputer"
 
     func start() {
+        guard !started else { return }
+        started = true
         volumeListener = { [weak self] _, _ in
             MainActor.assumeIsolated { self?.refresh() }
+        }
+        defaultDeviceListener = { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.followDefaultDevice() }
         }
         followDefaultDevice()
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject),
             &Self.defaultDeviceAddress,
-            .main
-        ) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.followDefaultDevice() }
+            .main,
+            defaultDeviceListener
+        )
+    }
+
+    func stop() {
+        guard started else { return }
+        started = false
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &Self.defaultDeviceAddress,
+            .main,
+            defaultDeviceListener
+        )
+        if deviceID != kAudioObjectUnknown {
+            AudioObjectRemovePropertyListenerBlock(
+                deviceID, &Self.volumeAddress, .main, volumeListener
+            )
+            AudioObjectRemovePropertyListenerBlock(
+                deviceID, &Self.muteAddress, .main, volumeListener
+            )
         }
+        deviceID = AudioObjectID(kAudioObjectUnknown)
     }
 
     private func followDefaultDevice() {
@@ -119,6 +144,8 @@ final class AudioOutputService {
     /// Kept as a stored reference so add/remove use the identical block.
     @ObservationIgnored
     private var volumeListener: AudioObjectPropertyListenerBlock = { _, _ in }
+    @ObservationIgnored
+    private var defaultDeviceListener: AudioObjectPropertyListenerBlock = { _, _ in }
 
     func refresh() {
         guard deviceID != kAudioObjectUnknown else { return }

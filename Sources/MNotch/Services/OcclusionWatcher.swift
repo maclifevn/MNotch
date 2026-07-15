@@ -14,9 +14,11 @@ final class OcclusionWatcher {
     @ObservationIgnored var onHideChanged: ((Bool) -> Void)?
 
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var activationObserver: NSObjectProtocol?
 
     func start() {
-        NSWorkspace.shared.notificationCenter.addObserver(
+        guard timer == nil else { return }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
@@ -31,6 +33,15 @@ final class OcclusionWatcher {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         evaluate()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+        activationObserver = nil
     }
 
     private func evaluate() {

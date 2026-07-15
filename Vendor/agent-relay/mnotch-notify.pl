@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # MNotch generic agent notifier.
 #
-# For agents without a blocking permission hook (Codex, Gemini CLI, …). Point
+# For agents without a blocking permission hook (Gemini CLI, etc.). Point
 # their notify command at this script. It forwards a lightweight status event
 # to MNotch so the session shows up in the notch — no remote approval, just
 # awareness + jump.

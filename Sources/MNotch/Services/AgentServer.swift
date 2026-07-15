@@ -1,6 +1,44 @@
 import Foundation
 import Network
 
+enum AgentDecision: String {
+    case allow, deny, ask
+
+    static func normalized(_ value: String) -> AgentDecision {
+        AgentDecision(rawValue: value) ?? .ask
+    }
+}
+
+enum AgentHookResponse {
+    static func data(
+        event: String,
+        decision: AgentDecision,
+        reason: String = ""
+    ) -> Data? {
+        let payload: [String: Any]
+        if event == "PermissionRequest" {
+            // PermissionRequest has no "ask" representation. No output lets
+            // Claude/Codex keep their native approval prompt as the fallback.
+            guard decision != .ask else { return nil }
+            payload = [
+                "hookSpecificOutput": [
+                    "hookEventName": "PermissionRequest",
+                    "decision": ["behavior": decision == .deny ? "deny" : "allow"],
+                ],
+            ]
+        } else {
+            payload = [
+                "hookSpecificOutput": [
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": decision.rawValue,
+                    "permissionDecisionReason": reason,
+                ],
+            ]
+        }
+        return try? JSONSerialization.data(withJSONObject: payload)
+    }
+}
+
 /// One event received from an agent hook relay.
 struct AgentEvent: Decodable {
     /// hook event name: PreToolUse, PermissionRequest, Notification, Stop,
@@ -16,6 +54,9 @@ struct AgentEvent: Decodable {
     let notification: String?     // Notification matcher: permission_prompt / idle_prompt …
     let agentKind: String?        // "claude" | "codex" | "gemini" | …
     let title: String?
+    /// Claude Code status-line quota payload (only on event == "quota").
+    let rateLimits: ClaudeRateLimits?
+    let quotaUpdatedAt: Double?
     // Terminal locator (for jump-to-terminal).
     let termProgram: String?
     let termSession: String?
@@ -30,7 +71,10 @@ struct AgentEvent: Decodable {
         case toolName = "tool_name"
         case toolInputJSON = "tool_input"
         case lastMessage = "last_message"
+        case lastAssistantMessage = "last_assistant_message"
         case agentKind = "agent_kind"
+        case rateLimits = "rate_limits"
+        case quotaUpdatedAt = "quota_updated_at"
         case termProgram = "term_program"
         case termSession = "term_session"
         case itermSession = "iterm_session"
@@ -44,10 +88,13 @@ struct AgentEvent: Decodable {
         cwd = try? c.decode(String.self, forKey: .cwd)
         transcriptPath = try? c.decode(String.self, forKey: .transcriptPath)
         toolName = try? c.decode(String.self, forKey: .toolName)
-        lastMessage = try? c.decode(String.self, forKey: .lastMessage)
+        lastMessage = (try? c.decode(String.self, forKey: .lastMessage))
+            ?? (try? c.decode(String.self, forKey: .lastAssistantMessage))
         notification = try? c.decode(String.self, forKey: .notification)
         agentKind = try? c.decode(String.self, forKey: .agentKind)
         title = try? c.decode(String.self, forKey: .title)
+        rateLimits = try? c.decode(ClaudeRateLimits.self, forKey: .rateLimits)
+        quotaUpdatedAt = try? c.decode(Double.self, forKey: .quotaUpdatedAt)
         termProgram = try? c.decode(String.self, forKey: .termProgram)
         termSession = try? c.decode(String.self, forKey: .termSession)
         itermSession = try? c.decode(String.self, forKey: .itermSession)
@@ -112,7 +159,13 @@ final class AgentServer {
     private(set) var port: UInt16 = 0
     private var listener: NWListener?
     private var token = ""
-    private var pending: [Int: (connection: NWConnection, event: String)] = [:]
+    private struct PendingConnection {
+        let connection: NWConnection
+        let event: String
+        let timeout: Task<Void, Never>
+    }
+
+    private var pending: [Int: PendingConnection] = [:]
     private var nextID = 1
 
     static var supportDirectory: URL {
@@ -120,6 +173,9 @@ final class AgentServer {
             for: .applicationSupportDirectory, in: .userDomainMask
         )[0].appending(path: "MNotch")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: base.path
+        )
         return base
     }
 
@@ -128,6 +184,7 @@ final class AgentServer {
 
     func start() {
         guard listener == nil else { return }
+        try? FileManager.default.removeItem(at: Self.portFile)
         token = Self.loadOrCreateToken()
 
         do {
@@ -149,14 +206,40 @@ final class AgentServer {
         }
     }
 
+    func stop() {
+        listener?.cancel()
+        listener = nil
+        port = 0
+        try? FileManager.default.removeItem(at: Self.portFile)
+        for entry in pending.values {
+            entry.timeout.cancel()
+            entry.connection.cancel()
+        }
+        pending.removeAll()
+    }
+
     private func listenerBecameReady() {
         guard let p = listener?.port?.rawValue else { return }
         port = p
         try? String(p).write(to: Self.portFile, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: Self.portFile.path
+        )
         mnotchLog.notice("AgentServer ready on 127.0.0.1:\(p)")
     }
 
     private func accept(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let connection else { return }
+            switch state {
+            case .failed, .cancelled:
+                Task { @MainActor in
+                    self?.removePending(for: connection)
+                }
+            default:
+                break
+            }
+        }
         connection.start(queue: .main)
         receiveLine(on: connection, buffer: Data())
     }
@@ -179,7 +262,9 @@ final class AgentServer {
                 connection.cancel()
                 return
             }
-            self?.receiveLine(on: connection, buffer: buffer)
+            Task { @MainActor in
+                self?.receiveLine(on: connection, buffer: buffer)
+            }
         }
     }
 
@@ -202,7 +287,16 @@ final class AgentServer {
         if event.isPermissionRequest {
             let id = nextID
             nextID += 1
-            pending[id] = (connection, event.event)
+            let timeout = Task { [weak self, weak connection] in
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled, let connection else { return }
+                self?.expire(id, connection: connection)
+            }
+            pending[id] = PendingConnection(
+                connection: connection,
+                event: event.event,
+                timeout: timeout
+            )
             onEvent?(event, id)
         } else {
             onEvent?(event, nil)
@@ -215,29 +309,15 @@ final class AgentServer {
     /// PreToolUse and PermissionRequest expect different output shapes.
     func respond(_ id: Int, decision: String, reason: String = "") {
         guard let entry = pending.removeValue(forKey: id) else { return }
+        entry.timeout.cancel()
         let connection = entry.connection
+        let safeDecision = AgentDecision.normalized(decision)
 
-        let payload: [String: Any]
-        if entry.event == "PermissionRequest" {
-            // behavior must be allow/deny; "ask" degrades to leaving the dialog.
-            let behavior = decision == "deny" ? "deny" : "allow"
-            payload = [
-                "hookSpecificOutput": [
-                    "hookEventName": "PermissionRequest",
-                    "decision": ["behavior": behavior],
-                ],
-            ]
-        } else {
-            payload = [
-                "hookSpecificOutput": [
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": decision,
-                    "permissionDecisionReason": reason,
-                ],
-            ]
-        }
-
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+        guard let data = AgentHookResponse.data(
+            event: entry.event,
+            decision: safeDecision,
+            reason: reason
+        ) else {
             connection.cancel()
             return
         }
@@ -251,13 +331,35 @@ final class AgentServer {
     /// Drop a pending request without answering (relay will time out to the
     /// terminal). Used when a request is superseded or the session ends.
     func drop(_ id: Int) {
-        pending.removeValue(forKey: id)?.connection.cancel()
+        guard let entry = pending.removeValue(forKey: id) else { return }
+        entry.timeout.cancel()
+        entry.connection.cancel()
+    }
+
+    private func expire(_ id: Int, connection: NWConnection) {
+        guard let entry = pending[id], entry.connection === connection else { return }
+        pending.removeValue(forKey: id)
+        connection.cancel()
+    }
+
+    private func removePending(for connection: NWConnection) {
+        let ids = pending.compactMap { id, entry in
+            entry.connection === connection ? id : nil
+        }
+        for id in ids {
+            pending.removeValue(forKey: id)?.timeout.cancel()
+        }
     }
 
     private static func loadOrCreateToken() -> String {
-        if let existing = try? String(contentsOf: tokenFile, encoding: .utf8),
-           !existing.isEmpty {
-            return existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = try? String(contentsOf: tokenFile, encoding: .utf8) {
+            let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600], ofItemAtPath: tokenFile.path
+                )
+                return trimmed
+            }
         }
         let fresh = UUID().uuidString + UUID().uuidString
         try? fresh.write(to: tokenFile, atomically: true, encoding: .utf8)

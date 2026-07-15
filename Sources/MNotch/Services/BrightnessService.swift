@@ -11,6 +11,7 @@ final class BrightnessService {
 
     @ObservationIgnored private var getFn: GetFn?
     @ObservationIgnored private var setFn: SetFn?
+    @ObservationIgnored private var frameworkHandle: UnsafeMutableRawPointer?
 
     private(set) var brightness: Double = 0.5
 
@@ -41,6 +42,7 @@ final class BrightnessService {
     }
 
     func start() {
+        guard frameworkHandle == nil else { return }
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
             RTLD_LAZY
@@ -48,6 +50,7 @@ final class BrightnessService {
             mnotchLog.notice("DisplayServices unavailable")
             return
         }
+        frameworkHandle = handle
         if let sym = dlsym(handle, "DisplayServicesGetBrightness") {
             getFn = unsafeBitCast(sym, to: GetFn.self)
         }
@@ -56,6 +59,18 @@ final class BrightnessService {
         }
         refresh()
         mnotchLog.notice("brightness control available=\(self.available) value=\(self.brightness)")
+    }
+
+    func stop() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        lastPolled = nil
+        getFn = nil
+        setFn = nil
+        if let frameworkHandle {
+            dlclose(frameworkHandle)
+            self.frameworkHandle = nil
+        }
     }
 
     @discardableResult

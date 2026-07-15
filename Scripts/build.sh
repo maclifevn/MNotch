@@ -45,7 +45,12 @@ cp "$ADAPTER_DIR/build/MediaRemoteAdapterTestClient" "$APP/Contents/Resources/"
 # Agent hook relay + generic notifier (installed at runtime)
 cp "$ROOT/Vendor/agent-relay/mnotch-relay.pl" "$APP/Contents/Resources/"
 cp "$ROOT/Vendor/agent-relay/mnotch-notify.pl" "$APP/Contents/Resources/"
+cp "$ROOT/Vendor/agent-relay/mnotch-claude-statusline.pl" "$APP/Contents/Resources/"
 
-codesign --force --deep -s "$SIGN_ID" "$APP"
+# Sign nested Mach-O code from the inside out. Avoid `--deep`: it can mask an
+# incorrectly assembled bundle and is not suitable for distribution signing.
+codesign --force -s "$SIGN_ID" "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+codesign --force -s "$SIGN_ID" "$APP/Contents/Resources/MediaRemoteAdapterTestClient"
+codesign --force -s "$SIGN_ID" "$APP"
 
 echo "Built $APP (version $VERSION build $BUILD_NUM, signed: $SIGN_ID)"

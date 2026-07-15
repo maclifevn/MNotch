@@ -2,6 +2,14 @@ import AppKit
 import IOBluetooth
 import IOKit
 
+/// IOBluetooth's notification token is an Objective-C handle with no Swift
+/// Sendable annotation. Registration/unregistration are thread-safe; the box
+/// makes the explicit ownership transfer to MainActor visible to Swift 6.
+private final class BluetoothNotificationBox: @unchecked Sendable {
+    let value: IOBluetoothUserNotification
+    init(_ value: IOBluetoothUserNotification) { self.value = value }
+}
+
 /// Pops a notification when a Bluetooth device connects, with battery level
 /// scraped from the IORegistry when the device reports one (AirPods, Magic
 /// peripherals). Registry keys are private-ish — everything degrades to nil.
@@ -23,9 +31,13 @@ final class BluetoothWatcher: NSObject {
         connected.values.map { ($0.name, $0.symbol) }.sorted { $0.name < $1.name }
     }
     private var warnedLow: Set<String> = []
+    private var connectNotification: IOBluetoothUserNotification?
+    private var disconnectNotifications: [String: BluetoothNotificationBox] = [:]
+    private var batteryTimer: Timer?
 
     func start() {
-        IOBluetoothDevice.register(
+        guard batteryTimer == nil else { return }
+        connectNotification = IOBluetoothDevice.register(
             forConnectNotifications: self,
             selector: #selector(deviceConnected(_:device:))
         )
@@ -37,6 +49,19 @@ final class BluetoothWatcher: NSObject {
         }
         timer.tolerance = 30
         RunLoop.main.add(timer, forMode: .common)
+        batteryTimer = timer
+    }
+
+    func stop() {
+        batteryTimer?.invalidate()
+        batteryTimer = nil
+        connectNotification?.unregister()
+        connectNotification = nil
+        disconnectNotifications.values.forEach { $0.value.unregister() }
+        disconnectNotifications.removeAll()
+        connected.removeAll()
+        warnedLow.removeAll()
+        recentPops.removeAll()
     }
 
     private func recheckBatteries() {
@@ -82,10 +107,10 @@ final class BluetoothWatcher: NSObject {
 
         let symbol = Self.symbol(forName: name, classOfDevice: device.classOfDevice)
         let address = device.addressString
-        device.register(
+        let disconnectNotification = device.register(
             forDisconnectNotification: self,
             selector: #selector(deviceDisconnected(_:device:))
-        )
+        ).map(BluetoothNotificationBox.init)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -93,6 +118,10 @@ final class BluetoothWatcher: NSObject {
             self.connected[key] = Connected(
                 name: name, symbol: symbol, address: address
             )
+            if let disconnectNotification {
+                self.disconnectNotifications[key]?.value.unregister()
+                self.disconnectNotifications[key] = disconnectNotification
+            }
 
             // One pop per device per 2 minutes, however often it reconnects.
             if let last = self.recentPops[key], Date().timeIntervalSince(last) < 120 {
@@ -120,6 +149,7 @@ final class BluetoothWatcher: NSObject {
         Task { @MainActor [weak self] in
             self?.connected.removeValue(forKey: key)
             self?.warnedLow.remove(key)
+            self?.disconnectNotifications.removeValue(forKey: key)
         }
     }
 

@@ -22,11 +22,12 @@ struct NotchBodyView: View {
     private let services = AppServices.shared
     @Namespace private var notchSpace
 
-    /// Agent request card + confirmation pill use an opaque shadow float
-    /// instead of the behind-window blur halo (which bleeds white).
-    private var isAgentSurface: Bool {
+    /// Every full panel uses the same wallpaper-independent dark float.
+    /// Behind-window blur samples bright desktop content and creates a white
+    /// halo, so it must never be used as the expanded surface shadow.
+    private var usesFloatingSurfaceShadow: Bool {
         switch viewModel.status {
-        case .expanded(.agent), .pop(.agentConfirm): true
+        case .expanded, .pop(.agentConfirm): true
         default: false
         }
     }
@@ -45,30 +46,12 @@ struct NotchBodyView: View {
             .background(.black, in: shape)
             .clipShape(shape)
             .background {
-                if isAgentSurface {
-                    // Opaque, wallpaper-independent float: the black notch shape
-                    // casting a soft dark shadow. No behind-window sampling → no
-                    // white halo on any desktop (matches the reference cards).
+                if usesFloatingSurfaceShadow,
+                   SettingsStore.shared.panelShadow {
+                    // One shell for Music, Shelf, Calendar and Agent: the opaque
+                    // notch casts a dark shadow without sampling the wallpaper.
                     shape.fill(.black)
                         .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 11)
-                } else if viewModel.status.isExpanded, SettingsStore.shared.progressiveBlur {
-                    // Progressive blur: a soft behind-window halo extending past
-                    // the panel's bottom edge onto the desktop. Applied AFTER the
-                    // clip so it overflows freely and never tints the black fill.
-                    VisualEffectView()
-                        .frame(width: size.width + 60, height: size.height + 80)
-                        .mask(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .black, location: 0),
-                                    .init(color: .black.opacity(0.4), location: 0.6),
-                                    .init(color: .clear, location: 1),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .transition(.opacity)
                 }
             }
             .overlay {

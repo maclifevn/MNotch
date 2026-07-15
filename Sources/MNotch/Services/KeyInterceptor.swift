@@ -26,6 +26,7 @@ final class KeyInterceptor {
     var handler: ((SystemKey, Bool, Bool, NSEvent.ModifierFlags) -> Bool)?
 
     private var tap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
 
     func start() {
         guard tap == nil else { return }
@@ -62,9 +63,24 @@ final class KeyInterceptor {
         self.tap = tap
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        runLoopSource = source
         CGEvent.tapEnable(tap: tap, enable: true)
         tapActive = true
         mnotchLog.notice("event tap active")
+    }
+
+    func stop() {
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            CFRunLoopSourceInvalidate(runLoopSource)
+        }
+        runLoopSource = nil
+        tap = nil
+        tapActive = false
     }
 
     fileprivate func handle(event: CGEvent, type: CGEventType) -> Unmanaged<CGEvent>? {

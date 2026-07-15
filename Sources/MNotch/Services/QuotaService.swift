@@ -1,13 +1,139 @@
 import Foundation
 import Observation
 
-/// Best-effort Claude usage estimate. Anthropic doesn't expose remaining plan
-/// limits, so this sums token usage from ~/.claude transcripts over a rolling
-/// 5-hour window (the same signal ccusage reads) and reports it against a
-/// configurable ceiling. Clearly an estimate, not an official number.
+struct QuotaUsageSample: Sendable {
+    let date: Date
+    let tokens: Int
+}
+
+/// Pure JSON extraction kept separate so transcript parsing can be tested
+/// without constructing the app service.
+enum QuotaUsageParser {
+    static func fields(from data: Data) -> (timestamp: String?, tokens: Int)? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = obj["message"] as? [String: Any],
+              let usage = message["usage"] as? [String: Any]
+        else { return nil }
+
+        let tokens = (usage["input_tokens"] as? Int ?? 0)
+            + (usage["output_tokens"] as? Int ?? 0)
+            + (usage["cache_creation_input_tokens"] as? Int ?? 0)
+        return (obj["timestamp"] as? String, tokens)
+    }
+}
+
+/// Incremental transcript reader. Each refresh only consumes bytes appended
+/// since the previous scan and keeps timestamped token samples for the rolling
+/// window, avoiding repeated full-file reads as transcripts grow.
+private actor QuotaScanner {
+    private struct FileState {
+        var offset: UInt64 = 0
+        var remainder = Data()
+        var samples: [QuotaUsageSample] = []
+    }
+
+    private var files: [URL: FileState] = [:]
+    private let fractionalISO: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private let plainISO = ISO8601DateFormatter()
+
+    func total(in directory: URL, since cutoff: Date) -> Int {
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var seen = Set<URL>()
+        var total = 0
+        for case let url as URL in walker where url.pathExtension == "jsonl" {
+            if Task.isCancelled { return total }
+            seen.insert(url)
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .fileSizeKey]
+            ) else { continue }
+
+            let modified = values.contentModificationDate ?? .distantPast
+            guard modified >= cutoff else {
+                files.removeValue(forKey: url)
+                continue
+            }
+
+            var state = files[url] ?? FileState()
+            let size = UInt64(max(values.fileSize ?? 0, 0))
+            if size < state.offset {
+                // Rotation or truncation: rebuild this file's cache.
+                state = FileState()
+            }
+            if size > state.offset {
+                readAppendedBytes(from: url, fallbackDate: modified, into: &state)
+            }
+            state.samples.removeAll { $0.date < cutoff }
+            total += state.samples.reduce(0) { $0 + $1.tokens }
+            files[url] = state
+        }
+
+        files = files.filter { seen.contains($0.key) }
+        return total
+    }
+
+    private func readAppendedBytes(
+        from url: URL,
+        fallbackDate: Date,
+        into state: inout FileState
+    ) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: state.offset)
+            guard let chunk = try handle.readToEnd(), !chunk.isEmpty else { return }
+            state.offset += UInt64(chunk.count)
+
+            var data = state.remainder
+            data.append(chunk)
+            var lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
+            if data.last == 0x0A {
+                state.remainder = Data()
+            } else if let partial = lines.popLast() {
+                state.remainder = Data(partial)
+            }
+
+            for line in lines where !line.isEmpty {
+                guard let fields = QuotaUsageParser.fields(from: Data(line)) else { continue }
+                let date = fields.timestamp.flatMap {
+                    fractionalISO.date(from: $0) ?? plainISO.date(from: $0)
+                } ?? fallbackDate
+                state.samples.append(QuotaUsageSample(date: date, tokens: fields.tokens))
+            }
+        } catch {
+            return
+        }
+    }
+}
+
+/// Unified Codex + Claude quota service.
+///
+/// Codex comes from the official App Server rate-limit API. Claude arrives
+/// through Claude Code's official status-line JSON. The transcript scanner is
+/// retained only as a local activity counter; it is never presented as an
+/// authoritative plan percentage.
 @MainActor
 @Observable
 final class QuotaService {
+    private(set) var codexQuota = ProviderQuota.loading(.codex)
+    private(set) var claudeQuota = ProviderQuota(
+        provider: .claude,
+        state: .waiting("Run a Claude prompt"),
+        windows: [],
+        planName: nil,
+        creditsBalance: nil,
+        resetCredits: nil,
+        lastUpdated: nil
+    )
     private(set) var tokensInWindow = 0
     private(set) var lastUpdated = Date.distantPast
 
@@ -17,15 +143,28 @@ final class QuotaService {
     private static let window: TimeInterval = 5 * 3600
 
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private let scanner = QuotaScanner()
+    @ObservationIgnored private let codexClient = CodexQuotaClient()
+    @ObservationIgnored private var codexCallbacksConfigured = false
 
     private var projectsDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".claude/projects")
     }
 
+    private var claudeCacheURL: URL {
+        AgentServer.supportDirectory.appending(path: "claude-quota.json")
+    }
+
+    var providers: [ProviderQuota] { [codexQuota, claudeQuota] }
+
     func start() {
+        guard timer == nil else { return }
+        configureCodexCallbacksIfNeeded()
+        loadClaudeCache()
+        codexClient.start()
         refresh()
-        // Cheap enough every few minutes; transcripts are appended live.
         let timer = Timer(timeInterval: 180, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
@@ -34,64 +173,107 @@ final class QuotaService {
         self.timer = timer
     }
 
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        codexClient.stop()
+    }
+
     var fraction: Double {
         guard windowLimit > 0 else { return 0 }
         return min(Double(tokensInWindow) / Double(windowLimit), 1)
     }
 
     func refresh() {
+        codexClient.refresh()
+        guard refreshTask == nil else { return }
         let cutoff = Date().addingTimeInterval(-Self.window)
-        Task.detached(priority: .utility) { [projectsDir] in
-            let total = Self.sumTokens(in: projectsDir, since: cutoff)
-            await MainActor.run { [weak self] in
-                self?.tokensInWindow = total
-                self?.lastUpdated = Date()
+        let directory = projectsDir
+        refreshTask = Task { [weak self, scanner] in
+            let total = await scanner.total(in: directory, since: cutoff)
+            guard !Task.isCancelled, let self else { return }
+            self.tokensInWindow = total
+            self.lastUpdated = Date()
+            self.refreshTask = nil
+        }
+    }
+
+    func ingestClaude(
+        _ rateLimits: ClaudeRateLimits,
+        updatedAt: Date = .now,
+        cached: Bool = false
+    ) {
+        let windows = rateLimits.normalizedWindows
+        guard !windows.isEmpty else { return }
+        claudeQuota = ProviderQuota(
+            provider: .claude,
+            state: cached ? .cached : .live,
+            windows: windows,
+            planName: nil,
+            creditsBalance: nil,
+            resetCredits: nil,
+            lastUpdated: updatedAt
+        )
+    }
+
+    private func configureCodexCallbacksIfNeeded() {
+        guard !codexCallbacksConfigured else { return }
+        codexCallbacksConfigured = true
+        codexClient.onSnapshot = { [weak self] snapshot in
+            self?.applyCodex(snapshot)
+        }
+        codexClient.onUnavailable = { [weak self] message in
+            guard let self else { return }
+            if self.codexQuota.windows.isEmpty {
+                self.codexQuota.state = .unavailable(message)
+            } else {
+                self.codexQuota.state = .cached
             }
         }
     }
 
-    /// Sum input+output+cache tokens from `usage` objects in every transcript
-    /// line whose timestamp is within the window. Parsing is defensive: any
-    /// malformed line is skipped.
-    private nonisolated static func sumTokens(in dir: URL, since cutoff: Date) -> Int {
-        let fm = FileManager.default
-        guard let walker = fm.enumerator(
-            at: dir,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else { return 0 }
+    private func applyCodex(_ snapshot: CodexQuotaSnapshot) {
+        let windows = snapshot.normalizedWindows
+        guard !windows.isEmpty else {
+            codexQuota.state = .unavailable("No subscription quota")
+            return
+        }
+        codexQuota = ProviderQuota(
+            provider: .codex,
+            state: .live,
+            windows: windows,
+            planName: snapshot.planType.map(Self.displayPlan),
+            creditsBalance: snapshot.creditsBalance,
+            resetCredits: snapshot.resetCredits,
+            lastUpdated: .now
+        )
+    }
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoPlain = ISO8601DateFormatter()
+    private func loadClaudeCache() {
+        struct Cache: Decodable {
+            let rateLimits: ClaudeRateLimits
+            let updatedAt: Double?
 
-        var total = 0
-        for case let url as URL in walker where url.pathExtension == "jsonl" {
-            // Skip files untouched since the window opened.
-            if let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                .contentModificationDate, modified < cutoff {
-                continue
-            }
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            for line in content.split(separator: "\n") {
-                guard let data = line.data(using: .utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                else { continue }
-
-                if let ts = obj["timestamp"] as? String {
-                    let date = iso.date(from: ts) ?? isoPlain.date(from: ts)
-                    if let date, date < cutoff { continue }
-                }
-                guard let message = obj["message"] as? [String: Any],
-                      let usage = message["usage"] as? [String: Any]
-                else { continue }
-                // input + output + cache-creation only; cache reads are cheap
-                // re-reads that dominate the raw sum and misrepresent usage.
-                total += (usage["input_tokens"] as? Int ?? 0)
-                total += (usage["output_tokens"] as? Int ?? 0)
-                total += (usage["cache_creation_input_tokens"] as? Int ?? 0)
+            enum CodingKeys: String, CodingKey {
+                case rateLimits = "rate_limits"
+                case updatedAt = "quota_updated_at"
             }
         }
-        return total
+        guard let data = try? Data(contentsOf: claudeCacheURL),
+              let cache = try? JSONDecoder().decode(Cache.self, from: data)
+        else { return }
+        ingestClaude(
+            cache.rateLimits,
+            updatedAt: cache.updatedAt.map(Date.init(timeIntervalSince1970:)) ?? .now,
+            cached: true
+        )
+    }
+
+    private static func displayPlan(_ raw: String) -> String {
+        raw.split(separator: "_")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 }

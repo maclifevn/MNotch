@@ -48,7 +48,7 @@ struct AgentRequestCard: View {
     private var header: some View {
         HStack(spacing: 7) {
             Circle().fill(.orange).frame(width: 6, height: 6)
-            Text("Permission Request")
+            Text("\(session.kind.capitalized) Permission")
                 .font(.system(size: 11, weight: .semibold))
                 .textCase(.uppercase)
                 .tracking(0.4)
@@ -134,6 +134,8 @@ struct AgentRequestCard: View {
             ToolStyle(glyph: "square.and.pencil", verb: "Write", tint: .orange, path: path)
         case .bash:
             ToolStyle(glyph: "terminal.fill", verb: "Run", tint: .yellow, path: nil)
+        case .patch:
+            ToolStyle(glyph: "doc.badge.gearshape", verb: "Patch", tint: .orange, path: nil)
         case .plan:
             ToolStyle(glyph: "list.bullet.clipboard", verb: "Plan", tint: .blue, path: nil)
         case .generic:

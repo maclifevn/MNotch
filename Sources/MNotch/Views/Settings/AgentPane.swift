@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 
 /// Settings → Agents: monitor AI coding agents from the notch. Installing the
-/// hooks writes MNotch's relay into ~/.claude/settings.json (reversible).
+/// hooks writes MNotch's relay into each agent's user config (reversible).
 struct AgentPane: View {
     @Bindable var settings = SettingsStore.shared
-    @State private var hooksInstalled = ClaudeHookInstaller.isInstalled
+    @State private var claudeHooksInstalled = ClaudeHookInstaller.isInstalled
+    @State private var claudeQuotaBridgeInstalled = ClaudeHookInstaller.isQuotaBridgeInstalled
+    @State private var codexHooksInstalled = CodexHookInstaller.isInstalled
     @State private var errorMessage: String?
 
     var body: some View {
@@ -21,19 +23,28 @@ struct AgentPane: View {
 
             Section("Claude Code") {
                 LabeledContent("Hooks") {
-                    Text(hooksInstalled ? "Installed" : "Not installed")
-                        .foregroundStyle(hooksInstalled ? .green : .secondary)
+                    Text(claudeHooksInstalled ? "Installed" : "Not installed")
+                        .foregroundStyle(claudeHooksInstalled ? .green : .secondary)
                 }
-                if hooksInstalled {
+                LabeledContent("Quota bridge") {
+                    Text(claudeQuotaBridgeInstalled ? "Installed" : "Not installed")
+                        .foregroundStyle(claudeQuotaBridgeInstalled ? .green : .secondary)
+                }
+                if claudeHooksInstalled {
                     Button("Uninstall Hooks", role: .destructive) {
                         run { try ClaudeHookInstaller.uninstall() }
+                    }
+                    if !claudeQuotaBridgeInstalled {
+                        Button("Repair Quota Bridge") {
+                            run { try ClaudeHookInstaller.installQuotaBridge() }
+                        }
                     }
                 } else {
                     Button("Install Hooks") {
                         run { try ClaudeHookInstaller.install() }
                     }
                 }
-                Text("Adds MNotch's relay to ~/.claude/settings.json. Approve/reject permission requests from the notch; if MNotch isn't running, Claude Code falls back to the terminal prompt.")
+                Text("Adds MNotch's relay and a quota status-line bridge to ~/.claude/settings.json. Existing status-line output is preserved and restored on uninstall.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 if let errorMessage {
@@ -41,6 +52,25 @@ struct AgentPane: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+            }
+
+            Section("Codex") {
+                LabeledContent("Approval hooks") {
+                    Text(codexHooksInstalled ? "Installed" : "Not installed")
+                        .foregroundStyle(codexHooksInstalled ? .green : .secondary)
+                }
+                if codexHooksInstalled {
+                    Button("Uninstall Codex Hooks", role: .destructive) {
+                        run { try CodexHookInstaller.uninstall() }
+                    }
+                } else {
+                    Button("Install Codex Hooks") {
+                        run { try CodexHookInstaller.install() }
+                    }
+                }
+                Text("Adds PermissionRequest hooks to ~/.codex/hooks.json. After installing or changing them, open /hooks in Codex once and trust the MNotch command. Codex keeps its built-in approval prompt if MNotch is unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             Section("Behaviour") {
@@ -58,21 +88,32 @@ struct AgentPane: View {
                 ) { "\(Int($0)) s" }
             }
 
-            Section("Usage (estimate)") {
+            Section("Live quota") {
                 let quota = AppServices.shared.quota
-                LabeledContent("Last 5 hours") {
-                    Text("\(quota.tokensInWindow / 1000)K tokens")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                LabeledContent("Codex") {
+                    Text(quotaSummary(quota.codexQuota))
+                        .foregroundStyle(
+                            quota.codexQuota.windows.isEmpty
+                                ? Color(nsColor: .secondaryLabelColor)
+                                : Color.green
+                        )
                 }
-                ProgressView(value: quota.fraction)
-                Text("Summed from ~/.claude transcripts. Anthropic doesn't publish remaining limits, so this is an estimate against a configurable ceiling.")
+                LabeledContent("Claude") {
+                    Text(quotaSummary(quota.claudeQuota))
+                        .foregroundStyle(
+                            quota.claudeQuota.windows.isEmpty
+                                ? Color(nsColor: .secondaryLabelColor)
+                                : Color.green
+                        )
+                }
+                Button("Refresh Now") { quota.refresh() }
+                Text("Codex uses the official App Server. Claude's official 5-hour and 7-day percentages appear after Claude Code completes a response.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
 
-            Section("Other agents (Codex, Gemini, …)") {
-                Text("These tools don't expose a blocking permission hook, so they can only send status notifications (not remote approval). Point their notify command at:")
+            Section("Other agents (Gemini, …)") {
+                Text("Agents without a blocking permission hook can still send status notifications. Point their notify command at:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("/usr/bin/perl \(notifyPath)")
@@ -83,8 +124,11 @@ struct AgentPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            hooksInstalled = ClaudeHookInstaller.isInstalled
+            refreshInstallState()
             ClaudeHookInstaller.ensureNotifyHelper()
+        }
+        .onChange(of: settings.agentEnabled) { _, enabled in
+            AppServices.shared.setAgentMonitoringEnabled(enabled)
         }
     }
 
@@ -99,6 +143,23 @@ struct AgentPane: View {
         } catch {
             errorMessage = error.localizedDescription
         }
-        hooksInstalled = ClaudeHookInstaller.isInstalled
+        refreshInstallState()
+    }
+
+    private func refreshInstallState() {
+        claudeHooksInstalled = ClaudeHookInstaller.isInstalled
+        claudeQuotaBridgeInstalled = ClaudeHookInstaller.isQuotaBridgeInstalled
+        codexHooksInstalled = CodexHookInstaller.isInstalled
+    }
+
+    private func quotaSummary(_ provider: ProviderQuota) -> String {
+        if let primary = provider.primaryWindow {
+            return "\(Int(primary.remainingPercent.rounded()))% left"
+        }
+        switch provider.state {
+        case .loading: return "Connecting…"
+        case .waiting(let message), .unavailable(let message): return message
+        case .live, .cached: return "Unavailable"
+        }
     }
 }

@@ -19,6 +19,8 @@ struct AgentPreview: View {
             codeBox(content, maxHeight: 200, wrap: false)
         case .bash(let command):
             codeBox(command, maxHeight: 120, wrap: true)
+        case .patch(let patch):
+            codeBox(patch, maxHeight: 210, wrap: false)
         case .plan(let markdown):
             ScrollView {
                 Text(Self.rendered(markdown))

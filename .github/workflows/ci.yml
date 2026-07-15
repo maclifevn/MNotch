@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Validate relay scripts
+        run: |
+          perl -c Vendor/agent-relay/mnotch-relay.pl
+          perl -c Vendor/agent-relay/mnotch-notify.pl
+      - name: Build debug
+        run: swift build
+      - name: Run tests
+        run: swift test
+      - name: Build release
+        run: swift build -c release

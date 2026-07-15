@@ -48,6 +48,20 @@ struct ShelfView: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottom) {
+            if shelf.isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.bottom, 8)
+            } else if let error = shelf.lastError {
+                Text(error)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.red.opacity(0.85))
+                    .lineLimit(2)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 4)
+            }
+        }
     }
 
     private var emptyState: some View {

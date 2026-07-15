@@ -70,7 +70,7 @@ struct GeneralPane: View {
 
             Section("Behaviour") {
                 Toggle("Contrast outline", isOn: $settings.contrastOutline)
-                Toggle("Progressive blur", isOn: $settings.progressiveBlur)
+                Toggle("Panel shadow", isOn: $settings.panelShadow)
                 Toggle("Haptic feedback", isOn: $settings.hapticFeedback)
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle("Expand on hover", isOn: $settings.expandOnHover)
@@ -205,9 +205,11 @@ struct FocusPane: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                         Button("Open Privacy Settings") {
-                            NSWorkspace.shared.open(URL(
+                            if let url = URL(
                                 string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-                            )!)
+                            ) {
+                                NSWorkspace.shared.open(url)
+                            }
                         }
                         .controlSize(.small)
                     }

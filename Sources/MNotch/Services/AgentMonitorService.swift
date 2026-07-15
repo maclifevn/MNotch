@@ -56,6 +56,8 @@ final class AgentMonitorService {
     @ObservationIgnored var onAttention: ((AgentSession) -> Void)?
     /// Agent finished a turn.
     @ObservationIgnored var onDone: ((AgentSession) -> Void)?
+    /// Official Claude subscription quota from the status-line bridge.
+    @ObservationIgnored var onClaudeQuota: ((ClaudeRateLimits, Date) -> Void)?
     /// A pending request was answered or dropped — collapse if nothing else pends.
     @ObservationIgnored var onRequestResolved: (() -> Void)?
 
@@ -76,6 +78,13 @@ final class AgentMonitorService {
     // MARK: - Event handling
 
     private func handle(_ event: AgentEvent, requestID: Int?) {
+        if event.event == "quota", let limits = event.rateLimits {
+            let updatedAt = event.quotaUpdatedAt
+                .map(Date.init(timeIntervalSince1970:)) ?? .now
+            onClaudeQuota?(limits, updatedAt)
+            return
+        }
+
         let sessionID = event.sessionId ?? "unknown"
         var session = sessions.first { $0.id == sessionID }
             ?? AgentSession(
@@ -99,6 +108,11 @@ final class AgentMonitorService {
         switch event.event {
         case "PreToolUse", "PermissionRequest":
             guard let requestID else { break }
+            // A session can emit a replacement request before the previous
+            // relay has timed out. Never leave the superseded socket pending.
+            if let previousID = session.request?.id, previousID != requestID {
+                server.drop(previousID)
+            }
             let request = PendingRequest(
                 id: requestID,
                 toolName: event.toolName ?? "tool",
@@ -185,6 +199,11 @@ final class AgentMonitorService {
         sessions.removeAll { $0.id == sessionID && $0.status == .done }
     }
 
+    func stop() {
+        server.stop()
+        sessions.removeAll()
+    }
+
     /// Bring the agent's terminal to the front, targeting the exact tab/pane
     /// where possible (iTerm2 & Terminal by session id, tmux by pane), else
     /// just activating the app.
@@ -193,6 +212,7 @@ final class AgentMonitorService {
         let bundleID: String? = switch term.program {
         case "iTerm.app": "com.googlecode.iterm2"
         case "Apple_Terminal": "com.apple.Terminal"
+        case "codex": "com.openai.codex"
         case "vscode": "com.microsoft.VSCode"
         case "ghostty": "com.mitchellh.ghostty"
         case "WarpTerminal": "dev.warp.Warp-Stable"
@@ -213,6 +233,10 @@ final class AgentMonitorService {
 
         // Focus the exact iTerm2 session, if we captured its id.
         if term.program == "iTerm.app", let sid = term.itermSession, !sid.isEmpty {
+            guard let sid = Self.safeAppleScriptIdentifier(sid) else {
+                mnotchLog.error("Refusing unsafe iTerm session identifier")
+                return
+            }
             let script = """
             tell application "iTerm2"
                 repeat with w in windows
@@ -249,10 +273,20 @@ final class AgentMonitorService {
         }
     }
 
+    nonisolated static func safeAppleScriptIdentifier(_ value: String) -> String? {
+        let allowed = CharacterSet.alphanumerics.union(
+            CharacterSet(charactersIn: "-_:.")
+        )
+        guard !value.isEmpty,
+              value.unicodeScalars.allSatisfy({ allowed.contains($0) })
+        else { return nil }
+        return value
+    }
+
     // MARK: - Content extraction
 
     /// Typed per-tool detail from tool_input; degrades to `.generic`.
-    private static func detail(_ event: AgentEvent) -> RequestDetail {
+    static func detail(_ event: AgentEvent) -> RequestDetail {
         guard let json = event.toolInputJSON,
               let data = json.data(using: .utf8),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -270,6 +304,9 @@ final class AgentMonitorService {
             return .write(path: s("file_path"), content: s("content"))
         case "Bash":
             return .bash(command: s("command"))
+        case "apply_patch":
+            let patch = s("patch").isEmpty ? s("input") : s("patch")
+            return patch.isEmpty ? .generic : .patch(patch: patch)
         case "ExitPlanMode":
             return .plan(markdown: s("plan"))
         default:

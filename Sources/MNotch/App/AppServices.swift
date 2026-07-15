@@ -63,10 +63,14 @@ final class AppServices {
     private var startedAt = Date.distantPast
     private var lastObservedVolume: Double?
     private var lastObservedMuted: Bool?
+    private var started = false
+    private var agentMonitoringStarted = false
 
     private init() {}
 
     func startAll() {
+        guard !started else { return }
+        started = true
         startedAt = Date()
         media.start()
         audio.start()
@@ -127,9 +131,10 @@ final class AppServices {
         // Agent monitor: permission requests auto-expand the notch into the
         // Agent tab; idle prompts and turn-completions fire pops + sounds.
         agents.onRequest = { [weak self] _ in
-            guard SettingsStore.shared.agentEnabled else { return }
-            SoundPlayer.play(.agentAttention)
-            self?.expandAgent?()
+            let settings = SettingsStore.shared
+            guard settings.agentEnabled else { return }
+            if settings.agentSound { SoundPlayer.play(.agentAttention) }
+            if settings.agentAutoExpand { self?.expandAgent?() }
         }
         agents.onAttention = { [weak self] session in
             guard SettingsStore.shared.agentEnabled else { return }
@@ -144,12 +149,12 @@ final class AppServices {
         agents.onRequestResolved = { [weak self] in
             self?.collapseIfIdle?()
         }
-        agents.start()
+        agents.onClaudeQuota = { [weak self] limits, updatedAt in
+            self?.quota.ingestClaude(limits, updatedAt: updatedAt)
+        }
         // Keep the deployed relay in sync with this app build.
         ClaudeHookInstaller.refreshScripts()
-        if SettingsStore.shared.agentEnabled {
-            quota.start()
-        }
+        setAgentMonitoringEnabled(SettingsStore.shared.agentEnabled)
 
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared
@@ -204,6 +209,38 @@ final class AppServices {
             self.lastObservedMuted = muted
             guard changed, self.allowedNow(.sound) else { return }
             self.showHUD?(.volume, muted ? 0 : volume, muted)
+        }
+    }
+
+    func stopAll() {
+        guard started else { return }
+        started = false
+        media.stop()
+        quota.stop()
+        calendar.stop()
+        agents.stop()
+        agentMonitoringStarted = false
+        keys.stop()
+        brightness.stop()
+        backlight.stop()
+        audio.stop()
+        power.stop()
+        bluetooth.stop()
+        occlusion.stop()
+        focus.stop()
+        lockScreen.stop()
+    }
+
+    func setAgentMonitoringEnabled(_ enabled: Bool) {
+        if enabled, !agentMonitoringStarted {
+            agentMonitoringStarted = true
+            agents.start()
+            quota.start()
+        } else if !enabled, agentMonitoringStarted {
+            agentMonitoringStarted = false
+            agents.stop()
+            quota.stop()
+            collapseIfIdle?()
         }
     }
 

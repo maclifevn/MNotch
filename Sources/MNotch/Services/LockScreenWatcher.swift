@@ -12,27 +12,29 @@ final class LockScreenWatcher {
     private(set) var saverRunning = false
 
     private let overlay = LockOverlayController()
+    private var observers: [NSObjectProtocol] = []
 
     /// Fired on lock/unlock so the notch panels can (un)elevate above the shield.
     var onLockStateChanged: ((Bool) -> Void)?
 
     func start() {
+        guard observers.isEmpty else { return }
         let center = DistributedNotificationCenter.default()
-        center.addObserver(
+        observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screenIsLocked"),
             object: nil,
             queue: .main
         ) { _ in
             Task { @MainActor [weak self] in self?.screenLocked() }
-        }
-        center.addObserver(
+        })
+        observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"),
             object: nil,
             queue: .main
         ) { _ in
             Task { @MainActor [weak self] in self?.screenUnlocked() }
-        }
-        center.addObserver(
+        })
+        observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screensaver.didstart"),
             object: nil,
             queue: .main
@@ -41,8 +43,8 @@ final class LockScreenWatcher {
                 self?.saverRunning = true
                 self?.refreshOverlay()
             }
-        }
-        center.addObserver(
+        })
+        observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screensaver.didstop"),
             object: nil,
             queue: .main
@@ -51,7 +53,15 @@ final class LockScreenWatcher {
                 self?.saverRunning = false
                 self?.refreshOverlay()
             }
-        }
+        })
+    }
+
+    func stop() {
+        let center = DistributedNotificationCenter.default()
+        observers.forEach { center.removeObserver($0) }
+        observers.removeAll()
+        releaseAssertion()
+        overlay.setVisible(false)
     }
 
     private func refreshOverlay() {

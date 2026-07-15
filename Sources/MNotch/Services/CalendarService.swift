@@ -1,6 +1,16 @@
 import EventKit
 import Observation
 
+enum CalendarSourceSelection {
+    static func enabledIdentifiers(
+        available: [String],
+        disabled: [String]
+    ) -> [String] {
+        let disabledSet = Set(disabled)
+        return available.filter { !disabledSet.contains($0) }
+    }
+}
+
 /// Calendar events via EventKit: today's (including all-day — holidays and
 /// birthdays are the events people actually see up here) plus the next week,
 /// grouped by day. Access is requested lazily, the first time the calendar
@@ -70,6 +80,8 @@ final class CalendarService {
     @ObservationIgnored private var store: EKEventStore?
     @ObservationIgnored private var peekTimers: [Timer] = []
     @ObservationIgnored private var chimeTimer: Timer?
+    @ObservationIgnored private var refreshTimer: Timer?
+    @ObservationIgnored private var storeChangeObserver: NSObjectProtocol?
 
     func ensureStarted() {
         guard !requested else { return }
@@ -81,7 +93,7 @@ final class CalendarService {
             self?.authorized = granted
             guard granted else { return }
             self?.reload()
-            NotificationCenter.default.addObserver(
+            self?.storeChangeObserver = NotificationCenter.default.addObserver(
                 forName: .EKEventStoreChanged,
                 object: store,
                 queue: .main
@@ -94,7 +106,24 @@ final class CalendarService {
             }
             refresh.tolerance = 60
             RunLoop.main.add(refresh, forMode: .common)
+            self?.refreshTimer = refresh
         }
+    }
+
+    func stop() {
+        if let storeChangeObserver {
+            NotificationCenter.default.removeObserver(storeChangeObserver)
+        }
+        storeChangeObserver = nil
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        peekTimers.forEach { $0.invalidate() }
+        peekTimers = []
+        chimeTimer?.invalidate()
+        chimeTimer = nil
+        store = nil
+        requested = false
+        authorized = false
     }
 
     func reload() {
@@ -118,12 +147,27 @@ final class CalendarService {
         let windowEnd = calendar.date(byAdding: .day, value: 8, to: startOfToday) ?? now
 
         let disabled = SettingsStore.shared.calendarDisabledCalendars
-        let enabledCalendars = store.calendars(for: .event)
-            .filter { !disabled.contains($0.calendarIdentifier) }
+        let allCalendars = store.calendars(for: .event)
+        let enabledIDs = Set(CalendarSourceSelection.enabledIdentifiers(
+            available: allCalendars.map(\.calendarIdentifier),
+            disabled: disabled
+        ))
+        let enabledCalendars = allCalendars
+            .filter { enabledIDs.contains($0.calendarIdentifier) }
+        // EventKit interprets `nil` as "all calendars". Returning early is
+        // therefore required when the user explicitly disables every source.
+        guard !enabledCalendars.isEmpty else {
+            today = []
+            upcoming = []
+            monthEventDays = []
+            schedulePeeks()
+            scheduleChime()
+            return
+        }
         let predicate = store.predicateForEvents(
             withStart: startOfToday,
             end: windowEnd,
-            calendars: enabledCalendars.isEmpty ? nil : enabledCalendars
+            calendars: enabledCalendars
         )
         let events = store.events(matching: predicate)
             .sorted {
@@ -170,7 +214,7 @@ final class CalendarService {
         let predicate = store.predicateForEvents(
             withStart: interval.start,
             end: interval.end,
-            calendars: calendars.isEmpty ? nil : calendars
+            calendars: calendars
         )
         monthEventDays = Set(
             store.events(matching: predicate).map { cal.component(.day, from: $0.startDate) }

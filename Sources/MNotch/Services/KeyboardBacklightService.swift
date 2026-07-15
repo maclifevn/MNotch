@@ -15,21 +15,27 @@ import AppKit
 final class KeyboardBacklightService {
     @ObservationIgnored private var client: AnyObject?
     @ObservationIgnored private var keyboardID: UInt64 = 1
+    @ObservationIgnored private var frameworkHandle: UnsafeMutableRawPointer?
 
     private(set) var level: Double = 0.5
 
     var available: Bool { client != nil }
 
     func start() {
-        guard dlopen(
+        guard frameworkHandle == nil else { return }
+        guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness",
             RTLD_LAZY
-        ) != nil,
-            let cls = NSClassFromString("KeyboardBrightnessClient") as? NSObject.Type
-        else {
+        ) else {
             mnotchLog.notice("CoreBrightness KeyboardBrightnessClient unavailable")
             return
         }
+        guard let cls = NSClassFromString("KeyboardBrightnessClient") as? NSObject.Type else {
+            dlclose(handle)
+            mnotchLog.notice("CoreBrightness KeyboardBrightnessClient unavailable")
+            return
+        }
+        frameworkHandle = handle
         let instance = cls.init()
         let proxy = unsafeBitCast(instance, to: KeyboardBrightnessClientLike.self)
         guard instance.responds(to: #selector(KeyboardBrightnessClientLike.brightness(forKeyboard:))),
@@ -45,6 +51,14 @@ final class KeyboardBacklightService {
         client = instance
         refresh()
         mnotchLog.notice("keyboard backlight available, id=\(self.keyboardID) level=\(self.level)")
+    }
+
+    func stop() {
+        client = nil
+        if let frameworkHandle {
+            dlclose(frameworkHandle)
+            self.frameworkHandle = nil
+        }
     }
 
     private var proxy: KeyboardBrightnessClientLike? {

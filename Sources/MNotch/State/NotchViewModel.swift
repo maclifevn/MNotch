@@ -36,6 +36,39 @@ enum NotchStatus: Equatable {
     }
 }
 
+struct NotchIdleInputs: Equatable {
+    let activity: IdleActivity
+    let mostRecent: Bool
+    let mediaAvailable: Bool
+    let calendarAvailable: Bool
+    let dismissed: Bool
+}
+
+enum NotchIdleResolver {
+    static func resolve(_ input: NotchIdleInputs) -> NotchViewModel.ResolvedIdle {
+        guard !input.dismissed else { return .empty }
+        let choice: IdleActivity
+        if input.mostRecent {
+            choice = input.mediaAvailable
+                ? .playing
+                : (input.calendarAvailable ? .calendar : .none)
+        } else {
+            choice = input.activity
+        }
+
+        switch choice {
+        case .none: return .empty
+        case .playing: return input.mediaAvailable ? .playing : .empty
+        case .calendar: return input.calendarAvailable ? .calendar : .empty
+        case .duo:
+            if input.mediaAvailable && input.calendarAvailable { return .duo }
+            if input.mediaAvailable { return .playing }
+            if input.calendarAvailable { return .calendar }
+            return .empty
+        }
+    }
+}
+
 /// One state machine per notch panel. All animation quality routes through
 /// here: every transition happens inside `withAnimation` with a shared spring
 /// from `Anim`, and the view tree just renders `status`.
@@ -66,7 +99,6 @@ final class NotchViewModel {
     private(set) var activityDismissed = false
 
     var resolvedIdle: ResolvedIdle {
-        guard !activityDismissed else { return .empty }
         let settings = SettingsStore.shared
         let calendar = AppServices.shared.calendar
         let mediaOK = mediaActive
@@ -77,21 +109,13 @@ final class NotchViewModel {
             calendarOK = false
         }
 
-        var choice = settings.idleActivity
-        if settings.idleMostRecent {
-            choice = mediaOK ? .playing : (calendarOK ? .calendar : .none)
-        }
-
-        switch choice {
-        case .none: return .empty
-        case .playing: return mediaOK ? .playing : .empty
-        case .calendar: return calendarOK ? .calendar : .empty
-        case .duo:
-            if mediaOK && calendarOK { return .duo }
-            if mediaOK { return .playing }
-            if calendarOK { return .calendar }
-            return .empty
-        }
+        return NotchIdleResolver.resolve(NotchIdleInputs(
+            activity: settings.idleActivity,
+            mostRecent: settings.idleMostRecent,
+            mediaAvailable: mediaOK,
+            calendarAvailable: calendarOK,
+            dismissed: activityDismissed
+        ))
     }
 
     func dismissActivity() {
@@ -140,8 +164,10 @@ final class NotchViewModel {
     // Agent panel: fixed per-detail width, MEASURED height.
     static let agentNarrowWidth: CGFloat = 380   // .generic
     static let agentWideWidth: CGFloat = 460     // everything else
+    static let agentDashboardWidth: CGFloat = 468
+    static let agentDashboardHeight: CGFloat = 236
     static let agentMinHeight: CGFloat = 92
-    static let agentMaxHeight: CGFloat = 340
+    static let agentMaxHeight: CGFloat = 360
 
     /// Floor so the flared top edge always spans the physical cutout.
     var minAgentWidth: CGFloat { geometry.notchWidth + topRadius * 2 + 48 }
@@ -157,7 +183,7 @@ final class NotchViewModel {
         case .generic: 118
         case .bash: 150
         case .write: 230
-        case .edit, .multiEdit: 250
+        case .edit, .multiEdit, .patch: 250
         case .plan: 240
         }
     }
@@ -216,11 +242,15 @@ final class NotchViewModel {
             )
         case .expanded(let tab):
             guard tab == .agent else { return Self.expandedSize }
-            let d = AppServices.shared.agents.firstPending?.request?.detail ?? .generic
+            let request = AppServices.shared.agents.firstPending?.request
+            let seed = request.map { Self.seedHeight(for: $0.detail) }
+                ?? Self.agentDashboardHeight
+            let width = request.map { Self.agentWidth(for: $0.detail) }
+                ?? Self.agentDashboardWidth
             let h = agentContentHeight == 0
-                ? Self.seedHeight(for: d)
+                ? seed
                 : min(max(agentContentHeight, Self.agentMinHeight), Self.agentMaxHeight)
-            return CGSize(width: max(Self.agentWidth(for: d), minAgentWidth), height: h)
+            return CGSize(width: max(width, minAgentWidth), height: h)
         }
     }
 
@@ -392,6 +422,9 @@ final class NotchViewModel {
 
     func expand(_ tab: NotchTab) {
         lastTab = tab
+        if tab == .agent, !AppServices.shared.agents.hasPendingRequest {
+            agentContentHeight = Self.agentDashboardHeight
+        }
         let wasExpanded = status.isExpanded
         withAnimation(Anim.open) { status = .expanded(tab) }
         if !wasExpanded, SettingsStore.shared.hapticFeedback {
@@ -407,6 +440,9 @@ final class NotchViewModel {
 
     func selectTab(_ tab: NotchTab) {
         lastTab = tab
+        if tab == .agent, !AppServices.shared.agents.hasPendingRequest {
+            agentContentHeight = Self.agentDashboardHeight
+        }
         withAnimation(Anim.open) { status = .expanded(tab) }
     }
 }

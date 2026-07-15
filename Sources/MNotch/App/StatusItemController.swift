@@ -46,40 +46,57 @@ final class StatusItemController: NSObject {
         NSApp.terminate(nil)
     }
 
-    /// The favicon-ml logo polygons drawn as a single black silhouette;
-    /// isTemplate makes the system tint it for menu bar appearance/state.
+    /// Alcove-style framed glyph: a continuous rounded shell, a compact notch
+    /// attached to its top edge, and the Maclife double-peak M below. Drawing
+    /// it as a template keeps it crisp on Retina and lets macOS tint it for
+    /// light/dark menu bars and pressed state.
     private static func templateLogo() -> NSImage {
-        let logoW: CGFloat = 64
-        let logoH: CGFloat = 54.75
-        let width: CGFloat = 17
-        let height = width * logoH / logoW
-        let scale = width / logoW
-        let polys: [[CGPoint]] = [
-            [
-                CGPoint(x: 13.77, y: 17.46), CGPoint(x: 1.29, y: 50.15),
-                CGPoint(x: 12.29, y: 50.15), CGPoint(x: 27.56, y: 26.78),
-            ],
-            [
-                CGPoint(x: 43.12, y: 2.94), CGPoint(x: 27.56, y: 26.78),
-                CGPoint(x: 62.16, y: 50.15),
-            ],
-            [
-                CGPoint(x: 27.56, y: 26.78), CGPoint(x: 12.29, y: 50.15),
-                CGPoint(x: 62.16, y: 50.15),
-            ],
-        ]
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.setStroke()
 
-        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+            let display = NSBezierPath(
+                roundedRect: NSRect(x: 1.7, y: 1.6, width: 14.6, height: 14.8),
+                xRadius: 3.4,
+                yRadius: 3.4
+            )
+            display.lineWidth = 1.05
+            display.stroke()
+
             NSColor.black.setFill()
-            for points in polys {
-                let path = NSBezierPath()
-                for (i, p) in points.enumerated() {
-                    let point = NSPoint(x: p.x * scale, y: (logoH - p.y) * scale)
-                    if i == 0 { path.move(to: point) } else { path.line(to: point) }
-                }
-                path.close()
-                path.fill()
-            }
+            let notch = NSBezierPath()
+            notch.move(to: NSPoint(x: 5.9, y: 16.4))
+            notch.line(to: NSPoint(x: 12.1, y: 16.4))
+            notch.line(to: NSPoint(x: 11.9, y: 14.5))
+            notch.curve(
+                to: NSPoint(x: 10.5, y: 13.1),
+                controlPoint1: NSPoint(x: 11.8, y: 13.7),
+                controlPoint2: NSPoint(x: 11.2, y: 13.1)
+            )
+            notch.line(to: NSPoint(x: 7.5, y: 13.1))
+            notch.curve(
+                to: NSPoint(x: 6.1, y: 14.5),
+                controlPoint1: NSPoint(x: 6.8, y: 13.1),
+                controlPoint2: NSPoint(x: 6.2, y: 13.7)
+            )
+            notch.close()
+            notch.fill()
+
+            // Solid miniature of the overlapping Maclife mountain ribbons.
+            let mark = NSBezierPath()
+            mark.move(to: NSPoint(x: 5.5, y: 9.3))
+            mark.line(to: NSPoint(x: 3.0, y: 3.0))
+            mark.line(to: NSPoint(x: 5.2, y: 3.0))
+            mark.line(to: NSPoint(x: 8.3, y: 7.5))
+            mark.close()
+            mark.move(to: NSPoint(x: 11.4, y: 11.8))
+            mark.line(to: NSPoint(x: 8.3, y: 7.5))
+            mark.line(to: NSPoint(x: 15.0, y: 3.0))
+            mark.close()
+            mark.move(to: NSPoint(x: 8.3, y: 7.5))
+            mark.line(to: NSPoint(x: 5.2, y: 3.0))
+            mark.line(to: NSPoint(x: 15.0, y: 3.0))
+            mark.close()
+            mark.fill()
             return true
         }
         image.isTemplate = true

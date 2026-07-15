@@ -1,46 +1,5 @@
-import AppKit
 import Observation
 import ServiceManagement
-
-// MARK: - Option enums
-
-enum IdleActivity: String, CaseIterable {
-    case none, playing, calendar, duo
-}
-
-enum LockCardStyle: String, CaseIterable {
-    case glass
-    case clear
-    case frosted
-}
-
-enum HUDBarStyle: String, CaseIterable {
-    case white, accent, decibel
-}
-
-enum AnimSpeed: String, CaseIterable {
-    case smooth, fast, instant
-}
-
-enum WaveformStyle: String, CaseIterable {
-    case monochrome, colored, gradient
-}
-
-enum MediaQuickAction: String, CaseIterable {
-    case favorite, shuffle, repeatMode, copy
-}
-
-enum MediaBadgeStyle: String, CaseIterable {
-    case none, appIcon
-}
-
-enum SoundIconStyle: String, CaseIterable {
-    case symbol, device
-}
-
-enum CalendarUse: String, CaseIterable {
-    case both, notifications, activity
-}
 
 /// UserDefaults-backed settings, one property per Alcove-style toggle.
 /// Every stored property persists via its didSet; defaults mirror Alcove's.
@@ -90,7 +49,9 @@ final class SettingsStore {
     var idleMostRecent: Bool { didSet { save("general.idleMostRecent", idleMostRecent) } }
 
     var contrastOutline: Bool { didSet { save("general.contrastOutline", contrastOutline) } }
-    var progressiveBlur: Bool { didSet { save("general.progressiveBlur", progressiveBlur) } }
+    /// Dark, wallpaper-independent shadow under full notch panels. The stored
+    /// key keeps its legacy name so existing preferences migrate implicitly.
+    var panelShadow: Bool { didSet { save("general.progressiveBlur", panelShadow) } }
     var hapticFeedback: Bool { didSet { save("general.haptic", hapticFeedback) } }
     var expandOnHover: Bool { didSet { save("general.expandOnHover", expandOnHover) } }
 
@@ -244,7 +205,10 @@ final class SettingsStore {
             d.string(forKey: key) ?? fallback
         }
         func opt<T: RawRepresentable>(_ key: String, _ fallback: T) -> T where T.RawValue == String {
-            d.string(forKey: key).flatMap(T.init(rawValue:)) ?? fallback
+            guard let raw = d.string(forKey: key), let value = T(rawValue: raw) else {
+                return fallback
+            }
+            return value
         }
 
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -257,7 +221,7 @@ final class SettingsStore {
         idleActivity = opt("general.idleActivity", IdleActivity.playing)
         idleMostRecent = flag("general.idleMostRecent", false)
         contrastOutline = flag("general.contrastOutline", true)
-        progressiveBlur = flag("general.progressiveBlur", true)
+        panelShadow = flag("general.progressiveBlur", true)
         hapticFeedback = flag("general.haptic", true)
         expandOnHover = flag("general.expandOnHover", false)
         gestureNatural = flag("gesture.natural", false)

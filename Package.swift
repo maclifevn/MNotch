@@ -10,6 +10,11 @@ let package = Package(
         .executableTarget(
             name: "MNotch",
             path: "Sources/MNotch"
-        )
+        ),
+        .testTarget(
+            name: "MNotchTests",
+            dependencies: ["MNotch"],
+            path: "Tests/MNotchTests"
+        ),
     ]
 )

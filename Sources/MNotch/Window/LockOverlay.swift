@@ -88,7 +88,9 @@ final class LockOverlayController {
             ctx.duration = 0.3
             panel.animator().alphaValue = 0
         }, completionHandler: {
-            panel.orderOut(nil)
+            Task { @MainActor in
+                panel.orderOut(nil)
+            }
         })
     }
 }

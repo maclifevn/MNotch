@@ -71,6 +71,9 @@ final class MediaRemoteService {
     var hasActiveMedia: Bool { !playback.title.isEmpty }
 
     private var pollTask: Task<Void, Never>?
+    private var confirmationTask: Task<Void, Never>?
+    private var pollInFlight = false
+    private var pollRequested = false
     private var missCount = 0
     private var artworkIdentity = ""
     private(set) var lastPlayingAt = Date.distantPast
@@ -166,7 +169,7 @@ final class MediaRemoteService {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollOnce()
+                await self?.requestPoll()
                 try? await Task.sleep(for: Self.pollInterval)
             }
         }
@@ -175,9 +178,25 @@ final class MediaRemoteService {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        confirmationTask?.cancel()
+        confirmationTask = nil
+        pollRequested = false
     }
 
     // MARK: - Polling
+
+    private func requestPoll() async {
+        if pollInFlight {
+            pollRequested = true
+            return
+        }
+        pollInFlight = true
+        repeat {
+            pollRequested = false
+            await pollOnce()
+        } while pollRequested && !Task.isCancelled
+        pollInFlight = false
+    }
 
     private func pollOnce() async {
         guard let paths = Self.adapterPaths else { return }
@@ -337,15 +356,17 @@ final class MediaRemoteService {
     /// Favorite the current track (Apple Music only, via AppleScript).
     func favoriteCurrentTrack() {
         guard playback.bundleIdentifier == "com.apple.Music" else { return }
-        let script = NSAppleScript(source: """
-        tell application "Music"
-            try
-                set favorited of current track to not (favorited of current track)
-            end try
-        end tell
-        """)
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
+        Task.detached(priority: .userInitiated) {
+            let script = NSAppleScript(source: """
+            tell application "Music"
+                try
+                    set favorited of current track to not (favorited of current track)
+                end try
+            end tell
+            """)
+            var error: NSDictionary?
+            script?.executeAndReturnError(&error)
+        }
     }
 
     func toggleShuffle() {
@@ -360,9 +381,11 @@ final class MediaRemoteService {
 
     /// Quick confirmation poll shortly after a command.
     private func pollSoon() {
-        Task { [weak self] in
+        confirmationTask?.cancel()
+        confirmationTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
-            await self?.pollOnce()
+            guard !Task.isCancelled else { return }
+            await self?.requestPoll()
         }
     }
 
@@ -381,7 +404,11 @@ final class MediaRemoteService {
         proc.arguments = [paths.script, paths.framework] + arguments
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
-        try? proc.run()
+        do {
+            try proc.run()
+        } catch {
+            mnotchLog.error("Media command failed: \(error)")
+        }
     }
 
     // MARK: - Process helper

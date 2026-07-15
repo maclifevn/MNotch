@@ -6,6 +6,7 @@ Dynamic Island cho MacBook — clone Alcove, 100% native Swift/SwiftUI, build kh
 
 ```sh
 Scripts/run.sh        # build + mở app
+swift test            # unit test logic lõi
 ```
 
 Yêu cầu: macOS 15+, Apple Silicon, Swift Command Line Tools.
@@ -20,6 +21,7 @@ Yêu cầu: macOS 15+, Apple Silicon, Swift Command Line Tools.
 - **File shelf**: kéo file lên notch → tự mở shelf; kéo ra dùng lại; AirDrop.
 - **Calendar**: sự kiện còn lại trong ngày.
 - **Settings** (icon bánh răng trong panel): bật/tắt từng tính năng, fake notch trên màn ngoài, launch at login.
+- **Agent approvals + quota**: Claude Code và Codex có thể gửi permission request vào notch để xem nội dung rồi Allow/Deny. Khi không có request, tab Agent hiển thị quota chính thức còn lại theo cửa sổ 5 giờ/7 ngày, thời điểm reset và trạng thái live/cache. Cài hook trong Settings → Agents; với Codex, mở `/hooks` một lần để review/trust command theo cơ chế bảo mật của Codex.
 
 ## Quyền
 
@@ -37,5 +39,9 @@ Yêu cầu: macOS 15+, Apple Silicon, Swift Command Line Tools.
 - `Shape/NotchShape.swift` — outline notch với radii animatable (góc trên lõm, dưới bo).
 - `State/NotchViewModel.swift` — state machine `closed / hud / pop / expanded` + hover intent (mở 120ms, đóng 350ms); toàn bộ spring định nghĩa ở `State/Anim.swift`.
 - `Services/` — media (perl adapter), CoreAudio, CGEventTap, DisplayServices/CoreBrightness (private, degrade an toàn), IOKit power, IOBluetooth.
+
+Các tác vụ file/transcript chạy ngoài main actor; service dài hạn có lifecycle
+`start/stop` rõ ràng. CI kiểm tra debug build, unit test, release build và cú
+pháp các relay script trên mỗi push/PR.
 
 Lock-screen presence (như Alcove) không khả thi từ app thường — ngoài scope.
