@@ -15,6 +15,8 @@ struct AgentSession: Identifiable, Equatable {
     var status: AgentStatus
     var lastMessage: String
     var terminal: TerminalLocator
+    /// Last time any event touched this session (for the "28m / 1h" age tag).
+    var lastActivity: Date = .now
     /// Set while a blocking permission request is awaiting a decision.
     var request: PendingRequest?
 
@@ -97,6 +99,7 @@ final class AgentMonitorService {
             )
 
         if let cwd = event.cwd, !cwd.isEmpty { session.cwd = cwd }
+        session.lastActivity = .now
         session.terminal = TerminalLocator(
             program: event.termProgram,
             termSession: event.termSession,
@@ -175,18 +178,64 @@ final class AgentMonitorService {
     // MARK: - User actions
 
     func approve(_ session: AgentSession) {
-        respond(session, decision: "allow")
+        respond(session, decision: "allow", newStatus: .working)
     }
 
     func reject(_ session: AgentSession) {
-        respond(session, decision: "deny", reason: "Rejected from MNotch")
+        respond(session, decision: "deny", reason: "Rejected from MNotch", newStatus: .done)
     }
 
-    private func respond(_ session: AgentSession, decision: String, reason: String = "") {
+    /// Hand the decision back to the agent's own terminal: reply "ask" so
+    /// Claude/Codex shows its native permission prompt right where the user is
+    /// already looking, instead of popping the notch. The session stays
+    /// `.waiting` — it is now blocked on that native prompt.
+    func deferToTerminal(_ session: AgentSession) {
+        respond(session, decision: "ask", newStatus: .waiting)
+    }
+
+    private func respond(
+        _ session: AgentSession,
+        decision: String,
+        reason: String = "",
+        newStatus: AgentStatus
+    ) {
         guard let request = session.request else { return }
         server.respond(request.id, decision: decision, reason: reason)
-        clearRequest(session.id, status: decision == "allow" ? .working : .done)
+        clearRequest(session.id, status: newStatus)
         onRequestResolved?()
+    }
+
+    /// Terminals embedded in an IDE keep the agent in a panel that is often
+    /// hidden even while the app is frontmost, so being frontmost tells us
+    /// nothing about whether the user can see the prompt — never defer for them.
+    private static let embeddedTerminals: Set<String> = ["vscode"]
+
+    /// True when the agent's own terminal app is the frontmost window — in that
+    /// case the user is looking at the terminal and should answer there. Fails
+    /// open (returns false → show the notch) for unknown or embedded terminals
+    /// where frontmost doesn't imply the agent's pane is visible.
+    func terminalIsFrontmost(_ session: AgentSession) -> Bool {
+        guard let program = session.terminal.program,
+              !Self.embeddedTerminals.contains(program),
+              let bundleID = Self.terminalBundleID(program) else {
+            return false
+        }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID
+    }
+
+    /// Maps a TERM_PROGRAM value to the terminal app's bundle identifier.
+    static func terminalBundleID(_ program: String?) -> String? {
+        switch program {
+        case "iTerm.app": "com.googlecode.iterm2"
+        case "Apple_Terminal": "com.apple.Terminal"
+        case "codex": "com.openai.codex"
+        case "vscode": "com.microsoft.VSCode"
+        case "ghostty": "com.mitchellh.ghostty"
+        case "WarpTerminal": "dev.warp.Warp-Stable"
+        case "Hyper": "co.zeit.hyper"
+        case "WezTerm": "com.github.wez.wezterm"
+        default: nil
+        }
     }
 
     private func clearRequest(_ sessionID: String, status: AgentStatus) {
@@ -209,17 +258,7 @@ final class AgentMonitorService {
     /// just activating the app.
     func jump(_ session: AgentSession) {
         let term = session.terminal
-        let bundleID: String? = switch term.program {
-        case "iTerm.app": "com.googlecode.iterm2"
-        case "Apple_Terminal": "com.apple.Terminal"
-        case "codex": "com.openai.codex"
-        case "vscode": "com.microsoft.VSCode"
-        case "ghostty": "com.mitchellh.ghostty"
-        case "WarpTerminal": "dev.warp.Warp-Stable"
-        case "Hyper": "co.zeit.hyper"
-        case "WezTerm": "com.github.wez.wezterm"
-        default: nil
-        }
+        let bundleID = Self.terminalBundleID(term.program)
 
         if let bundleID,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {

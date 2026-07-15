@@ -40,9 +40,6 @@ struct AgentRequestCard: View {
             }
             buttons
         }
-        .padding(.top, viewModel.geometry.notchHeight - 4)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 14)
     }
 
     private var header: some View {

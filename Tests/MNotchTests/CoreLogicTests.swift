@@ -53,6 +53,23 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertNil(AgentMonitorService.safeAppleScriptIdentifier("x\" then do shell script"))
     }
 
+    @MainActor
+    func testTerminalBundleIDMapsKnownProgramsForFrontmostCheck() {
+        XCTAssertEqual(AgentMonitorService.terminalBundleID("iTerm.app"), "com.googlecode.iterm2")
+        XCTAssertEqual(AgentMonitorService.terminalBundleID("Apple_Terminal"), "com.apple.Terminal")
+        XCTAssertEqual(AgentMonitorService.terminalBundleID("ghostty"), "com.mitchellh.ghostty")
+        // Unknown or missing terminals can't be matched, so the notch is shown
+        // rather than wrongly deferred to a terminal we can't identify.
+        XCTAssertNil(AgentMonitorService.terminalBundleID("some-unknown-term"))
+        XCTAssertNil(AgentMonitorService.terminalBundleID(nil))
+    }
+
+    func testDeferDecisionProducesNoPermissionOutput() {
+        // Deferring to the terminal replies "ask"; for PermissionRequest that
+        // means no output, so the agent falls back to its native prompt.
+        XCTAssertNil(AgentHookResponse.data(event: "PermissionRequest", decision: .ask))
+    }
+
     func testQuotaParserCountsBillableFieldsOnly() throws {
         let json = #"{"timestamp":"2026-07-14T10:00:00.000Z","message":{"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":3,"cache_read_input_tokens":1000}}}"#
         let result = QuotaUsageParser.fields(from: try XCTUnwrap(json.data(using: .utf8)))

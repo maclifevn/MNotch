@@ -10,11 +10,18 @@ import Foundation
 enum ClaudeHookInstaller {
     private static let marker = "__mnotch__"
 
-    /// Hook events we register. Permission events block; the rest notify.
+    /// Hook events we register. Only `PermissionRequest` blocks — it fires
+    /// solely when a tool would otherwise prompt the user, so read-only tools
+    /// (Read/Grep/Glob…) never reach the notch. `PreToolUse` fires on *every*
+    /// tool call and is deliberately NOT registered (see `retiredEvents`).
     private static let events = [
-        "PreToolUse", "PermissionRequest", "Notification",
+        "PermissionRequest", "Notification",
         "Stop", "SessionStart", "SessionEnd",
     ]
+
+    /// Events MNotch used to install but no longer does. Kept here so upgrades
+    /// strip the stale entries out of an existing settings.json.
+    private static let retiredEvents = ["PreToolUse"]
 
     static var settingsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -61,9 +68,43 @@ enum ClaudeHookInstaller {
     /// It also repairs a missing quota bridge when MNotch hooks are installed.
     static func refreshScripts() {
         try? deployScripts()
-        if isInstalled, !isQuotaBridgeInstalled {
-            try? installQuotaBridge()
+        if isInstalled {
+            // Migrate installs that predate the PreToolUse → PermissionRequest
+            // switch, so read-only tools stop popping the notch on every call.
+            pruneRetiredEvents()
+            if !isQuotaBridgeInstalled {
+                try? installQuotaBridge()
+            }
         }
+    }
+
+    /// Strip our markers from any event in `retiredEvents` (currently the old
+    /// PreToolUse hook). Idempotent; writes only when something changed.
+    private static func pruneRetiredEvents() {
+        guard var root = readSettings(),
+              var hooks = root["hooks"] as? [String: Any]
+        else { return }
+        var changed = false
+        for event in retiredEvents {
+            guard var matchers = hooks[event] as? [[String: Any]] else { continue }
+            let before = matchers.count
+            matchers.removeAll(where: isOurs)
+            guard matchers.count != before else { continue }
+            changed = true
+            if matchers.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = matchers
+            }
+        }
+        guard changed else { return }
+        if hooks.isEmpty {
+            root.removeValue(forKey: "hooks")
+        } else {
+            root["hooks"] = hooks
+        }
+        try? writeSettings(root)
+        mnotchLog.notice("Pruned retired PreToolUse hook from settings.json")
     }
 
     static func deployScripts() throws {
@@ -111,6 +152,17 @@ enum ClaudeHookInstaller {
             hooks[event] = matchers
         }
 
+        // Clean up hooks from older installs we no longer register.
+        for event in retiredEvents {
+            guard var matchers = hooks[event] as? [[String: Any]] else { continue }
+            matchers.removeAll(where: isOurs)
+            if matchers.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = matchers
+            }
+        }
+
         root["hooks"] = hooks
         try installQuotaBridge(into: &root)
         try writeSettings(root)
@@ -121,7 +173,7 @@ enum ClaudeHookInstaller {
         guard var root = readSettings() else { return }
         var hooks = root["hooks"] as? [String: Any] ?? [:]
 
-        for event in events {
+        for event in events + retiredEvents {
             guard var matchers = hooks[event] as? [[String: Any]] else { continue }
             matchers.removeAll(where: isOurs)
             if matchers.isEmpty {

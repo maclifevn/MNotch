@@ -159,15 +159,17 @@ final class NotchViewModel {
     /// expansion (400 tall so a full-height agent diff + drop shadow render
     /// unclipped; interactiveRect uses visualSize so the extra canvas is
     /// invisible and non-interactive).
-    static let panelSize = CGSize(width: 700, height: 400)
+    static let panelSize = CGSize(width: 700, height: 448)
 
     // Agent panel: fixed per-detail width, MEASURED height.
     static let agentNarrowWidth: CGFloat = 380   // .generic
     static let agentWideWidth: CGFloat = 460     // everything else
     static let agentDashboardWidth: CGFloat = 468
-    static let agentDashboardHeight: CGFloat = 236
+    static let agentDashboardHeight: CGFloat = 190
     static let agentMinHeight: CGFloat = 92
-    static let agentMaxHeight: CGFloat = 360
+    // Tall enough that a max-height diff/write preview plus the always-present
+    // usage strip still leaves the Deny/Allow row inside the panel canvas.
+    static let agentMaxHeight: CGFloat = 396
 
     /// Floor so the flared top edge always spans the physical cutout.
     var minAgentWidth: CGFloat { geometry.notchWidth + topRadius * 2 + 48 }
@@ -178,13 +180,14 @@ final class NotchViewModel {
     }
 
     /// Class-default seed so the open animation targets ~final height at once.
+    /// Includes the always-present usage strip (~24pt) above the request card.
     static func seedHeight(for d: RequestDetail) -> CGFloat {
         switch d {
-        case .generic: 118
-        case .bash: 150
-        case .write: 230
-        case .edit, .multiEdit, .patch: 250
-        case .plan: 240
+        case .generic: 150
+        case .bash: 182
+        case .write: 262
+        case .edit, .multiEdit, .patch: 282
+        case .plan: 272
         }
     }
 

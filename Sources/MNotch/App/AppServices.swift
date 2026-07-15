@@ -130,11 +130,19 @@ final class AppServices {
 
         // Agent monitor: permission requests auto-expand the notch into the
         // Agent tab; idle prompts and turn-completions fire pops + sounds.
-        agents.onRequest = { [weak self] _ in
+        agents.onRequest = { [weak self] session in
+            guard let self else { return }
             let settings = SettingsStore.shared
             guard settings.agentEnabled else { return }
+            // If the agent's own terminal is frontmost, the user is looking at
+            // it — let the native prompt handle it there and keep the notch
+            // quiet. The notch only takes over when they've tabbed away.
+            if self.agents.terminalIsFrontmost(session) {
+                self.agents.deferToTerminal(session)
+                return
+            }
             if settings.agentSound { SoundPlayer.play(.agentAttention) }
-            if settings.agentAutoExpand { self?.expandAgent?() }
+            if settings.agentAutoExpand { self.expandAgent?() }
         }
         agents.onAttention = { [weak self] session in
             guard SettingsStore.shared.agentEnabled else { return }

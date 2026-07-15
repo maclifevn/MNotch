@@ -49,6 +49,15 @@ enum DebugProbe {
                 }
             }
         }
+        center.addObserver(
+            forName: NSNotification.Name("mnotch.debug.agent-tab"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                controller.debugViewModels.first?.selectTab(.agent)
+            }
+        }
     }
 
     private static func dump(controller: NotchWindowController) {
