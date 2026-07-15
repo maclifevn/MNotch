@@ -247,6 +247,13 @@ final class ClaudeUsageClient {
 
     // MARK: - Locating the CLI
 
+    /// The located `claude` binary path, or nil if it isn't installed. For the
+    /// Settings UI; may spawn a login shell on the first call, so run it off the
+    /// main thread.
+    nonisolated static func cliPath() -> String? {
+        resolveClaude()?.claude
+    }
+
     private struct Resolution: Sendable { let claude: String; let path: String }
 
     // Cache the located binary so we don't spawn an interactive login shell on

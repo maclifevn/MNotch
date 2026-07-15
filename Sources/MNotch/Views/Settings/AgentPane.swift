@@ -9,6 +9,9 @@ struct AgentPane: View {
     @State private var claudeQuotaBridgeInstalled = ClaudeHookInstaller.isQuotaBridgeInstalled
     @State private var codexHooksInstalled = CodexHookInstaller.isInstalled
     @State private var errorMessage: String?
+    @State private var claudeCLIInstalled: Bool?   // nil = still checking
+
+    private let claudeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash"
 
     var body: some View {
         Form {
@@ -51,6 +54,49 @@ struct AgentPane: View {
                     Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                }
+            }
+
+            Section("Claude usage") {
+                LabeledContent("Claude CLI") {
+                    switch claudeCLIInstalled {
+                    case .some(true): Text("Installed").foregroundStyle(.green)
+                    case .some(false): Text("Not found").foregroundStyle(.orange)
+                    case .none: Text("Checking…").foregroundStyle(.secondary)
+                    }
+                }
+                if claudeCLIInstalled == false {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Claude usage % is read from the local `claude` CLI. Install it, then sign in — no Keychain, no separate login for MNotch.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("1. Run this in Terminal to install:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Text(claudeInstallCommand)
+                                .font(.system(size: 11).monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(claudeInstallCommand, forType: .string)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy install command")
+                        }
+                        Text("2. Then run `claude` in Terminal and sign in. Usage appears within a few minutes (or reopen MNotch).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Usage % comes straight from the `claude` CLI (`claude -p /usage`) — no Keychain access and no extra login.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
 
@@ -107,7 +153,7 @@ struct AgentPane: View {
                         )
                 }
                 Button("Refresh Now") { quota.refresh() }
-                Text("Codex uses the official App Server. Claude's official 5-hour and 7-day percentages appear after Claude Code completes a response.")
+                Text("Codex uses the official App Server. Claude's session + weekly percentages come from the `claude` CLI (see Claude usage above).")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -126,6 +172,11 @@ struct AgentPane: View {
         .onAppear {
             refreshInstallState()
             ClaudeHookInstaller.ensureNotifyHelper()
+        }
+        .task {
+            // Locating the CLI can spawn a login shell — keep it off the main actor.
+            let path = await Task.detached { ClaudeUsageClient.cliPath() }.value
+            claudeCLIInstalled = (path != nil)
         }
         .onChange(of: settings.agentEnabled) { _, enabled in
             AppServices.shared.setAgentMonitoringEnabled(enabled)
