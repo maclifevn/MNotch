@@ -186,6 +186,7 @@ final class SettingsStore {
     var agentSound: Bool { didSet { save("agent.sound", agentSound) } }
     var agentDuration: Double { didSet { save("agent.duration", agentDuration) } }
     var agentAutoExpand: Bool { didSet { save("agent.autoExpand", agentAutoExpand) } }
+    var agentDeferToTerminal: Bool { didSet { save("agent.deferToTerminal", agentDeferToTerminal) } }
 
     // MARK: - Init / load
 
@@ -325,6 +326,7 @@ final class SettingsStore {
         agentSound = flag("agent.sound", true)
         agentDuration = num("agent.duration", 4)
         agentAutoExpand = flag("agent.autoExpand", true)
+        agentDeferToTerminal = flag("agent.deferToTerminal", true)
 
         loading = false
     }

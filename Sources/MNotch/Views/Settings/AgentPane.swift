@@ -121,6 +121,12 @@ struct AgentPane: View {
 
             Section("Behaviour") {
                 Toggle("Auto-open notch on permission request", isOn: $settings.agentAutoExpand)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Defer to terminal when it's active", isOn: $settings.agentDeferToTerminal)
+                    Text("When on, a request whose terminal is frontmost is answered by the terminal's own prompt; the notch only pops when you've switched away. Turn off to always pop the notch.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 SoundToggleRow(
                     title: "Sound on agent events",
                     isOn: $settings.agentSound,

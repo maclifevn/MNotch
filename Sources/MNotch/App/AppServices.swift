@@ -136,8 +136,9 @@ final class AppServices {
             guard settings.agentEnabled else { return }
             // If the agent's own terminal is frontmost, the user is looking at
             // it — let the native prompt handle it there and keep the notch
-            // quiet. The notch only takes over when they've tabbed away.
-            if self.agents.terminalIsFrontmost(session) {
+            // quiet. The notch only takes over when they've tabbed away. Users
+            // who always want the notch can turn this off.
+            if settings.agentDeferToTerminal, self.agents.terminalIsFrontmost(session) {
                 self.agents.deferToTerminal(session)
                 return
             }
