@@ -29,8 +29,14 @@ final class NotchWindowController {
         let locked = AppServices.shared.lockScreen.isLocked
         let hidden = AppServices.shared.occlusion.shouldHide
 
+        // When no display has a real notch (Mac mini/Studio, Intel Macs, or a
+        // MacBook running lid-closed on an external), fall back to a simulated
+        // notch automatically — otherwise the app would draw nothing at all.
+        let anyRealNotch = NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+        let simulate = settings.forceSimulatedNotch || !anyRealNotch
+
         for screen in NSScreen.screens
-        where (screen.safeAreaInsets.top > 0 || settings.forceSimulatedNotch)
+        where (screen.safeAreaInsets.top > 0 || simulate)
             && Self.isTargeted(screen, target: settings.displayTarget) {
             let viewModel = NotchViewModel(geometry: .forScreen(screen))
             let panel = NotchPanel(screen: screen, viewModel: viewModel)
