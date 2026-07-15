@@ -65,9 +65,19 @@ struct AgentUsageStrip: View {
     }
 
     private var placeholder: String {
+        // Prefer the live reason (e.g. "Sign in to Claude Code for usage") over
+        // a generic fallback so the strip explains why it's empty.
+        switch quota.state {
+        case .waiting(let message), .unavailable(let message):
+            return message
+        case .loading:
+            return "Loading usage…"
+        default:
+            break
+        }
         switch quota.provider {
-        case .claude: "Claude usage — run a prompt"
-        case .codex: "Codex usage unavailable"
+        case .claude: return "Claude usage unavailable"
+        case .codex: return "Codex usage unavailable"
         }
     }
 

@@ -146,6 +146,7 @@ final class QuotaService {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private let scanner = QuotaScanner()
     @ObservationIgnored private let codexClient = CodexQuotaClient()
+    @ObservationIgnored private let claudeClient = ClaudeUsageClient()
     @ObservationIgnored private var codexCallbacksConfigured = false
 
     private var projectsDir: URL {
@@ -162,8 +163,10 @@ final class QuotaService {
     func start() {
         guard timer == nil else { return }
         configureCodexCallbacksIfNeeded()
+        configureClaudeCallbacksIfNeeded()
         loadClaudeCache()
         codexClient.start()
+        claudeClient.start()
         refresh()
         let timer = Timer(timeInterval: 180, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.refresh() }
@@ -179,6 +182,7 @@ final class QuotaService {
         refreshTask?.cancel()
         refreshTask = nil
         codexClient.stop()
+        claudeClient.stop()
     }
 
     var fraction: Double {
@@ -188,6 +192,7 @@ final class QuotaService {
 
     func refresh() {
         codexClient.refresh()
+        claudeClient.refresh()
         guard refreshTask == nil else { return }
         let cutoff = Date().addingTimeInterval(-Self.window)
         let directory = projectsDir
@@ -230,6 +235,22 @@ final class QuotaService {
                 self.codexQuota.state = .unavailable(message)
             } else {
                 self.codexQuota.state = .cached
+            }
+        }
+    }
+
+    private func configureClaudeCallbacksIfNeeded() {
+        guard claudeClient.onLimits == nil else { return }
+        claudeClient.onLimits = { [weak self] limits in
+            self?.ingestClaude(limits, updatedAt: .now, cached: false)
+        }
+        claudeClient.onUnavailable = { [weak self] message in
+            guard let self else { return }
+            // Keep the last real numbers (as stale) rather than blanking them.
+            if self.claudeQuota.windows.isEmpty {
+                self.claudeQuota.state = .waiting(message)
+            } else {
+                self.claudeQuota.state = .cached
             }
         }
     }
