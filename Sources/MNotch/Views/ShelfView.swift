@@ -1,4 +1,6 @@
-import QuickLookThumbnailing
+// QuickLookThumbnailing lacks Sendable annotations on SDKs before macOS 26,
+// where returning a thumbnail across the actor boundary is a hard error.
+@preconcurrency import QuickLookThumbnailing
 import SwiftUI
 import UniformTypeIdentifiers
 
