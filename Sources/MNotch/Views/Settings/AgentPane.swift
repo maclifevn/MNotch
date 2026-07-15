@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Settings → Agents: monitor AI coding agents from the notch. Installing the
@@ -158,7 +159,7 @@ struct AgentPane: View {
                                 : Color.green
                         )
                 }
-                Button("Refresh Now") { quota.refresh() }
+                Button("Refresh Now") { quota.refresh(force: true) }
                 Text("Codex uses the official App Server. Claude's session + weekly percentages come from the `claude` CLI (see Claude usage above).")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -179,14 +180,24 @@ struct AgentPane: View {
             refreshInstallState()
             ClaudeHookInstaller.ensureNotifyHelper()
         }
-        .task {
-            // Locating the CLI can spawn a login shell — keep it off the main actor.
-            let path = await Task.detached { ClaudeUsageClient.cliPath() }.value
-            claudeCLIInstalled = (path != nil)
+        .task { await recheckClaudeCLI() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            // Re-check after the user tabs out to install the CLI and comes back,
+            // so the status stops saying "Not found" without reopening the pane.
+            Task { await recheckClaudeCLI() }
         }
         .onChange(of: settings.agentEnabled) { _, enabled in
             AppServices.shared.setAgentMonitoringEnabled(enabled)
         }
+    }
+
+    @MainActor
+    private func recheckClaudeCLI() async {
+        // Locating the CLI can spawn a login shell — keep it off the main actor.
+        let path = await Task.detached { ClaudeUsageClient.cliPath() }.value
+        claudeCLIInstalled = (path != nil)
     }
 
     private var notifyPath: String {

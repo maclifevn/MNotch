@@ -1,5 +1,9 @@
 import Foundation
 
+/// Collects a pipe's bytes on a background queue so both of a process's pipes
+/// can be drained concurrently without a full-buffer deadlock.
+private final class PipeDataBox: @unchecked Sendable { var data = Data() }
+
 /// Reads Claude subscription usage by asking the local `claude` CLI itself
 /// (`claude -p /usage`). The CLI owns its own OAuth login, so MNotch never
 /// touches the Keychain, never triggers an access prompt, and never risks
@@ -18,25 +22,51 @@ final class ClaudeUsageClient {
     var onUnavailable: ((String) -> Void)?
 
     private var task: Task<Void, Never>?
+    /// After a failure, suppress the timer-driven poll until this time so a
+    /// throttled endpoint isn't hammered every interval (manual refresh forces).
+    private var throttledUntil: Date?
+    private var backoff: TimeInterval = 180
 
-    func start() { refresh() }
+    // The currently running CLI process, so stop() can actually terminate it.
+    private nonisolated(unsafe) static var runningProcess: Process?
+    private nonisolated static let processLock = NSLock()
 
-    func refresh() {
+    func start() { refresh(force: true) }
+
+    func refresh(force: Bool = false) {
         guard task == nil else { return }   // single-flight
+        if !force, let until = throttledUntil, until > Date() { return }
         task = Task { [weak self] in
             let outcome = await Self.fetch()
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            // Always clear the in-flight task so a restart isn't wedged, but
+            // apply the result only if we weren't cancelled meanwhile.
+            defer { self.task = nil }
+            guard !Task.isCancelled else { return }
             switch outcome {
-            case .windows(let windows): self.onWindows?(windows)
-            case .unavailable(let message): self.onUnavailable?(message)
+            case .windows(let windows):
+                self.throttledUntil = nil
+                self.backoff = 180
+                self.onWindows?(windows)
+            case .unavailable(let message):
+                self.throttledUntil = Date().addingTimeInterval(self.backoff)
+                self.backoff = min(self.backoff * 2, 900)
+                self.onUnavailable?(message)
             }
-            self.task = nil
         }
     }
 
     func stop() {
         task?.cancel()
-        task = nil
+        // Terminate the running process and let the task nil itself once the
+        // (now-terminated) fetch returns — never nil `task` here, or a restart
+        // could launch a second concurrent `claude` while this one is alive.
+        Self.terminate()
+    }
+
+    private nonisolated static func terminate() {
+        processLock.lock(); defer { processLock.unlock() }
+        if runningProcess?.isRunning == true { runningProcess?.terminate() }
     }
 
     private enum Outcome: Sendable {
@@ -70,38 +100,54 @@ final class ClaudeUsageClient {
     /// Run `claude -p /usage` under the user's login PATH and return combined
     /// stdout+stderr. Bounded by a hard timeout so a hung CLI can't wedge polling.
     private nonisolated static func runUsage(claude: String, path: String) -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: claude)
-        task.arguments = ["-p", "/usage"]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: claude)
+        process.arguments = ["-p", "/usage"]
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = path
         env["DISABLE_AUTOUPDATER"] = "1"
         env["DISABLE_NON_ESSENTIAL_MODEL_CALLS"] = "1"
         env["CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION"] = "1"
-        task.environment = env
-        task.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        process.environment = env
+        process.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
         let outPipe = Pipe(), errPipe = Pipe()
-        task.standardOutput = outPipe
-        task.standardError = errPipe
-        task.standardInput = FileHandle.nullDevice
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        process.standardInput = FileHandle.nullDevice
 
-        do { try task.run() } catch { return "" }
+        do { try process.run() } catch { return "" }
+        processLock.lock(); runningProcess = process; processLock.unlock()
+        defer { processLock.lock(); runningProcess = nil; processLock.unlock() }
 
-        let killer = DispatchWorkItem { if task.isRunning { task.terminate() } }
+        let killer = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30, execute: killer)
+
+        // Drain stderr concurrently so a child that fills one pipe's buffer
+        // while the other stays open can't deadlock the read.
+        let errBox = PipeDataBox()
+        let errDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            errBox.data = errPipe.fileHandleForReading.readDataToEndOfFile()
+            errDone.signal()
+        }
         let out = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let err = errPipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
+        process.waitUntilExit()
+        errDone.wait()
         killer.cancel()
 
-        return String(decoding: out, as: UTF8.self) + "\n" + String(decoding: err, as: UTF8.self)
+        return String(decoding: out, as: UTF8.self) + "\n" + String(decoding: errBox.data, as: UTF8.self)
     }
 
     private nonisolated static func isAuthError(_ text: String) -> Bool {
+        // Specific phrases only — bare "sign in"/"credentials" appear in normal
+        // prose and would wrongly tell a logged-in user to re-authenticate.
         let low = text.lowercased()
-        return low.contains("not signed in") || low.contains("sign in")
-            || low.contains("log in") || low.contains("/login")
-            || low.contains("authenticate") || low.contains("credentials")
+        return low.contains("not signed in")
+            || low.contains("not logged in")
+            || low.contains("please log in")
+            || low.contains("please sign in")
+            || low.contains("/login")
+            || low.contains("no credentials")
     }
 
     // MARK: - Parsing
@@ -115,7 +161,10 @@ final class ClaudeUsageClient {
         var windows: [QuotaWindow] = []
         for rawLine in text.components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard line.count <= 90,
+            // Generous bound only to skip prose paragraphs; the title-prefix
+            // check below is what actually gates to real window lines. (90 was
+            // too tight — a long IANA timezone at 100% used could exceed it.)
+            guard line.count <= 200,
                   let colon = line.firstIndex(of: ":") else { continue }
             let title = String(line[..<colon]).trimmingCharacters(in: .whitespaces).lowercased()
             let rest = String(line[line.index(after: colon)...])
@@ -234,7 +283,9 @@ final class ClaudeUsageClient {
         comp.day = parsed.day
         comp.hour = parsed.hour
         comp.minute = parsed.minute
-        guard let result = Calendar.current.date(from: comp) else { return date }
+        // Fail to nil rather than returning the year-2000 parse, which would
+        // render a reset ~26 years in the past.
+        guard let result = Calendar.current.date(from: comp) else { return nil }
         if result.timeIntervalSinceNow < -86_400 * 180 {
             comp.year = year + 1
             return Calendar.current.date(from: comp)

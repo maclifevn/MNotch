@@ -190,9 +190,9 @@ final class QuotaService {
         return min(Double(tokensInWindow) / Double(windowLimit), 1)
     }
 
-    func refresh() {
+    func refresh(force: Bool = false) {
         codexClient.refresh()
-        claudeClient.refresh()
+        claudeClient.refresh(force: force)
         guard refreshTask == nil else { return }
         let cutoff = Date().addingTimeInterval(-Self.window)
         let directory = projectsDir

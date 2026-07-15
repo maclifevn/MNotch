@@ -158,9 +158,9 @@ final class AppServices {
         agents.onRequestResolved = { [weak self] in
             self?.collapseIfIdle?()
         }
-        agents.onClaudeQuota = { [weak self] limits, updatedAt in
-            self?.quota.ingestClaude(limits, updatedAt: updatedAt)
-        }
+        // Claude usage comes solely from the `claude` CLI now (QuotaService's
+        // ClaudeUsageClient). The status-line quota bridge is left unwired so the
+        // two sources can't fight over claudeQuota's window count and state.
         // Keep the deployed relay in sync with this app build.
         ClaudeHookInstaller.refreshScripts()
         setAgentMonitoringEnabled(SettingsStore.shared.agentEnabled)

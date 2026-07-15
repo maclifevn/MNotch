@@ -106,6 +106,17 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertNotNil(date)
     }
 
+    func testClaudeCLIUsageParsesLineWithLongTimezoneAndOverage() throws {
+        // A long IANA timezone at 100% used pushes the line past 90 chars; it
+        // must still parse (the old guard dropped it).
+        let output = """
+        Current week (all models): 100% used · resets Dec 31 at 11:59pm (America/Argentina/Buenos_Aires)
+        """
+        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
+        XCTAssertEqual(windows.map(\.label), ["7d"])
+        XCTAssertEqual(windows[0].usedPercent, 100)
+    }
+
     func testQuotaParserCountsBillableFieldsOnly() throws {
         let json = #"{"timestamp":"2026-07-14T10:00:00.000Z","message":{"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":3,"cache_read_input_tokens":1000}}}"#
         let result = QuotaUsageParser.fields(from: try XCTUnwrap(json.data(using: .utf8)))
