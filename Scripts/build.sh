@@ -32,6 +32,7 @@ sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUM/" \
     "$ROOT/Support/Info.plist" > "$APP/Contents/Info.plist"
 
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/"
+cp "$ROOT/Support/icon_mnotch.png" "$APP/Contents/Resources/"
 
 # MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
 ADAPTER_DIR="$ROOT/Vendor/mediaremote-adapter"

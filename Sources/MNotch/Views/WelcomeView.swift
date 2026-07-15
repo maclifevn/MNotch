@@ -150,23 +150,32 @@ struct WelcomeView: View {
 
 // MARK: - Hero logo
 
-/// The app-icon look: a light rounded plate holding the faceted brand mountain.
+/// The bundled MNotch app-icon artwork, with a drawn fallback if it's missing.
 private struct LogoPlate: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 21, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color(white: 1.0), Color(white: 0.92)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            )
-            .frame(width: 88, height: 88)
-            .overlay { FacetedMark().frame(width: 54, height: 46) }
-            .overlay(
+        Group {
+            if let url = Bundle.main.url(forResource: "icon_mnotch", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            } else {
                 RoundedRectangle(cornerRadius: 21, style: .continuous)
-                    .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(white: 1.0), Color(white: 0.92)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .overlay { FacetedMark().frame(width: 54, height: 46) }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 21, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                    )
+            }
+        }
+        .frame(width: 92, height: 92)
+        .shadow(color: .black.opacity(0.20), radius: 11, x: 0, y: 6)
     }
 }
 
