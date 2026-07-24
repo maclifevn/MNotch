@@ -320,7 +320,38 @@ final class MediaRemoteService {
 
     // MARK: - Commands
 
+    /// Players MNotch can start-and-play by name (AppleScript `play`). Keyed by
+    /// bundle id; the value is the scripting name. Values are constants — never
+    /// interpolated from user input — so the generated AppleScript is safe.
+    static let scriptablePlayers: [String: String] = [
+        "com.apple.Music": "Music",
+        "com.spotify.client": "Spotify",
+    ]
+
+    struct PreferredPlayer: Identifiable {
+        let bundleID: String
+        let name: String
+        var id: String { bundleID }
+    }
+
+    /// Scriptable players actually installed, for the Settings picker.
+    static var installedPlayers: [PreferredPlayer] {
+        scriptablePlayers.compactMap { bundle, name in
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) != nil
+                ? PreferredPlayer(bundleID: bundle, name: name)
+                : nil
+        }.sorted { $0.name < $1.name }
+    }
+
     func send(_ command: MediaCommand) {
+        // Pressing Play from an idle notch normally resumes whatever macOS last
+        // treated as Now Playing (usually Apple Music). If the user picked a
+        // preferred player and it isn't already the loaded source, start it
+        // directly instead so the Play button honors their choice.
+        let starting = command == .play
+            || (command == .togglePlayPause && !playback.isPlaying)
+        if starting, startPreferredPlayerIfNeeded() { return }
+
         // Optimistic flip so the button responds on the same frame.
         switch command {
         case .togglePlayPause:
@@ -334,6 +365,30 @@ final class MediaRemoteService {
         }
         runAdapter(["send", String(command.rawValue)])
         pollSoon()
+    }
+
+    /// Returns true when a configured preferred player handled the start.
+    private func startPreferredPlayerIfNeeded() -> Bool {
+        let preferred = SettingsStore.shared.mediaPreferredPlayer
+        guard !preferred.isEmpty,
+              preferred != playback.bundleIdentifier,   // already loaded → normal resume
+              let appName = Self.scriptablePlayers[preferred]
+        else { return false }
+        setPlayingOptimistically(true)
+        Self.playViaAppleScript(appName)
+        pollSoon()
+        return true
+    }
+
+    private nonisolated static func playViaAppleScript(_ appName: String) {
+        let source = "tell application \"\(appName)\" to play"
+        Task.detached {
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
+            if let error {
+                mnotchLog.error("Preferred player AppleScript failed: \(error, privacy: .public)")
+            }
+        }
     }
 
     func seek(to seconds: TimeInterval) {

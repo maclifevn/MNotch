@@ -139,6 +139,9 @@ final class SettingsStore {
     var mediaQuickAction: MediaQuickAction { didSet { save("media.quickAction", mediaQuickAction.rawValue) } }
     var mediaKnownSources: [String] { didSet { save("media.knownSources", mediaKnownSources) } }
     var mediaDisabledSources: [String] { didSet { save("media.disabledSources", mediaDisabledSources) } }
+    /// Bundle id of the app the notch's Play button starts when nothing is
+    /// already loaded from it ("" = let macOS pick, its usual default).
+    var mediaPreferredPlayer: String { didSet { save("media.preferredPlayer", mediaPreferredPlayer) } }
 
     // MARK: Calendar
 
@@ -289,6 +292,7 @@ final class SettingsStore {
         mediaQuickAction = opt("media.quickAction", MediaQuickAction.shuffle)
         mediaKnownSources = d.stringArray(forKey: "media.knownSources") ?? []
         mediaDisabledSources = d.stringArray(forKey: "media.disabledSources") ?? []
+        mediaPreferredPlayer = str("media.preferredPlayer", "")
 
         calendarEnabled = flag("cal.enabled", true, legacy: "feature.calendar")
         calendarTimeBefore = num("cal.timeBefore", 15)

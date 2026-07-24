@@ -17,6 +17,20 @@ struct NowPlayingPane: View {
                     step: 1
                 ) { "\(Int($0)) s" }
 
+                if !MediaRemoteService.installedPlayers.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Play button starts", selection: $settings.mediaPreferredPlayer) {
+                            Text("System default").tag("")
+                            ForEach(MediaRemoteService.installedPlayers) { player in
+                                Text(player.name).tag(player.bundleID)
+                            }
+                        }
+                        Text("Which app the notch's Play button opens when nothing is loaded yet. macOS still controls whatever is already playing — press Play there once and the notch follows it.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Artwork badge").font(.callout)
                     IconCardPicker(
