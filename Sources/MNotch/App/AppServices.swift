@@ -20,7 +20,6 @@ final class AppServices {
     let lockScreen = LockScreenWatcher()
     let agents = AgentMonitorService()
     let quota = QuotaService()
-    let notifications = NotificationMirrorService()
 
     /// Set by NotchWindowController; opens the Agent tab for a request.
     var expandAgent: (() -> Void)?
@@ -172,19 +171,6 @@ final class AppServices {
         }
         agents.onRequestResolved = { [weak self] in
             self?.collapseIfIdle?()
-        }
-        notifications.onNotification = { [weak self] item in
-            guard let self, SettingsStore.shared.notifMirrorEnabled else { return }
-            // Respect Focus / Do Not Disturb: macOS still records notifications
-            // to the store while suppressing their banners, so don't resurface
-            // them on the notch when a Focus is active.
-            guard !self.focus.isFocused else { return }
-            self.showPop?(.systemNotification(
-                bundleID: item.bundleID,
-                app: item.appName,
-                title: item.title,
-                body: item.body
-            ))
         }
         // Claude usage comes solely from the local CLI. Refresh installed hook
         // scripts and migrate the retired status-line quota wrapper if present.

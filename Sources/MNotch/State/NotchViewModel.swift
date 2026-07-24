@@ -23,7 +23,6 @@ enum PopKind: Equatable {
     case event(title: String, red: Double, green: Double, blue: Double, startingNow: Bool, start: Date)
     case agent(name: String, kind: String, needsInput: Bool)
     case agentConfirm(approved: Bool)
-    case systemNotification(bundleID: String, app: String, title: String, body: String)
 }
 
 enum NotchStatus: Equatable {
@@ -445,7 +444,6 @@ final class NotchViewModel {
         case .event: settings.calendarPeekDuration
         case .agent: settings.agentDuration
         case .agentConfirm: 1.2   // driven by confirmAgentDecision, not showPop
-        case .systemNotification: settings.notifMirrorDuration
         }
 
         let logKind = switch kind {
@@ -458,7 +456,6 @@ final class NotchViewModel {
         case .event: "calendar-event"
         case .agent: "agent"
         case .agentConfirm: "agent-confirm"
-        case .systemNotification: "system-notification"
         }
         mnotchLog.debug("showPop kind=\(logKind, privacy: .public)")
         withAnimation(Anim.pop) { status = .pop(kind) }

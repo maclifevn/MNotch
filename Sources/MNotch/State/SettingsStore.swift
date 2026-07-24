@@ -107,11 +107,6 @@ final class SettingsStore {
     var focusAllowDisplay: Bool { didSet { save("focus.allowDisplay", focusAllowDisplay) } }
     var focusAllowSound: Bool { didSet { save("focus.allowSound", focusAllowSound) } }
 
-    // MARK: System notification mirroring (experimental; needs Full Disk Access)
-
-    var notifMirrorEnabled: Bool { didSet { save("notif.mirror", notifMirrorEnabled) } }
-    var notifMirrorDuration: Double { didSet { save("notif.duration", notifMirrorDuration) } }
-
     // MARK: Display HUD (brightness)
 
     var displayHUDEnabled: Bool { didSet { save("display.enabled", displayHUDEnabled) } }
@@ -270,8 +265,6 @@ final class SettingsStore {
         focusAllowConnectivity = flag("focus.allowBt", true)
         focusAllowDisplay = flag("focus.allowDisplay", true)
         focusAllowSound = flag("focus.allowSound", true)
-        notifMirrorEnabled = flag("notif.mirror", false)
-        notifMirrorDuration = num("notif.duration", 5)
 
         displayHUDEnabled = flag("display.enabled", true, legacy: "feature.hud")
         displayHUDDuration = num("display.duration", 1.5)
