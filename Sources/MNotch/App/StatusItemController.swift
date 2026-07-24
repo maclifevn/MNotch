@@ -147,6 +147,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Menu-bar icon point size — matches the neighbouring status glyphs.
+    private static let iconSize: CGFloat = 16
+
     /// The MNotch app-icon badge, rendered from Support/MNotch_icon.svg into
     /// Support/menubar-icon.png at build time and shipped in Resources. Loaded
     /// once and marked template so macOS tints it for the menu bar.
@@ -156,19 +159,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
            let loaded = NSImage(contentsOf: url) {
             image = loaded
         } else {
-            image = NSImage(size: NSSize(width: 18, height: 18))
+            image = NSImage(size: NSSize(width: iconSize, height: iconSize))
         }
-        image.size = NSSize(width: 18, height: 18)
+        image.size = NSSize(width: iconSize, height: iconSize)
         image.isTemplate = true
         return image
     }()
 
     /// Base badge, plus a knocked-out warning dot when Accessibility is needed.
+    /// Composited at 18pt (where the badge coords are tuned) then sized down.
     private static func templateLogo(showWarning: Bool) -> NSImage {
         guard showWarning else { return baseIcon }
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size, flipped: false) { _ in
-            baseIcon.draw(in: NSRect(origin: .zero, size: size))
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            baseIcon.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
             NSColor.black.setFill()
             NSBezierPath(ovalIn: NSRect(x: 10.4, y: 0.2, width: 7.4, height: 7.4)).fill()
             NSGraphicsContext.current?.saveGraphicsState()
@@ -182,6 +185,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             NSGraphicsContext.current?.restoreGraphicsState()
             return true
         }
+        image.size = NSSize(width: iconSize, height: iconSize)
         image.isTemplate = true
         return image
     }
