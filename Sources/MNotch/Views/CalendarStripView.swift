@@ -13,10 +13,9 @@ struct CalendarStripView: View {
             } else if calendar.today.isEmpty && calendar.upcoming.isEmpty {
                 message("No upcoming events", symbol: "checkmark.circle")
             } else {
-                HStack(alignment: .top, spacing: 16) {
-                    todayColumn
-                    Spacer(minLength: 0)
-                    upcomingColumn
+                HStack(alignment: .top, spacing: 18) {
+                    dateBlock
+                    eventsColumn
                 }
             }
         }
@@ -32,40 +31,45 @@ struct CalendarStripView: View {
         }
     }
 
-    private var todayColumn: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    /// Big date (or the mini month grid) anchoring the left edge.
+    private var dateBlock: some View {
+        Group {
             if SettingsStore.shared.calendarMonthView {
                 MonthGridView(eventDays: calendar.monthEventDays)
             } else {
-                Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.red)
-                    .kerning(0.5)
-                Text(Date().formatted(.dateTime.day()))
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.red)
+                        .kerning(0.5)
+                    Text(Date().formatted(.dateTime.day()))
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(calendar.today.prefix(3)) { item in
+        }
+        .fixedSize()
+    }
+
+    /// One left-aligned flow: today's events, then each upcoming day under its
+    /// label. Fills the remaining width so nothing floats off in a corner.
+    private var eventsColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(calendar.today.prefix(3)) { item in
+                EventChip(item: item)
+            }
+            ForEach(calendar.upcoming) { section in
+                Text(Self.dayLabel(section.day))
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .kerning(0.6)
+                    .padding(.top, calendar.today.isEmpty ? 0 : 3)
+                ForEach(section.items.prefix(2)) { item in
                     EventChip(item: item)
                 }
             }
-            .padding(.top, 4)
         }
-    }
-
-    private var upcomingColumn: some View {
-        VStack(alignment: .trailing, spacing: 5) {
-            ForEach(calendar.upcoming) { section in
-                Text(Self.dayLabel(section.day))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .kerning(0.5)
-                ForEach(section.items) { item in
-                    EventChip(item: item, alignment: .trailing)
-                }
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     static func dayLabel(_ day: Date) -> String {
@@ -113,9 +117,8 @@ struct CalendarStripView: View {
     }
 }
 
-/// Rounded event pill tinted with the calendar's color, like Alcove's.
-/// `alignment` pins the pill inside its 165pt slot (leading in the today
-/// column, trailing in the right-aligned upcoming column).
+/// Rounded event pill tinted with the calendar's color, like Alcove's. Hugs its
+/// title, capped so a very long name truncates instead of spanning the panel.
 struct EventChip: View {
     let item: CalendarService.Item
     var alignment: Alignment = .leading
@@ -144,6 +147,6 @@ struct EventChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(tint.opacity(0.18), in: Capsule())
-        .frame(maxWidth: 165, alignment: alignment)
+        .frame(maxWidth: 320, alignment: alignment)
     }
 }
