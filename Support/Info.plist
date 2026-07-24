@@ -29,7 +29,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>MNotch uses Apple Events only when you choose an action that controls your music app (Music or Spotify) or returns to an agent session in Terminal.</string>
+	<string>MNotch uses Apple Events only when you choose an action that controls your media app or returns to an agent session in Terminal.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>MNotch shows your upcoming events in the notch calendar widget.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>

@@ -320,9 +320,10 @@ final class MediaRemoteService {
 
     // MARK: - Commands
 
-    /// Players MNotch can start-and-play by name (AppleScript `play`). Keyed by
-    /// bundle id; the value is the scripting name. Values are constants — never
-    /// interpolated from user input — so the generated AppleScript is safe.
+    /// Players MNotch can start with an explicit AppleScript `play` verb. Keyed
+    /// by bundle id → scripting name; values are constants (never interpolated
+    /// from user input) so the generated AppleScript is safe. Any other app is
+    /// launched and nudged via MediaRemote instead.
     static let scriptablePlayers: [String: String] = [
         "com.apple.Music": "Music",
         "com.spotify.client": "Spotify",
@@ -334,13 +335,19 @@ final class MediaRemoteService {
         var id: String { bundleID }
     }
 
-    /// Scriptable players actually installed, for the Settings picker.
+    /// Apps offered in the "Play button starts" picker: the media sources the
+    /// notch has actually seen plus the common scriptable players — whichever
+    /// are installed, listed by display name.
     static var installedPlayers: [PreferredPlayer] {
-        scriptablePlayers.compactMap { bundle, name in
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) != nil
-                ? PreferredPlayer(bundleID: bundle, name: name)
-                : nil
-        }.sorted { $0.name < $1.name }
+        let candidates = Set(scriptablePlayers.keys)
+            .union(SettingsStore.shared.mediaKnownSources)
+        return candidates.compactMap { bundle -> PreferredPlayer? in
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle)
+            else { return nil }
+            let name = FileManager.default.displayName(atPath: url.path)
+                .replacingOccurrences(of: ".app", with: "")
+            return PreferredPlayer(bundleID: bundle, name: name)
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     func send(_ command: MediaCommand) {
@@ -367,28 +374,38 @@ final class MediaRemoteService {
         pollSoon()
     }
 
-    /// Returns true when a configured preferred player handled the start.
+    /// Returns true when a configured preferred player handled the start: bring
+    /// the chosen app up, then play it — AppleScript for scriptable players, a
+    /// MediaRemote nudge for everything else once it's the Now Playing app.
     private func startPreferredPlayerIfNeeded() -> Bool {
         let preferred = SettingsStore.shared.mediaPreferredPlayer
         guard !preferred.isEmpty,
               preferred != playback.bundleIdentifier,   // already loaded → normal resume
-              let appName = Self.scriptablePlayers[preferred]
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preferred)
         else { return false }
         setPlayingOptimistically(true)
-        Self.playViaAppleScript(appName)
-        pollSoon()
-        return true
-    }
-
-    private nonisolated static func playViaAppleScript(_ appName: String) {
-        let source = "tell application \"\(appName)\" to play"
-        Task.detached {
-            var error: NSDictionary?
-            NSAppleScript(source: source)?.executeAndReturnError(&error)
-            if let error {
-                mnotchLog.error("Preferred player AppleScript failed: \(error, privacy: .public)")
+        let scriptName = Self.scriptablePlayers[preferred]
+        let nudge = Self.adapterPaths.map { [$0.script, $0.framework, "send", "0"] }
+        Task.detached(priority: .userInitiated) {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            if let scriptName {
+                var error: NSDictionary?
+                NSAppleScript(source: "tell application \"\(scriptName)\" to play")?
+                    .executeAndReturnError(&error)
+                if let error {
+                    mnotchLog.error("Preferred player script failed: \(error, privacy: .public)")
+                }
+            } else if let nudge {
+                // Give the freshly launched app a moment to register as the
+                // system Now Playing target, then send it a play command.
+                try? await Task.sleep(for: .milliseconds(900))
+                Self.runAdapterSync(nudge)
             }
         }
+        pollSoon()
+        return true
     }
 
     func seek(to seconds: TimeInterval) {
