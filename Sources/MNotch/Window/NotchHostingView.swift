@@ -23,8 +23,8 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         fatalError("init(rootView:) is not supported")
     }
 
-    /// The panel never becomes key, so without this the first click is
-    /// swallowed as window activation and gestures never fire.
+    /// Accept the first click even when the panel isn't yet key, so a tap that
+    /// arrives before NotchPanel.sendEvent promotes the panel still lands.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

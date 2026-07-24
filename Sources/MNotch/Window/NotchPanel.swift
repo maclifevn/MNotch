@@ -29,7 +29,7 @@ final class NotchPanel: NSPanel {
         isMovable = false
         hidesOnDeactivate = false
         isFloatingPanel = true
-        becomesKeyOnlyIfNeeded = true
+        becomesKeyOnlyIfNeeded = false
         animationBehavior = .none
         acceptsMouseMovedEvents = true
         // Allows the panel to stay visible when elevated over the lock screen.
@@ -40,6 +40,19 @@ final class NotchPanel: NSPanel {
         setFrame(frame, display: true)
     }
 
-    override var canBecomeKey: Bool { false }
+    // SwiftUI controls in a non-key panel swallow the first click (it's spent
+    // becoming focused), so tab/button taps registered only "sometimes". Allow
+    // the panel to become key; `.nonactivatingPanel` keeps this from activating
+    // the app or stealing the menu bar.
+    override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Become key on the mouse-DOWN, before the event is routed, so the very
+    /// first tap on a control fires it instead of just focusing the panel.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 }
