@@ -241,7 +241,6 @@ struct ShelfItemView: View {
                     Image(nsImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 } else {
                     Image(systemName: "doc.fill")
                         .font(.system(size: 18))
@@ -249,6 +248,9 @@ struct ShelfItemView: View {
                 }
             }
             .frame(width: 52, height: 52)
+            // Clip the fill-cropped thumbnail to the tile so a wide (landscape)
+            // image can't overflow its 52pt slot and overlap its neighbours.
+            .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(
