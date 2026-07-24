@@ -144,6 +144,10 @@ final class CalendarService {
     /// flipped (returning to the app re-checks via permissionMayHaveChanged).
     func requestAccess() {
         if EKEventStore.authorizationStatus(for: .event) == .notDetermined {
+            // Activate first: a menu-bar (accessory) app that isn't frontmost
+            // can fail to surface the EventKit permission prompt when it's
+            // triggered from the non-activating notch panel.
+            NSApp.activate()
             requested = false        // let ensureStarted() run the prompt again
             ensureStarted()
         } else {

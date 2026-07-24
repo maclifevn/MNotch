@@ -12,7 +12,13 @@ enum SystemSettings {
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)"
         ) else { return }
-        NSWorkspace.shared.open(url)
+        // Bring the app forward first: triggered from a non-activating menu-bar
+        // window, System Settings can otherwise open behind. `activates` then
+        // pulls Settings itself to the front.
+        NSApp.activate()
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.open(url, configuration: config, completionHandler: nil)
     }
 }
 
