@@ -39,6 +39,7 @@ final class SettingsStore {
             onDisplayConfigChanged?()
         }
     }
+    var hideMenuBarIcon: Bool { didSet { save("general.hideMenuBar", hideMenuBarIcon) } }
     /// "all" | "main" | "builtIn" | display id string
     var displayTarget: String {
         didSet {
@@ -226,6 +227,7 @@ final class SettingsStore {
         // Default ON so the notch shows out of the box on every Mac (incl. mini/
         // Studio/external-only), not just notched MacBooks.
         forceSimulatedNotch = flag("general.forceNotch", true, legacy: "display.fakeNotch")
+        hideMenuBarIcon = flag("general.hideMenuBar", false)
         displayTarget = str("general.displayTarget", "all")
         idleActivity = opt("general.idleActivity", IdleActivity.playing)
         idleMostRecent = flag("general.idleMostRecent", false)

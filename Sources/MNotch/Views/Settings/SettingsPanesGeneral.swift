@@ -33,6 +33,17 @@ struct GeneralPane: View {
                         Text(screen.localizedName).tag(String(screen.displayID))
                     }
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Hide menu bar icon", isOn: $settings.hideMenuBarIcon)
+                    Text("Settings stays reachable from the gear tab in the notch, and Quit is below.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                HStack {
+                    Spacer()
+                    Button("Quit MNotch") { NSApp.terminate(nil) }
+                        .controlSize(.small)
+                }
             }
 
             Section("Idle Activity") {

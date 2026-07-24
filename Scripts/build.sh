@@ -37,6 +37,7 @@ cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/"
 sips -z 512 512 "$ROOT/Support/icon_mnotch.png" \
     --out "$APP/Contents/Resources/icon_mnotch.png" >/dev/null
 cp "$ROOT/Support/donate-qr.png" "$APP/Contents/Resources/"
+cp "$ROOT/Support/menubar-icon.png" "$APP/Contents/Resources/"
 
 # MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
 ADAPTER_DIR="$ROOT/Vendor/mediaremote-adapter"

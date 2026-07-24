@@ -61,9 +61,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         statusItem = item
         observeAccessibilityState()
+        observeVisibility()
 #if DEBUG
         mnotchLog.debug("status item installed visible=\(item.isVisible)")
 #endif
+    }
+
+    /// Show/hide the menu bar item per Settings. Settings stays reachable from
+    /// the notch's gear tab, and Quit lives in Settings too, so hiding it never
+    /// traps the user.
+    private func observeVisibility() {
+        let hidden = withObservationTracking {
+            SettingsStore.shared.hideMenuBarIcon
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeVisibility() }
+        }
+        statusItem?.isVisible = !hidden
     }
 
     /// Consistently-sized template SF Symbol for a menu item's leading icon.
@@ -134,79 +147,39 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// The MNotch app-icon badge, rendered from Support/MNotch_icon.svg into
+    /// Support/menubar-icon.png at build time and shipped in Resources. Loaded
+    /// once and marked template so macOS tints it for the menu bar.
+    private static let baseIcon: NSImage = {
+        let image: NSImage
+        if let url = Bundle.main.url(forResource: "menubar-icon", withExtension: "png"),
+           let loaded = NSImage(contentsOf: url) {
+            image = loaded
+        } else {
+            image = NSImage(size: NSSize(width: 18, height: 18))
+        }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }()
+
+    /// Base badge, plus a knocked-out warning dot when Accessibility is needed.
     private static func templateLogo(showWarning: Bool) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            NSColor.black.setStroke()
-
-            let display = NSBezierPath(
-                roundedRect: NSRect(x: 1.8, y: 1.8, width: 14.4, height: 14.4),
-                xRadius: 3.3,
-                yRadius: 3.3
-            )
-            display.lineWidth = 1.0
-            display.stroke()
-
+        guard showWarning else { return baseIcon }
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { _ in
+            baseIcon.draw(in: NSRect(origin: .zero, size: size))
             NSColor.black.setFill()
-
-            // Notch centered on the top edge: ~5 wide, a touch taller.
-            let notch = NSBezierPath()
-            notch.move(to: NSPoint(x: 6.5, y: 16.2))
-            notch.line(to: NSPoint(x: 11.5, y: 16.2))
-            notch.line(to: NSPoint(x: 11.32, y: 15.05))
-            notch.curve(
-                to: NSPoint(x: 10.6, y: 14.5),
-                controlPoint1: NSPoint(x: 11.22, y: 14.68),
-                controlPoint2: NSPoint(x: 10.95, y: 14.5)
-            )
-            notch.line(to: NSPoint(x: 7.4, y: 14.5))
-            notch.curve(
-                to: NSPoint(x: 6.68, y: 15.05),
-                controlPoint1: NSPoint(x: 7.05, y: 14.5),
-                controlPoint2: NSPoint(x: 6.78, y: 14.68)
-            )
-            notch.close()
-            notch.fill()
-
-            // Maclife mountain range (favicon-ml.svg), dropped so its base sits
-            // right on the frame's bottom edge — no hollow gap beneath it.
-            func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-                // SVG viewBox x∈[1.29,62.16], y∈[2.94,50.15] (top-down) → icon.
-                NSPoint(
-                    x: 3.25 + (x - 1.29) / 60.87 * 11.5,
-                    y: 1.9 + (50.15 - y) / 47.21 * 11.3
-                )
-            }
-            let mark = NSBezierPath()
-            mark.move(to: p(13.77, 17.46))   // left peak
-            mark.line(to: p(1.29, 50.15))
-            mark.line(to: p(12.29, 50.15))
-            mark.line(to: p(27.56, 26.78))
-            mark.close()
-            mark.move(to: p(43.12, 2.94))    // tall right peak
-            mark.line(to: p(27.56, 26.78))
-            mark.line(to: p(62.16, 50.15))
-            mark.close()
-            mark.move(to: p(27.56, 26.78))   // base fill
-            mark.line(to: p(12.29, 50.15))
-            mark.line(to: p(62.16, 50.15))
-            mark.close()
-            mark.fill()
-
-            if showWarning {
-                // Compact notification badge with a knocked-out exclamation;
-                // it remains a template so macOS owns the menu-bar tint.
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 10.4, y: 0.2, width: 7.4, height: 7.4)).fill()
-                NSGraphicsContext.current?.saveGraphicsState()
-                NSGraphicsContext.current?.compositingOperation = .clear
-                NSBezierPath(
-                    roundedRect: NSRect(x: 13.55, y: 3.0, width: 1.05, height: 2.9),
-                    xRadius: 0.5,
-                    yRadius: 0.5
-                ).fill()
-                NSBezierPath(ovalIn: NSRect(x: 13.55, y: 1.45, width: 1.05, height: 1.05)).fill()
-                NSGraphicsContext.current?.restoreGraphicsState()
-            }
+            NSBezierPath(ovalIn: NSRect(x: 10.4, y: 0.2, width: 7.4, height: 7.4)).fill()
+            NSGraphicsContext.current?.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(
+                roundedRect: NSRect(x: 13.55, y: 3.0, width: 1.05, height: 2.9),
+                xRadius: 0.5,
+                yRadius: 0.5
+            ).fill()
+            NSBezierPath(ovalIn: NSRect(x: 13.55, y: 1.45, width: 1.05, height: 1.05)).fill()
+            NSGraphicsContext.current?.restoreGraphicsState()
             return true
         }
         image.isTemplate = true
