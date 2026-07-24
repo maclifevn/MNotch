@@ -161,6 +161,11 @@ struct NotchBodyView: View {
         switch kind {
         case .accessibility:
             AccessibilityPopView(geometry: viewModel.geometry)
+        case .systemNotification(let bundleID, let app, let title, let body):
+            NotificationPopView(
+                bundleID: bundleID, app: app, title: title, bodyText: body,
+                geometry: viewModel.geometry
+            )
         case .charging(let percentage):
             BatteryPopView(percentage: percentage, kind: .charging, geometry: viewModel.geometry)
         case .lowBattery(let percentage):

@@ -225,6 +225,48 @@ struct AgentPopView: View {
     }
 }
 
+/// Mirrored macOS notification: app icon + title on the left wing, body on the
+/// right. Everything is single-line and truncates inside its wing.
+struct NotificationPopView: View {
+    let bundleID: String
+    let app: String
+    let title: String
+    let bodyText: String
+    let geometry: NotchGeometry
+
+    private var icon: NSImage? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    var body: some View {
+        PopWings(geometry: geometry) {
+            HStack(spacing: 6) {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Text(title.isEmpty ? app : title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+            }
+        } right: {
+            Text(bodyText.isEmpty ? app : bodyText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
 /// Compact confirmation pill shown briefly after Approve/Reject (reference 2).
 struct AgentConfirmView: View {
     let approved: Bool

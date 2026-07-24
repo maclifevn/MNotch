@@ -226,6 +226,48 @@ struct ConnectivityPane: View {
     }
 }
 
+struct NotificationsPane: View {
+    @Bindable var settings = SettingsStore.shared
+    private var notifications: NotificationMirrorService { AppServices.shared.notifications }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: $settings.notifMirrorEnabled) {
+                    Label("Mirror system notifications", systemImage: "bell.badge.fill")
+                }
+                Text("Shows notifications from every app on the notch as they arrive. Experimental — it reads macOS's private notification store, so it needs Full Disk Access and may break on future macOS updates.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                if settings.notifMirrorEnabled, notifications.access == .denied {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Full Disk Access needed — grant it to MNotch, then it starts mirroring.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Button("Open Full Disk Access Settings") {
+                            notifications.openFullDiskAccessSettings()
+                        }
+                        .controlSize(.small)
+                    }
+                } else if settings.notifMirrorEnabled, notifications.access == .granted {
+                    Label("Access granted", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+
+                SliderRow(
+                    title: "Duration",
+                    value: $settings.notifMirrorDuration,
+                    range: 2...10,
+                    step: 0.5
+                ) { String(format: "%.1f s", $0) }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 struct FocusPane: View {
     @Bindable var settings = SettingsStore.shared
 

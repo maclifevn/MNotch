@@ -99,6 +99,10 @@ final class SettingsStore {
 
     var focusEnabled: Bool { didSet { save("focus.enabled", focusEnabled) } }
     var focusDuration: Double { didSet { save("focus.duration", focusDuration) } }
+
+    // System notification mirroring (experimental; needs Full Disk Access).
+    var notifMirrorEnabled: Bool { didSet { save("notif.mirror", notifMirrorEnabled) } }
+    var notifMirrorDuration: Double { didSet { save("notif.duration", notifMirrorDuration) } }
     var focusSoundOnSleep: Bool { didSet { save("focus.sleepSound", focusSoundOnSleep) } }
     var focusReplaceWaveform: Bool { didSet { save("focus.replaceWaveform", focusReplaceWaveform) } }
     var focusHideLabel: Bool { didSet { save("focus.hideLabel", focusHideLabel) } }
@@ -258,6 +262,8 @@ final class SettingsStore {
 
         focusEnabled = flag("focus.enabled", true)
         focusDuration = num("focus.duration", 5)
+        notifMirrorEnabled = flag("notif.mirror", false)
+        notifMirrorDuration = num("notif.duration", 5)
         focusSoundOnSleep = flag("focus.sleepSound", false)
         focusReplaceWaveform = flag("focus.replaceWaveform", false)
         focusHideLabel = flag("focus.hideLabel", false)

@@ -19,6 +19,7 @@ struct FeatureFlags: Equatable, Sendable {
     var mediaHideWhileSourceActive = false
     var focusEnabled = false
     var agentEnabled = false
+    var notifMirrorEnabled = false
     var lockEnabled = false
     var lockNowPlaying = false
     var lockShowVolume = false
@@ -44,6 +45,7 @@ struct FeatureFlags: Equatable, Sendable {
             mediaHideWhileSourceActive: settings.mediaHideWhileSourceActive,
             focusEnabled: settings.focusEnabled,
             agentEnabled: settings.agentEnabled,
+            notifMirrorEnabled: settings.notifMirrorEnabled,
             lockEnabled: settings.lockEnabled,
             lockNowPlaying: settings.lockNowPlaying,
             lockShowVolume: settings.lockShowVolume,
@@ -71,6 +73,7 @@ struct FeatureDemand: Equatable {
     let focus: Bool
     let agents: Bool
     let quota: Bool
+    let notifications: Bool
 
     init(settings: SettingsStore) {
         self.init(flags: .capture(settings))
@@ -97,12 +100,13 @@ struct FeatureDemand: Equatable {
         focus = flags.focusEnabled || (lock && flags.lockWidgetFocus)
         agents = flags.agentEnabled
         quota = flags.agentEnabled
+        notifications = flags.notifMirrorEnabled
     }
 
     private init(
         media: Bool, audio: Bool, displayControls: Bool, keys: Bool,
         power: Bool, bluetooth: Bool, calendar: Bool, occlusion: Bool,
-        focus: Bool, agents: Bool, quota: Bool
+        focus: Bool, agents: Bool, quota: Bool, notifications: Bool
     ) {
         self.media = media
         self.audio = audio
@@ -115,6 +119,7 @@ struct FeatureDemand: Equatable {
         self.focus = focus
         self.agents = agents
         self.quota = quota
+        self.notifications = notifications
     }
 
     func suspended(_ suspended: Bool) -> FeatureDemand {
@@ -136,7 +141,10 @@ struct FeatureDemand: Equatable {
             occlusion: occlusion,
             focus: false,
             agents: agents,
-            quota: quota
+            quota: quota,
+            // Pause notification polling while the screen sleeps; start() re-
+            // baselines on wake so a backlog isn't replayed as a burst.
+            notifications: false
         )
     }
 }
@@ -234,6 +242,7 @@ final class FeatureCoordinator {
         services.focus.stop()
         services.agents.stop()
         services.quota.stop()
+        services.notifications.stop()
         services.lockScreen.stop()
     }
 
@@ -338,6 +347,8 @@ final class FeatureCoordinator {
         if old?.quota != demand.quota {
             demand.quota ? services.quota.start() : services.quota.stop()
         }
+        transition(old?.notifications, demand.notifications,
+                   start: services.notifications.start, stop: services.notifications.stop)
 
         if previous?.lock != next.lock {
             services.lockScreen.reconfigure()

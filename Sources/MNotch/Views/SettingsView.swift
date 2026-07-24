@@ -3,7 +3,7 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
-    case battery, connectivity, focus, hud
+    case battery, connectivity, focus, hud, systemNotifications
     case nowPlaying, calendar, fileTray, lockScreen, agent
     case about
 
@@ -16,6 +16,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .connectivity: "Connectivity"
         case .focus: "Focus"
         case .hud: "Display & Sound"
+        case .systemNotifications: "Notifications"
         case .nowPlaying: "Now Playing"
         case .calendar: "Calendar"
         case .fileTray: "File Tray"
@@ -32,6 +33,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .connectivity: "headphones"
         case .focus: "moon.fill"
         case .hud: "slider.horizontal.3"
+        case .systemNotifications: "bell.badge.fill"
         case .nowPlaying: "play.fill"
         case .calendar: "calendar"
         case .fileTray: "tray.fill"
@@ -48,6 +50,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .focus: .indigo
         case .connectivity: .green
         case .hud: .purple
+        case .systemNotifications: .pink
         case .nowPlaying: .red
         case .calendar: .red
         case .fileTray: Color(white: 0.45)
@@ -70,6 +73,7 @@ struct SettingsView: View {
                     sidebarRow(.connectivity)
                     sidebarRow(.focus)
                     sidebarRow(.hud)
+                    sidebarRow(.systemNotifications)
                 }
                 Section("Live Activities") {
                     sidebarRow(.nowPlaying)
@@ -112,6 +116,7 @@ struct SettingsView: View {
         case .connectivity: ConnectivityPane()
         case .focus: FocusPane()
         case .hud: HUDPane()
+        case .systemNotifications: NotificationsPane()
         case .nowPlaying: NowPlayingPane()
         case .calendar: CalendarPane()
         case .fileTray: FileTrayPane()
