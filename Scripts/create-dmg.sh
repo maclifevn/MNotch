@@ -33,6 +33,14 @@ codesign --verify --deep --strict "$APP"
 mkdir -p "$DIST_DIR"
 swift Scripts/create-dmg-background.swift "$BACKGROUND"
 
+# Detach any leftover "MNotch" volumes from a previous run. Otherwise the new
+# image mounts as "MNotch 1/2/…", but the Finder AppleScript below targets the
+# clashing name and writes the layout/.DS_Store to the WRONG volume — the final
+# DMG ends up with no background.
+while IFS= read -r v; do
+    hdiutil detach "$v" -force >/dev/null 2>&1 || true
+done < <(ls -d /Volumes/"$VOLUME_NAME"* 2>/dev/null || true)
+
 hdiutil create \
     -size 32m \
     -fs HFS+ \
@@ -51,6 +59,10 @@ MOUNTED=true
     echo "Could not determine mounted DMG path." >&2
     exit 1
 }
+# The real volume name as mounted (should be exactly "$VOLUME_NAME" now that we
+# cleaned up, but target whatever actually mounted so Finder never picks a
+# clashing volume).
+ACTUAL_VOLUME="$(basename "$MOUNT_DIR")"
 
 ditto "$APP" "$MOUNT_DIR/MNotch.app"
 ln -s /Applications "$MOUNT_DIR/Applications"
@@ -69,7 +81,7 @@ fi
 # third-party create-dmg dependency.
 osascript <<APPLESCRIPT
 tell application "Finder"
-    tell disk "$VOLUME_NAME"
+    tell disk "$ACTUAL_VOLUME"
         open
         tell container window
             set current view to icon view
@@ -93,8 +105,22 @@ tell application "Finder"
 end tell
 APPLESCRIPT
 
+# Finder writes the .DS_Store (window layout + background reference)
+# asynchronously. Detaching too early is why the mounted image looked right but
+# the final DMG lost its background — wait for the flush and confirm it landed.
 sync
-hdiutil detach "$MOUNT_DIR" >/dev/null
+for _ in 1 2 3 4 5 6; do
+    [[ -f "$MOUNT_DIR/.DS_Store" ]] && break
+    sleep 1
+done
+sleep 2
+[[ -f "$MOUNT_DIR/.DS_Store" ]] || echo "warning: .DS_Store not written; DMG may lack its background" >&2
+# Make the volume read-only-ish so the layout sticks through conversion.
+chmod -Rf go-w "$MOUNT_DIR" 2>/dev/null || true
+sync
+
+hdiutil detach "$MOUNT_DEVICE" >/dev/null 2>&1 \
+    || hdiutil detach "$MOUNT_DIR" -force >/dev/null
 MOUNTED=false
 
 rm -f "$FINAL_DMG"
