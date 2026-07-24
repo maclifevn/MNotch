@@ -51,9 +51,11 @@ final class NotchWindowController {
                 panel.alphaValue = 0
                 panel.ignoresMouseEvents = true
             }
-            panel.orderFrontRegardless()
-            if locked {
-                SkyLightOperator.shared.addToLockSpace(panel)
+            if locked, !SkyLightOperator.shared.addToLockSpace(panel) {
+                panel.ignoresMouseEvents = true
+                panel.orderOut(nil)
+            } else {
+                panel.orderFrontRegardless()
             }
             panels.append(panel)
             viewModels.append(viewModel)
@@ -76,6 +78,9 @@ final class NotchWindowController {
         AppServices.shared.collapseIfIdle = { [weak self] in
             self?.viewModels.forEach { $0.collapseAgentIfIdle() }
         }
+        AppServices.shared.dismissAccessibilityNotice = { [weak self] in
+            self?.viewModels.forEach { $0.dismissAccessibilityNotice() }
+        }
         // While locked, move the notch panels into the SkyLight lock-screen
         // space so HUDs/pops stay visible over the shield (Alcove behavior).
         // SLSSpaceAddWindowsAndRemoveFromSpaces REMOVES windows from their
@@ -87,7 +92,10 @@ final class NotchWindowController {
             if locked {
                 self.panels.forEach {
                     $0.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
-                    SkyLightOperator.shared.addToLockSpace($0)
+                    if !SkyLightOperator.shared.addToLockSpace($0) {
+                        $0.ignoresMouseEvents = true
+                        $0.orderOut(nil)
+                    }
                 }
             } else {
                 self.rebuild()
@@ -96,7 +104,7 @@ final class NotchWindowController {
         AppServices.shared.occlusion.onHideChanged = { [weak self] hide in
             guard let self else { return }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.25
+                context.duration = Anim.reduceMotion ? 0.1 : 0.25
                 for panel in self.panels {
                     panel.animator().alphaValue = hide ? 0 : 1
                 }

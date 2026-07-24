@@ -14,6 +14,7 @@ enum HUDKind: Equatable {
 }
 
 enum PopKind: Equatable {
+    case accessibility
     case charging(percentage: Int)
     case lowBattery(percentage: Int)
     case lowPower(on: Bool)
@@ -148,8 +149,14 @@ final class NotchViewModel {
     /// so wing content can never overflow into the camera cutout.
     var calendarWingContentWidth: CGFloat { 84 }
 
-    /// Alcove's expanded panel is ~2.05:1.
-    static let expandedSize = CGSize(width: 420, height: 205)
+    /// Expanded tabs share a compact width, but their height follows their
+    /// natural content instead of leaving a fixed black slab underneath.
+    static let expandedWidth: CGFloat = 420
+    static let expandedSeedHeights: [NotchTab: CGFloat] = [
+        .media: 205,
+        .shelf: 148,
+        .calendar: 205,
+    ]
     static let hudExtraWidth: CGFloat = 160
     static let hudExtraHeight: CGFloat = 10
     static let popExtraWidth: CGFloat = 190
@@ -194,11 +201,33 @@ final class NotchViewModel {
     /// Live natural height of the agent card, measured from the view and fed
     /// back here. Epsilon-guarded so a sub-pixel delta can't re-spring forever.
     private(set) var agentContentHeight: CGFloat = 0
+    private var expandedContentHeights: [NotchTab: CGFloat] = [:]
 
     func setAgentContentHeight(_ h: CGFloat) {
         let clamped = min(max(h, Self.agentMinHeight), Self.agentMaxHeight)
         guard abs(clamped - agentContentHeight) > 0.5 else { return }
         withAnimation(Anim.open) { agentContentHeight = clamped }
+    }
+
+    func setExpandedContentHeight(_ height: CGFloat, for tab: NotchTab) {
+        guard tab != .agent else { return }
+        let clamped = Self.clampedExpandedHeight(height, for: tab)
+        guard abs(clamped - (expandedContentHeights[tab] ?? 0)) > 0.5 else { return }
+        if status == .expanded(tab) {
+            withAnimation(Anim.open) { expandedContentHeights[tab] = clamped }
+        } else {
+            expandedContentHeights[tab] = clamped
+        }
+    }
+
+    static func clampedExpandedHeight(_ height: CGFloat, for tab: NotchTab) -> CGFloat {
+        let range: ClosedRange<CGFloat> = switch tab {
+        case .media: 176...240
+        case .shelf: 124...220
+        case .calendar: 132...310
+        case .agent: 0...0
+        }
+        return min(max(height, range.lowerBound), range.upperBound)
     }
 
     var agentConfirmSize: CGSize {
@@ -244,7 +273,14 @@ final class NotchViewModel {
                 height: closedSize.height + Self.popExtraHeight
             )
         case .expanded(let tab):
-            guard tab == .agent else { return Self.expandedSize }
+            guard tab == .agent else {
+                return CGSize(
+                    width: Self.expandedWidth,
+                    height: expandedContentHeights[tab]
+                        ?? Self.expandedSeedHeights[tab]
+                        ?? 205
+                )
+            }
             let request = AppServices.shared.agents.firstPending?.request
             let seed = request.map { Self.seedHeight(for: $0.detail) }
                 ?? Self.agentDashboardHeight
@@ -401,6 +437,7 @@ final class NotchViewModel {
 
         let settings = SettingsStore.shared
         let duration: Double = switch kind {
+        case .accessibility: 8
         case .charging, .lowBattery, .lowPower: settings.batteryDuration
         case .device: settings.connectivityDuration
         case .focus: settings.focusDuration
@@ -409,7 +446,18 @@ final class NotchViewModel {
         case .agentConfirm: 1.2   // driven by confirmAgentDecision, not showPop
         }
 
-        mnotchLog.notice("showPop \(String(describing: kind), privacy: .public)")
+        let logKind = switch kind {
+        case .accessibility: "accessibility"
+        case .charging: "charging"
+        case .lowBattery: "low-battery"
+        case .lowPower: "low-power"
+        case .device: "device"
+        case .focus: "focus"
+        case .event: "calendar-event"
+        case .agent: "agent"
+        case .agentConfirm: "agent-confirm"
+        }
+        mnotchLog.debug("showPop kind=\(logKind, privacy: .public)")
         withAnimation(Anim.pop) { status = .pop(kind) }
         popDismissTask?.cancel()
         popDismissTask = Task { [weak self] in
@@ -421,9 +469,16 @@ final class NotchViewModel {
         }
     }
 
+    func dismissAccessibilityNotice() {
+        guard status == .pop(.accessibility) else { return }
+        popDismissTask?.cancel()
+        withAnimation(Anim.close) { status = .closed }
+    }
+
     // MARK: - Transitions
 
     func expand(_ tab: NotchTab) {
+        let tab = resolvedTab(tab)
         lastTab = tab
         if tab == .agent, !AppServices.shared.agents.hasPendingRequest {
             agentContentHeight = Self.agentDashboardHeight
@@ -442,10 +497,26 @@ final class NotchViewModel {
     }
 
     func selectTab(_ tab: NotchTab) {
+        let tab = resolvedTab(tab)
         lastTab = tab
         if tab == .agent, !AppServices.shared.agents.hasPendingRequest {
             agentContentHeight = Self.agentDashboardHeight
         }
         withAnimation(Anim.open) { status = .expanded(tab) }
+    }
+
+    func isTabEnabled(_ tab: NotchTab) -> Bool {
+        let settings = SettingsStore.shared
+        return switch tab {
+        case .media: settings.mediaEnabled
+        case .shelf: settings.shelfEnabled
+        case .calendar: settings.calendarEnabled
+        case .agent: settings.agentEnabled
+        }
+    }
+
+    private func resolvedTab(_ requested: NotchTab) -> NotchTab {
+        guard !isTabEnabled(requested) else { return requested }
+        return NotchTab.allCases.first(where: isTabEnabled) ?? .media
     }
 }

@@ -15,6 +15,8 @@ final class OcclusionWatcher {
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var activationObserver: NSObjectProtocol?
+    @ObservationIgnored private var evaluationTask: Task<Void, Never>?
+    @ObservationIgnored private var evaluationRequested = false
 
     func start() {
         guard timer == nil else { return }
@@ -42,9 +44,22 @@ final class OcclusionWatcher {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         }
         activationObserver = nil
+        evaluationTask?.cancel()
+        evaluationTask = nil
+        evaluationRequested = false
+        frontmostBundleID = nil
+        if shouldHide {
+            shouldHide = false
+            onHideChanged?(false)
+        }
     }
 
     private func evaluate() {
+        guard evaluationTask == nil else {
+            evaluationRequested = true
+            return
+        }
+
         let settings = SettingsStore.shared
         let frontmost = NSWorkspace.shared.frontmostApplication
         frontmostBundleID = frontmost?.bundleIdentifier
@@ -55,27 +70,53 @@ final class OcclusionWatcher {
             hide = true
         }
 
-        if !hide, settings.hideInFullscreen || settings.hideInMissionControl {
-            let windows = CGWindowListCopyWindowInfo(
-                [.optionOnScreenOnly, .excludeDesktopElements],
-                kCGNullWindowID
-            ) as? [[String: Any]] ?? []
-
-            if settings.hideInFullscreen,
-               let app = frontmost,
-               app.bundleIdentifier != Bundle.main.bundleIdentifier,
-               Self.hasFullscreenWindow(in: windows, pid: app.processIdentifier) {
-                hide = true
-            }
-            if !hide, settings.hideInMissionControl, Self.missionControlActive(in: windows) {
-                hide = true
-            }
+        guard !hide, settings.hideInFullscreen || settings.hideInMissionControl else {
+            apply(hide)
+            return
         }
 
-        if hide != shouldHide {
-            shouldHide = hide
-            onHideChanged?(hide)
+        let hideFullscreen = settings.hideInFullscreen
+        let hideMissionControl = settings.hideInMissionControl
+        let frontmostPID = frontmost?.processIdentifier
+        let frontmostIsMNotch = frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier
+        let screenSizes = NSScreen.screens.map(\.frame.size)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        evaluationTask = Task { [weak self] in
+            let shouldHide = await Task.detached(priority: .utility) {
+                let windows = CGWindowListCopyWindowInfo(
+                    [.optionOnScreenOnly, .excludeDesktopElements],
+                    kCGNullWindowID
+                ) as? [[String: Any]] ?? []
+
+                if hideFullscreen,
+                   let frontmostPID,
+                   !frontmostIsMNotch,
+                   Self.hasFullscreenWindow(
+                       in: windows,
+                       pid: frontmostPID,
+                       screenSizes: screenSizes,
+                       ownPID: ownPID
+                   ) {
+                    return true
+                }
+                return hideMissionControl && Self.missionControlActive(in: windows)
+            }.value
+
+            guard !Task.isCancelled, let self else { return }
+            self.evaluationTask = nil
+            self.apply(shouldHide)
+            if self.evaluationRequested {
+                self.evaluationRequested = false
+                self.evaluate()
+            }
         }
+    }
+
+    private func apply(_ hide: Bool) {
+        guard hide != shouldHide else { return }
+        shouldHide = hide
+        onHideChanged?(hide)
     }
 
     // MARK: - Heuristics
@@ -93,10 +134,12 @@ final class OcclusionWatcher {
     /// screenHeight − 33), OR any app's frontmost layer-0 window covering a
     /// screen edge-to-edge (survives small system dialogs stealing frontmost;
     /// the exact-height requirement avoids matching merely-maximized windows).
-    private static func hasFullscreenWindow(in windows: [[String: Any]], pid: pid_t) -> Bool {
-        let screenSizes = NSScreen.screens.map(\.frame.size)
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-
+    private nonisolated static func hasFullscreenWindow(
+        in windows: [[String: Any]],
+        pid: pid_t,
+        screenSizes: [CGSize],
+        ownPID: Int32
+    ) -> Bool {
         var seenTopmostLayerZero = false
         for window in windows { // CGWindowList is ordered front-to-back
             guard (window[kCGWindowLayer as String] as? Int) == 0,
@@ -125,7 +168,7 @@ final class OcclusionWatcher {
         return false
     }
 
-    private static func missionControlActive(in windows: [[String: Any]]) -> Bool {
+    private nonisolated static func missionControlActive(in windows: [[String: Any]]) -> Bool {
         // kCGWindowName is only populated with Screen Recording permission,
         // so the name match alone would never fire. Fallback heuristic: during
         // Mission Control the Dock process owns a burst of thumbnail windows

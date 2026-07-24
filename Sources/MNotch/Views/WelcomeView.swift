@@ -1,6 +1,4 @@
 import AppKit
-@preconcurrency import ApplicationServices
-import Combine
 import SwiftUI
 
 // MARK: - Welcome
@@ -14,11 +12,9 @@ struct WelcomeView: View {
     var onFinish: () -> Void
 
     @Bindable private var settings = SettingsStore.shared
-    @State private var trusted = AXIsProcessTrusted()
+    private let accessibility = AppServices.shared.accessibility
 
-    // 1 Hz Accessibility poll so the status flips to "Granted" live the moment
-    // the user allows MNotch in System Settings — no window reopen.
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private var trusted: Bool { accessibility.isGranted }
 
     var body: some View {
         VStack(spacing: 22) {
@@ -34,7 +30,6 @@ struct WelcomeView: View {
         .padding(.bottom, 26)
         .frame(width: 460)
         .background(background)
-        .onReceive(ticker) { _ in refreshTrust() }
     }
 
     // MARK: Hero
@@ -58,7 +53,7 @@ struct WelcomeView: View {
     private var permissionSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             SectionLabel("Permission")
-            AccessibilityCard(trusted: trusted, onGrant: requestAccessibility)
+            AccessibilityCard(trusted: trusted, onGrant: accessibility.requestAccess)
             OtherPermissionsNote()
         }
     }
@@ -127,25 +122,6 @@ struct WelcomeView: View {
         .ignoresSafeArea()
     }
 
-    // MARK: Actions
-
-    private func requestAccessibility() {
-        if let url = URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-        let options = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-    }
-
-    private func refreshTrust() {
-        let now = AXIsProcessTrusted()
-        guard now != trusted else { return }
-        withAnimation(.smooth(duration: 0.35)) { trusted = now }
-        if now { AppServices.shared.keys.start() }   // light up the tap, no relaunch
-    }
 }
 
 // MARK: - Hero logo

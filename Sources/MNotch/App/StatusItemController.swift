@@ -1,17 +1,37 @@
 import AppKit
+import Observation
 
 /// Menu bar status item: the logo as a template silhouette (adapts to menu
 /// bar light/dark), with a small menu — the only Quit UI in an LSUIElement app.
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
+    private var accessibilityItem: NSMenuItem?
+    private var accessibilitySeparator: NSMenuItem?
+
+    private struct AccessibilityState: Equatable {
+        let granted: Bool
+        let required: Bool
+    }
 
     func install() {
+        guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = Self.templateLogo()
-        item.button?.toolTip = "MNotch"
 
         let menu = NSMenu()
+        menu.delegate = self
+        let accessibility = NSMenuItem(
+            title: "",
+            action: #selector(openAccessibilitySettings),
+            keyEquivalent: ""
+        )
+        accessibility.target = self
+        menu.addItem(accessibility)
+        let accessibilitySeparator = NSMenuItem.separator()
+        menu.addItem(accessibilitySeparator)
+        accessibilityItem = accessibility
+        self.accessibilitySeparator = accessibilitySeparator
+
         let settings = NSMenuItem(
             title: "Settings…",
             action: #selector(openSettings),
@@ -40,12 +60,10 @@ final class StatusItemController: NSObject {
         item.menu = menu
 
         statusItem = item
-        mnotchLog.notice("status item installed visible=\(item.isVisible) button=\(item.button != nil) window=\(String(describing: item.button?.window?.frame), privacy: .public)")
-        Task { [weak item] in
-            try? await Task.sleep(for: .seconds(2))
-            guard let item else { return }
-            mnotchLog.notice("status item after 2s visible=\(item.isVisible) window=\(String(describing: item.button?.window?.frame), privacy: .public) onScreen=\(item.button?.window?.isVisible ?? false)")
-        }
+        observeAccessibilityState()
+#if DEBUG
+        mnotchLog.debug("status item installed visible=\(item.isVisible)")
+#endif
     }
 
     /// Consistently-sized template SF Symbol for a menu item's leading icon.
@@ -65,15 +83,58 @@ final class StatusItemController: NSObject {
         WelcomeWindowController.shared.show()
     }
 
+    @objc private func openAccessibilitySettings() {
+        AppServices.shared.accessibility.requestAccess()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // Covers grants/revocations made externally even if MNotch never
+        // received an activation transition before the menu was opened.
+        AppServices.shared.accessibility.refresh()
     }
 
     /// Alcove-style framed glyph: a continuous rounded shell, a compact notch
     /// attached to its top edge, and the Maclife double-peak M below. Drawing
     /// it as a template keeps it crisp on Retina and lets macOS tint it for
     /// light/dark menu bars and pressed state.
-    private static func templateLogo() -> NSImage {
+    private func observeAccessibilityState() {
+        let state = withObservationTracking {
+            AccessibilityState(
+                granted: AppServices.shared.accessibility.isGranted,
+                required: AppServices.shared.accessibility.isRequiredForEnabledFeatures
+            )
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeAccessibilityState() }
+        }
+        updateAccessibilityState(state)
+    }
+
+    private func updateAccessibilityState(_ state: AccessibilityState) {
+        statusItem?.button?.image = Self.templateLogo(showWarning: state.required)
+        if state.granted {
+            statusItem?.button?.toolTip = "MNotch"
+            accessibilityItem?.isHidden = true
+            accessibilitySeparator?.isHidden = true
+        } else if state.required {
+            statusItem?.button?.toolTip = "MNotch — Accessibility required"
+            accessibilityItem?.isHidden = false
+            accessibilitySeparator?.isHidden = false
+            accessibilityItem?.title = "Accessibility Required…"
+            accessibilityItem?.image = Self.menuIcon("exclamationmark.triangle.fill")
+        } else {
+            statusItem?.button?.toolTip = "MNotch — Accessibility not granted"
+            accessibilityItem?.isHidden = false
+            accessibilitySeparator?.isHidden = false
+            accessibilityItem?.title = "Accessibility: Not Granted…"
+            accessibilityItem?.image = Self.menuIcon("accessibility")
+        }
+    }
+
+    private static func templateLogo(showWarning: Bool) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             NSColor.black.setStroke()
 
@@ -130,6 +191,22 @@ final class StatusItemController: NSObject {
             mark.line(to: p(62.16, 50.15))
             mark.close()
             mark.fill()
+
+            if showWarning {
+                // Compact notification badge with a knocked-out exclamation;
+                // it remains a template so macOS owns the menu-bar tint.
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 10.4, y: 0.2, width: 7.4, height: 7.4)).fill()
+                NSGraphicsContext.current?.saveGraphicsState()
+                NSGraphicsContext.current?.compositingOperation = .clear
+                NSBezierPath(
+                    roundedRect: NSRect(x: 13.55, y: 3.0, width: 1.05, height: 2.9),
+                    xRadius: 0.5,
+                    yRadius: 0.5
+                ).fill()
+                NSBezierPath(ovalIn: NSRect(x: 13.55, y: 1.45, width: 1.05, height: 1.05)).fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+            }
             return true
         }
         image.isTemplate = true

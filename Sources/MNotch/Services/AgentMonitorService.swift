@@ -58,8 +58,6 @@ final class AgentMonitorService {
     @ObservationIgnored var onAttention: ((AgentSession) -> Void)?
     /// Agent finished a turn.
     @ObservationIgnored var onDone: ((AgentSession) -> Void)?
-    /// Official Claude subscription quota from the status-line bridge.
-    @ObservationIgnored var onClaudeQuota: ((ClaudeRateLimits, Date) -> Void)?
     /// A pending request was answered or dropped — collapse if nothing else pends.
     @ObservationIgnored var onRequestResolved: (() -> Void)?
 
@@ -74,19 +72,26 @@ final class AgentMonitorService {
         server.onEvent = { [weak self] event, requestID in
             self?.handle(event, requestID: requestID)
         }
+        server.onRequestEnded = { [weak self] id in
+            self?.requestEndedExternally(id)
+        }
         server.start()
+    }
+
+    /// The relay closed or the server-side wait expired before the user acted,
+    /// so the agent has fallen back to its own terminal prompt. Clear the card
+    /// so it doesn't hang open, and collapse the notch if nothing else pends.
+    /// No-ops if the user already answered this request (it's been cleared).
+    func requestEndedExternally(_ id: Int) {
+        guard let index = sessions.firstIndex(where: { $0.request?.id == id }) else { return }
+        sessions[index].request = nil
+        sessions[index].status = .waiting
+        onRequestResolved?()
     }
 
     // MARK: - Event handling
 
-    private func handle(_ event: AgentEvent, requestID: Int?) {
-        if event.event == "quota", let limits = event.rateLimits {
-            let updatedAt = event.quotaUpdatedAt
-                .map(Date.init(timeIntervalSince1970:)) ?? .now
-            onClaudeQuota?(limits, updatedAt)
-            return
-        }
-
+    func handle(_ event: AgentEvent, requestID: Int?) {
         let sessionID = event.sessionId ?? "unknown"
         var session = sessions.first { $0.id == sessionID }
             ?? AgentSession(

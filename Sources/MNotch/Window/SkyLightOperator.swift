@@ -55,15 +55,19 @@ final class SkyLightOperator {
 
         connection = mainConnFn()
         space = createFn(connection, 1, 0)
-        _ = setLevelFn(connection, space, Self.lockLevel)
-        _ = showFn(connection, [space] as CFArray)
-        available = space != 0
-        mnotchLog.notice("SkyLight lock space created id=\(self.space) conn=\(self.connection)")
+        let levelStatus = setLevelFn(connection, space, Self.lockLevel)
+        let showStatus = showFn(connection, [space] as CFArray)
+        available = connection != 0 && space != 0 && levelStatus == 0 && showStatus == 0
+        if available {
+            mnotchLog.notice("SkyLight lock space ready")
+        } else {
+            mnotchLog.error("SkyLight rejected lock space; overlay disabled")
+        }
     }
 
     /// Move a window into the lock-screen space so it draws over the shield.
-    func addToLockSpace(_ window: NSWindow) {
-        guard available, let addWindows else { return }
-        _ = addWindows(connection, space, [window.windowNumber] as CFArray, 7)
+    func addToLockSpace(_ window: NSWindow) -> Bool {
+        guard available, let addWindows else { return false }
+        return addWindows(connection, space, [window.windowNumber] as CFArray, 7) == 0
     }
 }

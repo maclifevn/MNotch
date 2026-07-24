@@ -88,7 +88,8 @@ final class MediaRemoteService {
         return Date().timeIntervalSince(lastActiveAt) < idleDuration
     }
 
-    private static let pollInterval: Duration = .seconds(2)
+    private static let activePollInterval: Duration = .seconds(2)
+    private static let idlePollInterval: Duration = .seconds(10)
 
     /// Field types vary by media source (e.g. identifiers are strings for
     /// Music but numbers for browsers), so every field decodes leniently —
@@ -170,7 +171,11 @@ final class MediaRemoteService {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.requestPoll()
-                try? await Task.sleep(for: Self.pollInterval)
+                guard let self else { return }
+                let interval = self.hasActiveMedia
+                    ? Self.activePollInterval
+                    : Self.idlePollInterval
+                try? await Task.sleep(for: interval)
             }
         }
     }
@@ -228,7 +233,7 @@ final class MediaRemoteService {
 
         if playback.trackIdentity != artworkIdentity {
             artworkIdentity = playback.trackIdentity
-            mnotchLog.notice("track: \"\(self.playback.title, privacy: .public)\" — \(self.playback.artist, privacy: .public) [\(self.playback.bundleIdentifier, privacy: .public)] video=\(self.playback.isVideo)")
+            mnotchLog.debug("track changed bundle=\(self.playback.bundleIdentifier, privacy: .private) video=\(self.playback.isVideo)")
             // Never show the previous track's artwork on the new one.
             artwork = nil
             accentColor = .white
@@ -286,9 +291,7 @@ final class MediaRemoteService {
         guard let line, line != "null",
               let data = line.data(using: .utf8),
               let payload = try? JSONDecoder().decode(GetPayload.self, from: data),
-              let artworkString = payload.artworkData,
-              let imageData = Data(base64Encoded: artworkString.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let image = NSImage(data: imageData)
+              let artworkString = payload.artworkData
         else {
             if attempt < 4 {
                 Task { [weak self] in
@@ -299,9 +302,20 @@ final class MediaRemoteService {
             }
             return
         }
+
+        let processed = await Task.detached(priority: .utility) {
+            guard let data = Data(base64Encoded: artworkString.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )) else { return nil as (Data, DominantColor.Components)? }
+            return (data, DominantColor.accent(from: data))
+        }.value
+        guard playback.trackIdentity == identity,
+              let (imageData, accent) = processed,
+              let image = NSImage(data: imageData)
+        else { return }
         artwork = image
-        accentColor = DominantColor.accent(from: image)
-        mnotchLog.notice("artwork loaded for \(self.playback.title, privacy: .public) (attempt \(attempt))")
+        accentColor = Color(red: accent.red, green: accent.green, blue: accent.blue)
+        mnotchLog.debug("artwork loaded (attempt \(attempt))")
     }
 
     // MARK: - Commands
@@ -399,9 +413,16 @@ final class MediaRemoteService {
 
     private func runAdapter(_ arguments: [String]) {
         guard let paths = Self.adapterPaths else { return }
+        let processArguments = [paths.script, paths.framework] + arguments
+        Task.detached(priority: .userInitiated) {
+            Self.runAdapterSync(processArguments)
+        }
+    }
+
+    private nonisolated static func runAdapterSync(_ arguments: [String]) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        proc.arguments = [paths.script, paths.framework] + arguments
+        proc.arguments = arguments
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
         do {

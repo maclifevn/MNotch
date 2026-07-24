@@ -72,7 +72,7 @@ struct HUDView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 22, alignment: .leading)
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(Anim.symbolReplace)
             }
         } right: {
             HStack(spacing: 6) {

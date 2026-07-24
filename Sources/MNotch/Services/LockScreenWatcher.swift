@@ -64,6 +64,12 @@ final class LockScreenWatcher {
         overlay.setVisible(false)
     }
 
+    /// Apply live Settings changes without waiting for the next lock/saver event.
+    func reconfigure() {
+        refreshOverlay()
+        overlay.reconfigure()
+    }
+
     private func refreshOverlay() {
         let settings = SettingsStore.shared
         let wanted = settings.lockEnabled

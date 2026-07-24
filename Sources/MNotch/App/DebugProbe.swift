@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import SwiftUI
 
@@ -98,3 +99,4 @@ enum DebugProbe {
         }
     }
 }
+#endif

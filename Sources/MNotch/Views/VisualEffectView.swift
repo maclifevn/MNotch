@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// NSVisualEffectView bridge (behind-window blur) for the progressive blur
-/// under the expanded panel.
+/// NSVisualEffectView bridge used only inside lock-screen cards. Expanded
+/// notch panels stay opaque black to avoid wallpaper-dependent white halos.
 struct VisualEffectView: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .hudWindow
 

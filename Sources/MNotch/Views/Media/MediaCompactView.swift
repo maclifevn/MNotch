@@ -94,6 +94,6 @@ struct ArtworkView: View {
                     .shadow(radius: 2)
             }
         }
-        .animation(.easeInOut(duration: 0.45), value: identity)
+        .animation(Anim.open, value: identity)
     }
 }

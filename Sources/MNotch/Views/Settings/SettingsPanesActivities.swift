@@ -44,10 +44,6 @@ struct NowPlayingPane: View {
                     WaveformPreview(style: style)
                 }
 
-                UnavailableRow(
-                    title: "Use live waveform",
-                    note: "Needs system-audio capture; not available."
-                )
                 Toggle("Disable compact waveform", isOn: $settings.mediaDisableCompactWaveform)
                 Toggle("Disable artwork flip", isOn: $settings.mediaDisableArtworkFlip)
                 Toggle("Hide while source app is active", isOn: $settings.mediaHideWhileSourceActive)
@@ -169,18 +165,8 @@ struct CalendarPane: View {
                 )
                 Toggle("Use calendar color", isOn: $settings.calendarUseColor)
                 Toggle("Disable activity during events", isOn: $settings.calendarDisableDuringEvents)
-                UnavailableRow(
-                    title: "Show weather on empty day",
-                    note: "Weather integration isn't available."
-                )
                 Toggle("Use event indicators", isOn: $settings.calendarEventIndicators)
                 Toggle("Always show month view", isOn: $settings.calendarMonthView)
-            }
-            Section {
-                UnavailableRow(
-                    title: "Notify when time to leave",
-                    note: "Needs routing data; not available."
-                )
             }
             Section("Calendars") {
                 if calendar.calendars.isEmpty {
@@ -261,7 +247,7 @@ struct FileTrayPane: View {
                 Toggle(isOn: $settings.shelfEnabled) {
                     Label("File Tray", systemImage: "tray.fill")
                 }
-                Text("Drop files onto the notch to collect them; drag out to reuse, AirDrop from the tray tab.")
+                Text("Drop files onto the notch, select one or many, then Quick Look, open, reveal in Finder, drag out, or AirDrop them.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -347,13 +333,6 @@ struct LockScreenPane: View {
                     range: -200...200,
                     step: 10
                 ) { "\(Int($0)) px" }
-            }
-
-            Section {
-                UnavailableRow(
-                    title: "Weather",
-                    note: "Needs a weather data source; not available."
-                )
             }
 
             Section("Allowed Notifications") {

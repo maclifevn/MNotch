@@ -3,9 +3,16 @@ import SwiftUI
 
 struct GeneralPane: View {
     @Bindable var settings = SettingsStore.shared
+    private let accessibility = AppServices.shared.accessibility
 
     var body: some View {
         Form {
+            if !accessibility.isGranted {
+                Section("Permissions") {
+                    AccessibilityPermissionRow()
+                }
+            }
+
             Section {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
                 Toggle("Hide in fullscreen", isOn: $settings.hideInFullscreen)
@@ -112,6 +119,44 @@ struct GeneralPane: View {
     }
 }
 
+private struct AccessibilityPermissionRow: View {
+    private let permission = AppServices.shared.accessibility
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                Image(systemName: "accessibility")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(permission.isGranted ? Color.green : .orange)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        (permission.isGranted ? Color.green : .orange).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Accessibility")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Permission not granted")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("Grant Access…") {
+                    permission.requestAccess()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+            }
+            Text("Required for MNotch to handle volume, brightness, and keyboard-backlight keys without also showing Apple's OSD. Other features keep working without it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 3)
+    }
+}
+
 struct BatteryPane: View {
     @Bindable var settings = SettingsStore.shared
 
@@ -175,15 +220,6 @@ struct ConnectivityPane: View {
                     isOn: $settings.connectivitySoundOnLow,
                     effect: .deviceLow
                 )
-            }
-            Section {
-                LabeledContent("Device visuals") {
-                    Text("Symbols")
-                        .foregroundStyle(.secondary)
-                }
-                Text("Alcove's 3D models require bundled USDZ assets and aren't available here.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
         }
         .formStyle(.grouped)

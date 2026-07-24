@@ -35,26 +35,28 @@ struct OptionCardPicker<T: Hashable, Preview: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             ForEach(options, id: \.self) { option in
-                VStack(spacing: 5) {
-                    preview(option)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(.black, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(
-                                    selection == option ? Color.accentColor : .clear,
-                                    lineWidth: 2.5
-                                )
-                        )
-                    Text(label(option))
-                        .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
-                        .foregroundStyle(selection == option ? .primary : .secondary)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
+                Button {
                     selection = option
+                } label: {
+                    VStack(spacing: 5) {
+                        preview(option)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .background(.black, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        selection == option ? Color.accentColor : .clear,
+                                        lineWidth: 2.5
+                                    )
+                            )
+                        Text(label(option))
+                            .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
+                            .foregroundStyle(selection == option ? .primary : .secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option ? .isSelected : [])
             }
         }
         .padding(.vertical, 4)
@@ -71,57 +73,38 @@ struct IconCardPicker<T: Hashable>: View {
     var body: some View {
         HStack(spacing: 10) {
             ForEach(options, id: \.self) { option in
-                VStack(spacing: 5) {
-                    Image(systemName: symbol(option))
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(selection == option ? Color.accentColor : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .background(
-                            selection == option
-                                ? Color.accentColor.opacity(0.12)
-                                : Color.primary.opacity(0.05),
-                            in: RoundedRectangle(cornerRadius: 10)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(
-                                    selection == option ? Color.accentColor : .clear,
-                                    lineWidth: 2
-                                )
-                        )
-                    Text(label(option))
-                        .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
-                        .foregroundStyle(selection == option ? .primary : .secondary)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
+                Button {
                     selection = option
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: symbol(option))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(selection == option ? Color.accentColor : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(
+                                selection == option
+                                    ? Color.accentColor.opacity(0.12)
+                                    : Color.primary.opacity(0.05),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        selection == option ? Color.accentColor : .clear,
+                                        lineWidth: 2
+                                    )
+                            )
+                        Text(label(option))
+                            .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
+                            .foregroundStyle(selection == option ? .primary : .secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option ? .isSelected : [])
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-/// Row for features that exist in Alcove but are not possible here.
-struct UnavailableRow: View {
-    let title: String
-    let note: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .help(note)
-            Spacer()
-            Toggle("", isOn: .constant(false))
-                .labelsHidden()
-                .disabled(true)
-        }
-        .foregroundStyle(.secondary)
     }
 }
 

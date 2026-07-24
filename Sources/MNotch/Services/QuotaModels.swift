@@ -78,49 +78,6 @@ struct ProviderQuota: Identifiable, Equatable, Sendable {
     var primaryWindow: QuotaWindow? { windows.first }
 }
 
-struct ClaudeQuotaWindow: Codable, Equatable, Sendable {
-    let usedPercentage: Double
-    let resetsAt: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case usedPercentage = "used_percentage"
-        case resetsAt = "resets_at"
-    }
-}
-
-struct ClaudeRateLimits: Codable, Equatable, Sendable {
-    let fiveHour: ClaudeQuotaWindow?
-    let sevenDay: ClaudeQuotaWindow?
-
-    enum CodingKeys: String, CodingKey {
-        case fiveHour = "five_hour"
-        case sevenDay = "seven_day"
-    }
-
-    var normalizedWindows: [QuotaWindow] {
-        var result: [QuotaWindow] = []
-        if let fiveHour {
-            result.append(QuotaWindow(
-                id: "claude-five-hour",
-                label: "5h",
-                usedPercent: fiveHour.usedPercentage,
-                durationMinutes: 300,
-                resetsAt: fiveHour.resetsAt.map(Date.init(timeIntervalSince1970:))
-            ))
-        }
-        if let sevenDay {
-            result.append(QuotaWindow(
-                id: "claude-seven-day",
-                label: "7d",
-                usedPercent: sevenDay.usedPercentage,
-                durationMinutes: 10_080,
-                resetsAt: sevenDay.resetsAt.map(Date.init(timeIntervalSince1970:))
-            ))
-        }
-        return result
-    }
-}
-
 struct CodexQuotaSnapshot: Equatable, Sendable {
     var primary: QuotaWindow?
     var secondary: QuotaWindow?

@@ -19,5 +19,13 @@ jobs:
         run: swift build
       - name: Run tests
         run: swift test
-      - name: Build release
-        run: swift build -c release
+      - name: Assemble and verify release app
+        env:
+          CONFIG: release
+          SIGN_ID: "-"
+        run: |
+          Scripts/build.sh
+          plutil -lint build/MNotch.app/Contents/Info.plist
+          codesign --verify --strict build/MNotch.app/Contents/Frameworks/MediaRemoteAdapter.framework
+          codesign --verify --strict build/MNotch.app
+          test ! -e build/MNotch.app/Contents/Resources/MediaRemoteAdapterTestClient

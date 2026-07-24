@@ -90,23 +90,27 @@ final class CalendarService {
         self.store = store
         Task { [weak self] in
             let granted = (try? await store.requestFullAccessToEvents()) ?? false
-            self?.authorized = granted
+            // stop() (e.g. display sleep) or a newer ensureStarted() may have run
+            // during the await; without this guard the observer + 600s timer
+            // below would be installed after teardown and leak, one per race.
+            guard let self, self.requested, self.store === store else { return }
+            self.authorized = granted
             guard granted else { return }
-            self?.reload()
-            self?.storeChangeObserver = NotificationCenter.default.addObserver(
+            self.reload()
+            self.storeChangeObserver = NotificationCenter.default.addObserver(
                 forName: .EKEventStoreChanged,
                 object: store,
                 queue: .main
-            ) { _ in
+            ) { [weak self] _ in
                 Task { @MainActor in self?.reload() }
             }
             // Keep peeks/idle fresh as time passes.
-            let refresh = Timer(timeInterval: 600, repeats: true) { _ in
+            let refresh = Timer(timeInterval: 600, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.reload() }
             }
             refresh.tolerance = 60
             RunLoop.main.add(refresh, forMode: .common)
-            self?.refreshTimer = refresh
+            self.refreshTimer = refresh
         }
     }
 
@@ -124,6 +128,25 @@ final class CalendarService {
         store = nil
         requested = false
         authorized = false
+    }
+
+    /// Rebuild event selection and timers after a Calendar setting changes.
+    /// Safe before authorization; the first successful start performs a reload.
+    func reconfigure() {
+        guard requested, authorized else { return }
+        reload()
+    }
+
+    /// TCC can be changed in System Settings while MNotch remains running.
+    /// Recreate the EventKit store when the app becomes active so the Calendar
+    /// tab recovers without a relaunch.
+    func permissionMayHaveChanged() {
+        let nowAuthorized = EKEventStore.authorizationStatus(for: .event) == .fullAccess
+        guard requested, nowAuthorized != authorized else { return }
+        stop()
+        if nowAuthorized {
+            ensureStarted()
+        }
     }
 
     func reload() {

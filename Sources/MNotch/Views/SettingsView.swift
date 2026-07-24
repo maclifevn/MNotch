@@ -3,7 +3,7 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
-    case battery, connectivity, focus, display, sound
+    case battery, connectivity, focus, hud
     case nowPlaying, calendar, fileTray, lockScreen, agent
     case about
 
@@ -15,8 +15,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .battery: "Battery"
         case .connectivity: "Connectivity"
         case .focus: "Focus"
-        case .display: "Display"
-        case .sound: "Sound"
+        case .hud: "Display & Sound"
         case .nowPlaying: "Now Playing"
         case .calendar: "Calendar"
         case .fileTray: "File Tray"
@@ -32,8 +31,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .battery: "bolt.fill"
         case .connectivity: "headphones"
         case .focus: "moon.fill"
-        case .display: "sun.max.fill"
-        case .sound: "speaker.wave.2.fill"
+        case .hud: "slider.horizontal.3"
         case .nowPlaying: "play.fill"
         case .calendar: "calendar"
         case .fileTray: "tray.fill"
@@ -49,8 +47,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .battery: .orange
         case .focus: .indigo
         case .connectivity: .green
-        case .display: .purple
-        case .sound: .pink
+        case .hud: .purple
         case .nowPlaying: .red
         case .calendar: .red
         case .fileTray: Color(white: 0.45)
@@ -72,8 +69,7 @@ struct SettingsView: View {
                     sidebarRow(.battery)
                     sidebarRow(.connectivity)
                     sidebarRow(.focus)
-                    sidebarRow(.display)
-                    sidebarRow(.sound)
+                    sidebarRow(.hud)
                 }
                 Section("Live Activities") {
                     sidebarRow(.nowPlaying)
@@ -115,8 +111,7 @@ struct SettingsView: View {
         case .battery: BatteryPane()
         case .connectivity: ConnectivityPane()
         case .focus: FocusPane()
-        case .display: DisplayPane()
-        case .sound: SoundPane()
+        case .hud: HUDPane()
         case .nowPlaying: NowPlayingPane()
         case .calendar: CalendarPane()
         case .fileTray: FileTrayPane()

@@ -25,6 +25,34 @@ struct PopWings<Left: View, Right: View>: View {
     }
 }
 
+/// Persistent permission state also lives in the menu bar and Settings; this
+/// launch-time pop is the concise, actionable heads-up for returning users.
+struct AccessibilityPopView: View {
+    let geometry: NotchGeometry
+
+    var body: some View {
+        PopWings(geometry: geometry) {
+            HStack(spacing: 6) {
+                Image(systemName: "accessibility")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("Accessibility")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+            }
+        } right: {
+            Button("Grant") {
+                AppServices.shared.accessibility.requestAccess()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+            .tint(.orange)
+            .help("Open Accessibility Settings")
+        }
+    }
+}
+
 /// Charging / low-battery / low-power pop: glyph (+ optional label) on the
 /// left wing, percentage counting on the right.
 struct BatteryPopView: View {
@@ -70,7 +98,7 @@ struct BatteryPopView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(tint)
-                    .symbolEffect(.bounce, options: .nonRepeating)
+                    .notchBounce()
                 if !settings.batteryHideLabel {
                     Text(label)
                         .font(.system(size: 11, weight: .medium))
@@ -108,7 +136,7 @@ struct FocusPopView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(on ? Color.indigo : .white.opacity(0.6))
-                    .symbolEffect(.bounce, options: .nonRepeating)
+                    .notchBounce()
                 if !SettingsStore.shared.focusHideLabel {
                     Text(name)
                         .font(.system(size: 11, weight: .medium))
@@ -183,7 +211,7 @@ struct AgentPopView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(needsInput ? Color.orange : .green)
-                    .symbolEffect(.bounce, options: .nonRepeating)
+                    .notchBounce()
                 Text(name)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.85))
@@ -206,7 +234,7 @@ struct AgentConfirmView: View {
         HStack(spacing: 7) {
             Image(systemName: approved ? "checkmark" : "xmark")
                 .font(.system(size: 12, weight: .bold))
-                .symbolEffect(.bounce, options: .nonRepeating)
+                .notchBounce()
             Text(approved ? "Approved" : "Rejected")
                 .font(.system(size: 13, weight: .semibold))
         }
@@ -235,7 +263,7 @@ struct DevicePopView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
-                    .symbolEffect(.bounce, options: .nonRepeating)
+                    .notchBounce()
                 Text(name)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.75))
@@ -267,7 +295,11 @@ struct DevicePopView: View {
             }
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.8).delay(0.15)) {
+            withAnimation(
+                Anim.reduceMotion
+                    ? .linear(duration: 0.01)
+                    : .easeOut(duration: 0.8).delay(0.15)
+            ) {
                 ringProgress = Double(battery ?? 0) / 100
             }
         }

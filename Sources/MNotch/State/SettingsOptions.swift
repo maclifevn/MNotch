@@ -1,4 +1,4 @@
-enum IdleActivity: String, CaseIterable {
+enum IdleActivity: String, CaseIterable, Sendable {
     case none, playing, calendar, duo
 }
 

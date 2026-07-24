@@ -32,7 +32,10 @@ sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUM/" \
     "$ROOT/Support/Info.plist" > "$APP/Contents/Info.plist"
 
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/"
-cp "$ROOT/Support/icon_mnotch.png" "$APP/Contents/Resources/"
+# The in-app logo renders at <= 92pt; package a Retina-sized copy instead of
+# shipping the 1254px design source in every build.
+sips -z 512 512 "$ROOT/Support/icon_mnotch.png" \
+    --out "$APP/Contents/Resources/icon_mnotch.png" >/dev/null
 cp "$ROOT/Support/donate-qr.png" "$APP/Contents/Resources/"
 
 # MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
@@ -42,17 +45,24 @@ if [[ ! -d "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" ]]; then
 fi
 cp -R "$ADAPTER_DIR/build/MediaRemoteAdapter.framework" "$APP/Contents/Frameworks/"
 cp "$ADAPTER_DIR/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
-cp "$ADAPTER_DIR/build/MediaRemoteAdapterTestClient" "$APP/Contents/Resources/"
 
 # Agent hook relay + generic notifier (installed at runtime)
 cp "$ROOT/Vendor/agent-relay/mnotch-relay.pl" "$APP/Contents/Resources/"
 cp "$ROOT/Vendor/agent-relay/mnotch-notify.pl" "$APP/Contents/Resources/"
-cp "$ROOT/Vendor/agent-relay/mnotch-claude-statusline.pl" "$APP/Contents/Resources/"
 
 # Sign nested Mach-O code from the inside out. Avoid `--deep`: it can mask an
 # incorrectly assembled bundle and is not suitable for distribution signing.
-codesign --force -s "$SIGN_ID" "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
-codesign --force -s "$SIGN_ID" "$APP/Contents/Resources/MediaRemoteAdapterTestClient"
-codesign --force -s "$SIGN_ID" "$APP"
+# Developer ID releases require a secure timestamp and hardened runtime for
+# notarization. Local development identities stay lightweight so rebuilds do
+# not unexpectedly change their runtime behavior.
+SIGN_ARGS=(--force --sign "$SIGN_ID")
+APP_SIGN_ARGS=()
+if [[ "$SIGN_ID" == Developer\ ID\ Application:* ]]; then
+    SIGN_ARGS+=(--timestamp --options runtime)
+    APP_SIGN_ARGS+=(--entitlements "$ROOT/Support/MNotch.entitlements")
+fi
+
+codesign "${SIGN_ARGS[@]}" "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+codesign "${SIGN_ARGS[@]}" "${APP_SIGN_ARGS[@]}" "$APP"
 
 echo "Built $APP (version $VERSION build $BUILD_NUM, signed: $SIGN_ID)"

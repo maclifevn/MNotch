@@ -18,55 +18,87 @@ struct HUDSettingsPane: View {
                 Toggle(isOn: $enabled) {
                     Label(title, systemImage: symbol)
                 }
-                SliderRow(
-                    title: "Duration",
-                    value: $duration,
-                    range: 0.5...3,
-                    step: 0.25
-                ) { String(format: "%.1f s", $0) }
+                Group {
+                    SliderRow(
+                        title: "Duration",
+                        value: $duration,
+                        range: 0.5...3,
+                        step: 0.25
+                    ) { String(format: "%.1f s", $0) }
 
-                OptionCardPicker(
-                    selection: $barStyle,
-                    options: HUDBarStyle.allCases,
-                    label: { style in
-                        switch style {
-                        case .white: "White"
-                        case .accent: "Accent"
-                        case .decibel: "Decibel"
+                    OptionCardPicker(
+                        selection: $barStyle,
+                        options: HUDBarStyle.allCases,
+                        label: { style in
+                            switch style {
+                            case .white: "White"
+                            case .accent: "Accent"
+                            case .decibel: "Decibel"
+                            }
                         }
+                    ) { style in
+                        BarStylePreview(style: style)
                     }
-                ) { style in
-                    BarStylePreview(style: style)
-                }
 
-                Toggle("Show percentage", isOn: $showPercentage)
-                Toggle("Hide label", isOn: $hideLabel)
+                    Toggle("Show percentage", isOn: $showPercentage)
+                    Toggle("Hide label", isOn: $hideLabel)
 
-                IconCardPicker(
-                    selection: $animSpeed,
-                    options: AnimSpeed.allCases,
-                    label: { speed in
-                        switch speed {
-                        case .smooth: "Smooth"
-                        case .fast: "Fast"
-                        case .instant: "Instant"
+                    IconCardPicker(
+                        selection: $animSpeed,
+                        options: AnimSpeed.allCases,
+                        label: { speed in
+                            switch speed {
+                            case .smooth: "Smooth"
+                            case .fast: "Fast"
+                            case .instant: "Instant"
+                            }
+                        },
+                        symbol: { speed in
+                            switch speed {
+                            case .smooth: "tortoise.fill"
+                            case .fast: "hare.fill"
+                            case .instant: "bolt.fill"
+                            }
                         }
-                    },
-                    symbol: { speed in
-                        switch speed {
-                        case .smooth: "tortoise.fill"
-                        case .fast: "hare.fill"
-                        case .instant: "bolt.fill"
-                        }
+                    )
+
+                    if let extra {
+                        extra
                     }
-                )
-
-                if let extra {
-                    extra
                 }
+                .disabled(!enabled)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private enum HUDSettingsKind: String, CaseIterable {
+    case display = "Display"
+    case sound = "Sound"
+}
+
+struct HUDPane: View {
+    @State private var kind: HUDSettingsKind = .display
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("HUD", selection: $kind) {
+                ForEach(HUDSettingsKind.allCases, id: \.self) { kind in
+                    Text(kind.rawValue).tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 260)
+            .padding(.vertical, 10)
+
+            Divider()
+            switch kind {
+            case .display: DisplayPane()
+            case .sound: SoundPane()
+            }
+        }
     }
 }
 

@@ -54,9 +54,6 @@ struct AgentEvent: Decodable {
     let notification: String?     // Notification matcher: permission_prompt / idle_prompt …
     let agentKind: String?        // "claude" | "codex" | "gemini" | …
     let title: String?
-    /// Claude Code status-line quota payload (only on event == "quota").
-    let rateLimits: ClaudeRateLimits?
-    let quotaUpdatedAt: Double?
     // Terminal locator (for jump-to-terminal).
     let termProgram: String?
     let termSession: String?
@@ -73,8 +70,6 @@ struct AgentEvent: Decodable {
         case lastMessage = "last_message"
         case lastAssistantMessage = "last_assistant_message"
         case agentKind = "agent_kind"
-        case rateLimits = "rate_limits"
-        case quotaUpdatedAt = "quota_updated_at"
         case termProgram = "term_program"
         case termSession = "term_session"
         case itermSession = "iterm_session"
@@ -93,8 +88,6 @@ struct AgentEvent: Decodable {
         notification = try? c.decode(String.self, forKey: .notification)
         agentKind = try? c.decode(String.self, forKey: .agentKind)
         title = try? c.decode(String.self, forKey: .title)
-        rateLimits = try? c.decode(ClaudeRateLimits.self, forKey: .rateLimits)
-        quotaUpdatedAt = try? c.decode(Double.self, forKey: .quotaUpdatedAt)
         termProgram = try? c.decode(String.self, forKey: .termProgram)
         termSession = try? c.decode(String.self, forKey: .termSession)
         itermSession = try? c.decode(String.self, forKey: .itermSession)
@@ -155,6 +148,13 @@ final class AgentServer {
     /// (event, requestID?) — requestID is non-nil for blocking permission
     /// events that must be answered via `respond`.
     var onEvent: ((AgentEvent, Int?) -> Void)?
+
+    /// A pending permission request ended without the app answering it: the
+    /// relay disconnected (it timed out to the terminal, or the agent session
+    /// was killed) or the server-side wait expired. The consumer must clear the
+    /// matching notch card so it doesn't hang open. Not called for requests the
+    /// app itself resolves via `respond`/`drop`.
+    var onRequestEnded: ((Int) -> Void)?
 
     private(set) var port: UInt16 = 0
     private var listener: NWListener?
@@ -297,6 +297,11 @@ final class AgentServer {
                 event: event.event,
                 timeout: timeout
             )
+            // While waiting for a decision we aren't otherwise reading, so a
+            // clean peer close (relay timed out and exited, or the session
+            // ended) would go unnoticed until the backstop timer. Keep one read
+            // pending purely to detect EOF and release the card promptly.
+            watchForClose(connection)
             onEvent?(event, id)
         } else {
             onEvent?(event, nil)
@@ -336,10 +341,26 @@ final class AgentServer {
         entry.connection.cancel()
     }
 
+    /// Wait for the blocking connection's peer to close (EOF) or error while a
+    /// decision is outstanding, then release the pending request. Re-arms on the
+    /// stray byte the relay never actually sends, so it can't busy-loop.
+    private func watchForClose(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
+            [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                connection.cancel()
+                Task { @MainActor in self?.removePending(for: connection) }
+            } else {
+                Task { @MainActor in self?.watchForClose(connection) }
+            }
+        }
+    }
+
     private func expire(_ id: Int, connection: NWConnection) {
         guard let entry = pending[id], entry.connection === connection else { return }
         pending.removeValue(forKey: id)
         connection.cancel()
+        onRequestEnded?(id)
     }
 
     private func removePending(for connection: NWConnection) {
@@ -348,6 +369,7 @@ final class AgentServer {
         }
         for id in ids {
             pending.removeValue(forKey: id)?.timeout.cancel()
+            onRequestEnded?(id)
         }
     }
 

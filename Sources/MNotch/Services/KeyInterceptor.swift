@@ -12,6 +12,23 @@ enum SystemKey: Int {
     case illuminationDown = 22
 }
 
+enum KeyTapInterruption: String, Sendable {
+    case timeout
+    case userInput
+}
+
+struct KeyTapSafetyLatch {
+    private(set) var blocksRestart = false
+
+    mutating func recordInterruption() {
+        blocksRestart = true
+    }
+
+    mutating func recordNewPermissionGrant() {
+        blocksRestart = false
+    }
+}
+
 /// Modifying CGEventTap on NX_SYSDEFINED events: swallows volume/brightness/
 /// keyboard-backlight keys so Apple's OSD never fires, and lets us perform the
 /// action + show our notch HUD instead. Requires Accessibility; without it the
@@ -24,25 +41,24 @@ final class KeyInterceptor {
     /// (key, keyDown, isRepeat, modifiers) -> consume?
     @ObservationIgnored
     var handler: ((SystemKey, Bool, Bool, NSEvent.ModifierFlags) -> Bool)?
+    @ObservationIgnored
+    var onInterruption: ((KeyTapInterruption) -> Void)?
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var interruptionScheduled = false
+    private var safetyLatch = KeyTapSafetyLatch()
 
     func start() {
         guard tap == nil else { return }
-
-        // Prompt for Accessibility only once per install; after that, check
-        // silently (the ad-hoc dev loop would otherwise prompt every launch).
-        let promptedKey = "mnotch.ax.prompted"
-        var trusted = AXIsProcessTrusted()
-        if !trusted, !UserDefaults.standard.bool(forKey: promptedKey) {
-            UserDefaults.standard.set(true, forKey: promptedKey)
-            let options = [
-                kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-            ] as CFDictionary
-            trusted = AXIsProcessTrustedWithOptions(options)
+        guard !safetyLatch.blocksRestart else {
+            mnotchLog.error("event tap restart blocked by safety latch")
+            return
         }
-        guard trusted else {
+
+        // Permission prompts are user-initiated from the notch, menu bar,
+        // Settings, or Welcome. Never throw an unexplained TCC dialog at launch.
+        guard AXIsProcessTrusted() else {
             mnotchLog.notice("accessibility not granted; HUD in observe-only mode")
             return
         }
@@ -70,6 +86,16 @@ final class KeyInterceptor {
     }
 
     func stop() {
+        // Publish fail-open state before touching Core Graphics. A disabled tap
+        // must never leave the rest of the app believing system keys are still
+        // being consumed.
+        tapActive = false
+        let tap = self.tap
+        let runLoopSource = self.runLoopSource
+        self.tap = nil
+        self.runLoopSource = nil
+        interruptionScheduled = false
+
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
             CFMachPortInvalidate(tap)
@@ -78,16 +104,21 @@ final class KeyInterceptor {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
             CFRunLoopSourceInvalidate(runLoopSource)
         }
-        runLoopSource = nil
-        tap = nil
-        tapActive = false
+    }
+
+    /// A disabled tap is latched off for the rest of the current permission
+    /// grant. Only an observed false -> true TCC transition may clear it. This
+    /// prevents app activation or a Settings refresh from racing a revocation
+    /// and immediately installing another global tap.
+    func allowRestartAfterPermissionGrant() {
+        safetyLatch.recordNewPermissionGrant()
     }
 
     fileprivate func handle(event: CGEvent, type: CGEventType) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
+            scheduleFailOpenTeardown(
+                type == .tapDisabledByTimeout ? .timeout : .userInput
+            )
             return Unmanaged.passUnretained(event)
         }
 
@@ -109,6 +140,21 @@ final class KeyInterceptor {
 
         let consumed = handler?(key, keyDown, isRepeat, nsEvent.modifierFlags) ?? false
         return consumed ? nil : Unmanaged.passUnretained(event)
+    }
+
+    private func scheduleFailOpenTeardown(_ reason: KeyTapInterruption) {
+        // Never call CGEvent.tapEnable or invalidate the Mach port from inside
+        // its own callback. In particular, immediately re-enabling a tap that
+        // WindowServer disabled for timeout defeats the system safety valve and
+        // can create an endless disable/re-enable loop.
+        safetyLatch.recordInterruption()
+        guard !interruptionScheduled else { return }
+        interruptionScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.stop()
+            self.onInterruption?(reason)
+        }
     }
 }
 

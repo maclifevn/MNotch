@@ -11,12 +11,17 @@ struct VisualizerView: View {
     var gradient: [Color]? = nil
     var barCount = 4
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var playStateChangedAt = Date.distantPast
     @State private var engineRunning = false
     @State private var stopTask: Task<Void, Never>?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 14, paused: !engineRunning)) { timeline in
+        TimelineView(.animation(
+            minimumInterval: 1 / 14,
+            paused: !engineRunning || reduceMotion
+        )) { timeline in
             Canvas { context, size in
                 let t = timeline.date.timeIntervalSinceReferenceDate
                 // Ramp amplitude in/out over ~0.4s around play/pause.
@@ -27,7 +32,7 @@ struct VisualizerView: View {
                 let barWidth = size.width / (CGFloat(barCount) * 2 - 1)
                 for i in 0..<barCount {
                     let phase = Double(i) * 0.9
-                    let wobble = 0.55
+                    let wobble = reduceMotion ? 0.55 : 0.55
                         + 0.45 * sin(t * (5.2 + Double(i) * 0.7) + phase)
                         * sin(t * 1.3 + phase * 2)
                     let height = max(
@@ -54,12 +59,12 @@ struct VisualizerView: View {
             // flat bars, not a frozen full-amplitude frame (distantPast makes
             // the ramp already complete in whichever direction applies).
             playStateChangedAt = .distantPast
-            engineRunning = isPlaying
+            engineRunning = isPlaying && !reduceMotion
         }
         .onChange(of: isPlaying) {
             playStateChangedAt = Date()
             stopTask?.cancel()
-            if isPlaying {
+            if isPlaying, !reduceMotion {
                 engineRunning = true
             } else {
                 // Keep rendering through the ramp-out, then halt the timeline.
@@ -69,6 +74,10 @@ struct VisualizerView: View {
                     engineRunning = false
                 }
             }
+        }
+        .onChange(of: reduceMotion) {
+            stopTask?.cancel()
+            engineRunning = isPlaying && !reduceMotion
         }
     }
 }

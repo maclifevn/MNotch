@@ -22,8 +22,32 @@ final class LockOverlayController {
         }
     }
 
+    /// Apply position and idle-timeout changes while the overlay is visible.
+    func reconfigure() {
+        guard let panel else { return }
+        let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
+            ?? NSScreen.main
+        guard let screen else { return }
+        let settings = SettingsStore.shared
+        let origin = NSPoint(
+            x: screen.frame.midX - panel.frame.width / 2,
+            y: screen.frame.minY + screen.frame.height * 0.16 + settings.lockOffset
+        )
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Anim.reduceMotion ? 0 : 0.2
+            panel.animator().setFrameOrigin(origin)
+        }
+        scheduleIdleTimeout(minutes: settings.lockIdleDuration)
+    }
+
     private func show() {
         hide()
+
+        // Private WindowServer APIs are optional by design. Fail closed if a
+        // macOS update removes or rejects them; never leak a normal high-level
+        // panel into the unlocked desktop as a fake lock overlay.
+        let skyLight = SkyLightOperator.shared
+        guard skyLight.available else { return }
 
         let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
             ?? NSScreen.main
@@ -58,24 +82,37 @@ final class LockOverlayController {
         panel.canBecomeVisibleWithoutLogin = true
         panel.contentView = NSHostingView(rootView: LockOverlayView())
         panel.alphaValue = 0
+        // Order front BEFORE delegating to the lock space: SLSSpaceAddWindows…
+        // moves the window off whatever space it's currently on, so if we moved
+        // it first, orderFront would re-bind it to the active desktop space and
+        // undo the lock-space membership. alphaValue is 0 here, so this on-desktop
+        // moment never flashes; we still fail closed by ordering out on refusal.
         panel.orderFrontRegardless()
-        SkyLightOperator.shared.addToLockSpace(panel)
+        guard skyLight.addToLockSpace(panel) else {
+            mnotchLog.error("SkyLight could not attach lock overlay window")
+            panel.orderOut(nil)
+            return
+        }
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.5
+            ctx.duration = Anim.reduceMotion ? 0.12 : 0.5
             panel.animator().alphaValue = 1
         }
         self.panel = panel
         mnotchLog.notice("lock overlay shown level=\(panel.level.rawValue)")
 
         // Hide after the idle duration so the display can rest.
-        let idleMinutes = settings.lockIdleDuration
-        if idleMinutes > 0 {
-            idleTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(idleMinutes * 60))
-                guard !Task.isCancelled else { return }
-                self?.hide()
-            }
+        scheduleIdleTimeout(minutes: settings.lockIdleDuration)
+    }
+
+    private func scheduleIdleTimeout(minutes: Double) {
+        idleTask?.cancel()
+        idleTask = nil
+        guard panel != nil, minutes > 0 else { return }
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(minutes * 60))
+            guard !Task.isCancelled else { return }
+            self?.hide()
         }
     }
 
@@ -85,7 +122,7 @@ final class LockOverlayController {
         guard let panel else { return }
         self.panel = nil
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.3
+            ctx.duration = Anim.reduceMotion ? 0.1 : 0.3
             panel.animator().alphaValue = 0
         }, completionHandler: {
             Task { @MainActor in

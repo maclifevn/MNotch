@@ -7,7 +7,6 @@ import SwiftUI
 struct AgentPane: View {
     @Bindable var settings = SettingsStore.shared
     @State private var claudeHooksInstalled = ClaudeHookInstaller.isInstalled
-    @State private var claudeQuotaBridgeInstalled = ClaudeHookInstaller.isQuotaBridgeInstalled
     @State private var codexHooksInstalled = CodexHookInstaller.isInstalled
     @State private var errorMessage: String?
     @State private var claudeCLIInstalled: Bool?   // nil = still checking
@@ -30,25 +29,16 @@ struct AgentPane: View {
                     Text(claudeHooksInstalled ? "Installed" : "Not installed")
                         .foregroundStyle(claudeHooksInstalled ? .green : .secondary)
                 }
-                LabeledContent("Quota bridge") {
-                    Text(claudeQuotaBridgeInstalled ? "Installed" : "Not installed")
-                        .foregroundStyle(claudeQuotaBridgeInstalled ? .green : .secondary)
-                }
                 if claudeHooksInstalled {
                     Button("Uninstall Hooks", role: .destructive) {
                         run { try ClaudeHookInstaller.uninstall() }
-                    }
-                    if !claudeQuotaBridgeInstalled {
-                        Button("Repair Quota Bridge") {
-                            run { try ClaudeHookInstaller.installQuotaBridge() }
-                        }
                     }
                 } else {
                     Button("Install Hooks") {
                         run { try ClaudeHookInstaller.install() }
                     }
                 }
-                Text("Adds MNotch's relay and a quota status-line bridge to ~/.claude/settings.json. Existing status-line output is preserved and restored on uninstall.")
+                Text("Adds MNotch's permission and session relay to ~/.claude/settings.json. Claude usage is read separately from the local CLI.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 if let errorMessage {
@@ -216,7 +206,6 @@ struct AgentPane: View {
 
     private func refreshInstallState() {
         claudeHooksInstalled = ClaudeHookInstaller.isInstalled
-        claudeQuotaBridgeInstalled = ClaudeHookInstaller.isQuotaBridgeInstalled
         codexHooksInstalled = CodexHookInstaller.isInstalled
     }
 

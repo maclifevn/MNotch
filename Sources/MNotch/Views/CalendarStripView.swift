@@ -23,7 +23,7 @@ struct CalendarStripView: View {
         .padding(.top, viewModel.geometry.notchHeight - 6)
         .padding(.horizontal, 26)
         .padding(.bottom, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             calendar.ensureStarted()
             calendar.reload()
@@ -82,7 +82,8 @@ struct CalendarStripView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.45))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .frame(height: 72)
     }
 }
 

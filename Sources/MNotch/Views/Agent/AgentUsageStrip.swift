@@ -57,7 +57,7 @@ struct AgentUsageHeader: View {
         } else {
             let slots = activeSlots
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 8) {
                     ForEach(providersWithData) { provider in
                         GridRow {
                             UsageProviderBadge(provider: provider.provider)
@@ -108,13 +108,13 @@ private struct UsageProviderBadge: View {
     }
 }
 
-/// One rolling window as an aligned quartet: `label · slim bar · used% · reset`,
+/// One rolling window as an aligned quartet: `label · slim bar · left% · reset`,
 /// each on a fixed rhythm so numbers and countdowns form clean vertical columns.
 private struct UsageWindowCell: View {
     let window: QuotaWindow
     let now: Date
 
-    private let barWidth: CGFloat = 46
+    private let barWidth: CGFloat = 30
     private let barHeight: CGFloat = 5
 
     var body: some View {
@@ -133,22 +133,22 @@ private struct UsageWindowCell: View {
                     .frame(width: fillWidth, height: barHeight)
             }
 
-            Text("\(percentInt)%")
-                .font(.system(size: 11, weight: .bold).monospacedDigit())
+            Text("\(remainingInt)% left")
+                .font(.system(size: 10, weight: .bold).monospacedDigit())
                 .foregroundStyle(usageColor)
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 46, alignment: .trailing)
 
             Text(resetText ?? "")
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.32))
-                .frame(width: 42, alignment: .trailing)
+                .frame(width: 32, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.label) \(percentInt) percent used\(resetText.map { ", resets in \($0)" } ?? "")")
+        .accessibilityLabel("\(window.label) \(remainingInt) percent remaining\(resetText.map { ", resets in \($0)" } ?? "")")
     }
 
-    private var fraction: Double { min(max(window.usedPercent / 100, 0), 1) }
-    private var percentInt: Int { Int(window.usedPercent.rounded()) }
+    private var fraction: Double { window.remainingPercent / 100 }
+    private var remainingInt: Int { Int(window.remainingPercent.rounded()) }
 
     /// Zero stays empty; anything above keeps a thin sliver so tiny usage is
     /// visible without overstating it.
@@ -156,12 +156,12 @@ private struct UsageWindowCell: View {
         fraction <= 0 ? 0 : max(2.5, barWidth * fraction)
     }
 
-    /// Green while there's headroom, amber past half, red near the cap.
+    /// Remaining quota is the product promise: green with headroom, red near 0.
     private var usageColor: Color {
-        switch window.usedPercent {
-        case ..<60: Color(red: 0.40, green: 0.85, blue: 0.52)
-        case ..<85: Color(red: 0.98, green: 0.75, blue: 0.35)
-        default: Color(red: 1.0, green: 0.45, blue: 0.42)
+        switch window.remainingPercent {
+        case ..<15: Color(red: 1.0, green: 0.45, blue: 0.42)
+        case ..<40: Color(red: 0.98, green: 0.75, blue: 0.35)
+        default: Color(red: 0.40, green: 0.85, blue: 0.52)
         }
     }
 

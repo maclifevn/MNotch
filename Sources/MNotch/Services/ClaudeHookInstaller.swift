@@ -32,10 +32,6 @@ enum ClaudeHookInstaller {
         AgentServer.supportDirectory.appending(path: "mnotch-relay.pl")
     }
 
-    static var quotaRelayURL: URL {
-        AgentServer.supportDirectory.appending(path: "mnotch-claude-statusline.pl")
-    }
-
     private static var statusLineBackupURL: URL {
         AgentServer.supportDirectory.appending(path: "claude-statusline-backup.json")
     }
@@ -57,24 +53,16 @@ enum ClaudeHookInstaller {
         return false
     }
 
-    static var isQuotaBridgeInstalled: Bool {
-        guard let statusLine = readSettings()?["statusLine"] as? [String: Any]
-        else { return false }
-        return isOurStatusLine(statusLine)
-    }
-
     /// Keep the deployed relay + notifier in sync with the running app, so a
     /// rebuilt app doesn't leave a stale relay behind the installed hooks.
-    /// It also repairs a missing quota bridge when MNotch hooks are installed.
+    /// Also removes the retired status-line quota wrapper from older installs.
     static func refreshScripts() {
-        try? deployScripts()
+        retireQuotaBridge()
         if isInstalled {
+            try? deployScripts()
             // Migrate installs that predate the PreToolUse → PermissionRequest
             // switch, so read-only tools stop popping the notch on every call.
             pruneRetiredEvents()
-            if !isQuotaBridgeInstalled {
-                try? installQuotaBridge()
-            }
         }
     }
 
@@ -109,7 +97,6 @@ enum ClaudeHookInstaller {
 
     static func deployScripts() throws {
         try copyRelay()
-        try copyQuotaRelay()
         ensureNotifyHelper()
     }
 
@@ -164,9 +151,8 @@ enum ClaudeHookInstaller {
         }
 
         root["hooks"] = hooks
-        try installQuotaBridge(into: &root)
         try writeSettings(root)
-        mnotchLog.notice("Claude hooks + quota bridge installed")
+        mnotchLog.notice("Claude hooks installed")
     }
 
     static func uninstall() throws {
@@ -188,17 +174,13 @@ enum ClaudeHookInstaller {
         } else {
             root["hooks"] = hooks
         }
-        restoreQuotaBridge(in: &root)
+        (root, _) = restoringRetiredQuotaBridge(
+            in: root,
+            backupData: try? Data(contentsOf: statusLineBackupURL)
+        )
         try writeSettings(root)
-        removeStatusLineBackup()
-        mnotchLog.notice("Claude hooks + quota bridge uninstalled")
-    }
-
-    static func installQuotaBridge() throws {
-        try deployScripts()
-        var root = readSettings() ?? [:]
-        try installQuotaBridge(into: &root)
-        try writeSettings(root)
+        cleanupRetiredQuotaFiles()
+        mnotchLog.notice("Claude hooks uninstalled")
     }
 
     // MARK: - Helpers
@@ -212,61 +194,57 @@ enum ClaudeHookInstaller {
         return command.contains("mnotch-claude-statusline.pl")
     }
 
-    private static func installQuotaBridge(into root: inout [String: Any]) throws {
-        if let current = root["statusLine"] as? [String: Any],
-           isOurStatusLine(current) {
-            return
-        }
-
-        let previous = root["statusLine"] as? [String: Any]
-        try saveStatusLineBackup(previous)
-
-        var replacement: [String: Any] = [
-            "type": "command",
-            "command": "/usr/bin/perl \(shellQuote(quotaRelayURL.path))",
-        ]
-        // Preserve the supported presentation/timing options while the
-        // wrapper is active, then restore the complete object on uninstall.
-        for key in ["padding", "refreshInterval", "hideVimModeIndicator"] {
-            if let value = previous?[key] { replacement[key] = value }
-        }
-        root["statusLine"] = replacement
-    }
-
-    private static func restoreQuotaBridge(in root: inout [String: Any]) {
-        guard let current = root["statusLine"] as? [String: Any],
+    /// One-time migration for builds that installed MNotch as Claude's status
+    /// line. Restore the user's complete previous object before deleting our
+    /// retired helper files.
+    static func restoringRetiredQuotaBridge(
+        in source: [String: Any],
+        backupData: Data?
+    ) -> (root: [String: Any], restored: Bool) {
+        guard let current = source["statusLine"] as? [String: Any],
               isOurStatusLine(current)
-        else { return }
-        if let data = try? Data(contentsOf: statusLineBackupURL),
-           let previous = try? JSONSerialization.jsonObject(with: data) {
+        else { return (source, false) }
+
+        var root = source
+        if let backupData,
+           let previous = try? JSONSerialization.jsonObject(with: backupData) as? [String: Any] {
             root["statusLine"] = previous
         } else {
             root.removeValue(forKey: "statusLine")
         }
+        return (root, true)
     }
 
-    private static func saveStatusLineBackup(_ previous: [String: Any]?) throws {
-        removeStatusLineBackup()
-        guard let previous else { return }
-        let data = try JSONSerialization.data(
-            withJSONObject: previous,
-            options: [.prettyPrinted, .sortedKeys]
-        )
-        try data.write(to: statusLineBackupURL, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: statusLineBackupURL.path
-        )
-        if let command = previous["command"] as? String, !command.isEmpty {
-            try command.write(to: statusLineCommandURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600], ofItemAtPath: statusLineCommandURL.path
-            )
-        }
-    }
-
-    private static func removeStatusLineBackup() {
+    private static func cleanupRetiredQuotaFiles() {
         try? FileManager.default.removeItem(at: statusLineBackupURL)
         try? FileManager.default.removeItem(at: statusLineCommandURL)
+        try? FileManager.default.removeItem(
+            at: AgentServer.supportDirectory.appending(path: "mnotch-claude-statusline.pl")
+        )
+        try? FileManager.default.removeItem(
+            at: AgentServer.supportDirectory.appending(path: "claude-quota.json")
+        )
+    }
+
+    private static func retireQuotaBridge() {
+        guard let root = readSettings() else { return }
+        let result = restoringRetiredQuotaBridge(
+            in: root,
+            backupData: try? Data(contentsOf: statusLineBackupURL)
+        )
+        guard result.restored else {
+            cleanupRetiredQuotaFiles()
+            return
+        }
+        do {
+            try writeSettings(result.root)
+            cleanupRetiredQuotaFiles()
+            mnotchLog.notice("Retired Claude quota status-line bridge")
+        } catch {
+            // Preserve both the wrapper and its backup if the atomic settings
+            // write fails; a later launch can safely retry the migration.
+            mnotchLog.error("Could not retire Claude status-line bridge: \(error)")
+        }
     }
 
     private static func copyRelay() throws {
@@ -285,28 +263,6 @@ enum ClaudeHookInstaller {
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: dest.path
         )
-    }
-
-    private static func copyQuotaRelay() throws {
-        guard let bundled = Bundle.main.url(
-            forResource: "mnotch-claude-statusline", withExtension: "pl"
-        ) else {
-            throw NSError(domain: "MNotch", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Bundled Claude quota relay missing",
-            ])
-        }
-        let dest = quotaRelayURL
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        try FileManager.default.copyItem(at: bundled, to: dest)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: dest.path
-        )
-    }
-
-    private static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
     private static func readSettings() -> [String: Any]? {

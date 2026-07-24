@@ -1,4 +1,3 @@
-import EventKit
 import AppKit
 
 /// Single owner of all long-lived services; shared across notch panels.
@@ -8,6 +7,7 @@ final class AppServices {
     static let shared = AppServices()
 
     let media = MediaRemoteService()
+    let accessibility = AccessibilityPermissionService()
     let audio = AudioOutputService()
     let keys = KeyInterceptor()
     let brightness = BrightnessService()
@@ -25,6 +25,8 @@ final class AppServices {
     var expandAgent: (() -> Void)?
     /// Set by NotchWindowController; collapses if no request remains.
     var collapseIfIdle: (() -> Void)?
+    /// Removes a stale permission reminder as soon as TCC grants access.
+    var dismissAccessibilityNotice: (() -> Void)?
 
     enum NotificationCategory {
         case battery, connectivity, display, sound
@@ -64,7 +66,11 @@ final class AppServices {
     private var lastObservedVolume: Double?
     private var lastObservedMuted: Bool?
     private var started = false
-    private var agentMonitoringStarted = false
+    private lazy var featureCoordinator = FeatureCoordinator(services: self)
+    private enum SuspensionReason: Hashable { case displaySleep }
+    private var suspensionReasons: Set<SuspensionReason> = []
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var applicationObservers: [NSObjectProtocol] = []
 
     private init() {}
 
@@ -72,11 +78,19 @@ final class AppServices {
         guard !started else { return }
         started = true
         startedAt = Date()
-        media.start()
-        audio.start()
-        brightness.start()
-        backlight.start()
-
+        accessibility.onChange = { [weak self] granted in
+            guard let self else { return }
+            if granted {
+                self.keys.allowRestartAfterPermissionGrant()
+            }
+            self.featureCoordinator.accessibilityDidChange(granted)
+            if granted {
+                self.dismissAccessibilityNotice?()
+            } else if self.accessibility.isRequiredForEnabledFeatures {
+                self.showPop?(.accessibility)
+            }
+        }
+        accessibility.start()
         // Observe-mode brightness HUD (mirrors the system OSD until the
         // event tap has Accessibility and consumes the keys itself).
         brightness.onChanged = { [weak self] value in
@@ -87,12 +101,16 @@ final class AppServices {
             else { return }
             self.showHUD?(.brightness, value, false)
         }
-        brightness.startObserving()
-
         keys.handler = { [weak self] key, keyDown, isRepeat, modifiers in
             self?.handleSystemKey(key, keyDown: keyDown, modifiers: modifiers) ?? false
         }
-        keys.start()
+        keys.onInterruption = { [weak self] reason in
+            mnotchLog.error("event tap interrupted (\(reason.rawValue)); staying fail-open")
+            // This is intentionally refresh-only. If TCC still reports true
+            // after a timeout, the safety latch keeps the tap off rather than
+            // risking a global disable/re-enable loop.
+            self?.accessibility.refresh()
+        }
 
         power.onPowerEvent = { [weak self] event in
             let settings = SettingsStore.shared
@@ -113,7 +131,6 @@ final class AppServices {
                 self?.showPop?(.lowPower(on: on))
             }
         }
-        power.start()
 
         bluetooth.onConnect = { [weak self] name, symbol, battery in
             guard SettingsStore.shared.connectivityEnabled,
@@ -124,9 +141,6 @@ final class AppServices {
             guard self?.allowedNow(.connectivity) != false else { return }
             self?.showPop?(.device(name: name, symbol: symbol, battery: battery))
         }
-        bluetooth.start()
-        occlusion.start()
-        lockScreen.start()
 
         // Agent monitor: permission requests auto-expand the notch into the
         // Agent tab; idle prompts and turn-completions fire pops + sounds.
@@ -158,12 +172,9 @@ final class AppServices {
         agents.onRequestResolved = { [weak self] in
             self?.collapseIfIdle?()
         }
-        // Claude usage comes solely from the `claude` CLI now (QuotaService's
-        // ClaudeUsageClient). The status-line quota bridge is left unwired so the
-        // two sources can't fight over claudeQuota's window count and state.
-        // Keep the deployed relay in sync with this app build.
+        // Claude usage comes solely from the local CLI. Refresh installed hook
+        // scripts and migrate the retired status-line quota wrapper if present.
         ClaudeHookInstaller.refreshScripts()
-        setAgentMonitoringEnabled(SettingsStore.shared.agentEnabled)
 
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared
@@ -179,7 +190,6 @@ final class AppServices {
                 self?.showPop?(.focus(name: old.name, symbol: old.symbol, on: false))
             }
         }
-        focus.start()
 
         calendar.onPeek = { [weak self] item, startingNow in
             self?.showPop?(.event(
@@ -197,13 +207,6 @@ final class AppServices {
         calendar.onChime = {
             SoundPlayer.play(.chime)
         }
-        // Start eagerly only when access was already granted (no TCC prompt
-        // at launch); otherwise the first calendar UI touch requests it.
-        if SettingsStore.shared.calendarEnabled,
-           EKEventStore.authorizationStatus(for: .event) == .fullAccess {
-            calendar.ensureStarted()
-        }
-
         // Observe-only fallback (no Accessibility yet): mirror volume changes
         // from any source as a HUD. Redundant-but-harmless when the tap is
         // active, since the key handler already showed the same value.
@@ -219,38 +222,68 @@ final class AppServices {
             guard changed, self.allowedNow(.sound) else { return }
             self.showHUD?(.volume, muted ? 0 : volume, muted)
         }
+
+        installWorkspaceLifecycleObservers()
+        featureCoordinator.start()
     }
 
     func stopAll() {
         guard started else { return }
         started = false
-        media.stop()
-        quota.stop()
-        calendar.stop()
-        agents.stop()
-        agentMonitoringStarted = false
-        keys.stop()
-        brightness.stop()
-        backlight.stop()
-        audio.stop()
-        power.stop()
-        bluetooth.stop()
-        occlusion.stop()
-        focus.stop()
-        lockScreen.stop()
+        removeWorkspaceLifecycleObservers()
+        featureCoordinator.stop()
+        accessibility.stop()
     }
 
     func setAgentMonitoringEnabled(_ enabled: Bool) {
-        if enabled, !agentMonitoringStarted {
-            agentMonitoringStarted = true
-            agents.start()
-            quota.start()
-        } else if !enabled, agentMonitoringStarted {
-            agentMonitoringStarted = false
-            agents.stop()
-            quota.stop()
-            collapseIfIdle?()
+        // The setting is the source of truth; keep this compatibility entry
+        // point for onboarding/Settings and apply it synchronously.
+        if SettingsStore.shared.agentEnabled != enabled {
+            SettingsStore.shared.agentEnabled = enabled
         }
+        featureCoordinator.refresh()
+    }
+
+    private func installWorkspaceLifecycleObservers() {
+        guard workspaceObservers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        func observe(_ name: Notification.Name, _ reason: SuspensionReason, active: Bool) {
+            workspaceObservers.append(center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.setSuspension(reason, active: active) }
+            })
+        }
+        observe(NSWorkspace.screensDidSleepNotification, .displaySleep, active: true)
+        observe(NSWorkspace.screensDidWakeNotification, .displaySleep, active: false)
+
+        applicationObservers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.featureCoordinator.applicationDidBecomeActive() }
+        })
+    }
+
+    private func removeWorkspaceLifecycleObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach { center.removeObserver($0) }
+        workspaceObservers.removeAll()
+        applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        applicationObservers.removeAll()
+        suspensionReasons.removeAll()
+    }
+
+    private func setSuspension(_ reason: SuspensionReason, active: Bool) {
+        if active {
+            suspensionReasons.insert(reason)
+        } else {
+            suspensionReasons.remove(reason)
+        }
+        featureCoordinator.setSuspended(!suspensionReasons.isEmpty)
     }
 
     private func handleSystemKey(
@@ -264,21 +297,13 @@ final class AppServices {
         case .soundUp, .soundDown:
             guard settings.soundHUDEnabled else { return false }
             if keyDown {
-                let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
-                let newVolume = min(max(audio.volume + step, 0), 1)
-                audio.setVolume(newVolume)
-                if allowedNow(.sound) {
-                    showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
-                }
+                enqueueSystemKeyAction(key, fine: fine)
             }
             return true
         case .mute:
             guard settings.soundHUDEnabled else { return false }
             if keyDown {
-                audio.setMuted(!audio.muted)
-                if allowedNow(.sound) {
-                    showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
-                }
+                enqueueSystemKeyAction(key, fine: fine)
             }
             return true
         case .brightnessUp, .brightnessDown:
@@ -286,21 +311,56 @@ final class AppServices {
             // key (and show its own OSD) rather than breaking the feature.
             guard settings.displayHUDEnabled, brightness.available else { return false }
             if keyDown {
-                let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
-                if allowedNow(.display) {
-                    showHUD?(.brightness, newValue, false)
-                }
+                enqueueSystemKeyAction(key, fine: fine)
             }
             return true
         case .illuminationUp, .illuminationDown:
             guard settings.displayHUDEnabled, backlight.available else { return false }
             if keyDown {
-                let newValue = backlight.step(up: key == .illuminationUp)
-                if allowedNow(.display) {
-                    showHUD?(.keyboardBacklight, newValue, false)
-                }
+                enqueueSystemKeyAction(key, fine: fine)
             }
             return true
+        }
+    }
+
+    /// The global event-tap callback must return immediately. Hardware I/O and
+    /// SwiftUI state changes run on the next main-actor turn, after the event
+    /// has already been consumed or passed through.
+    private func enqueueSystemKeyAction(_ key: SystemKey, fine: Bool) {
+        Task { @MainActor [weak self] in
+            self?.performSystemKeyAction(key, fine: fine)
+        }
+    }
+
+    private func performSystemKeyAction(_ key: SystemKey, fine: Bool) {
+        let settings = SettingsStore.shared
+        switch key {
+        case .soundUp, .soundDown:
+            guard settings.soundHUDEnabled else { return }
+            let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
+            let newVolume = min(max(audio.volume + step, 0), 1)
+            audio.setVolume(newVolume)
+            if allowedNow(.sound) {
+                showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
+            }
+        case .mute:
+            guard settings.soundHUDEnabled else { return }
+            audio.setMuted(!audio.muted)
+            if allowedNow(.sound) {
+                showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
+            }
+        case .brightnessUp, .brightnessDown:
+            guard settings.displayHUDEnabled, brightness.available else { return }
+            let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
+            if allowedNow(.display) {
+                showHUD?(.brightness, newValue, false)
+            }
+        case .illuminationUp, .illuminationDown:
+            guard settings.displayHUDEnabled, backlight.available else { return }
+            let newValue = backlight.step(up: key == .illuminationUp)
+            if allowedNow(.display) {
+                showHUD?(.keyboardBacklight, newValue, false)
+            }
         }
     }
 }

@@ -59,7 +59,7 @@ struct MediaExpandedView: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.easeInOut(duration: 0.3), value: trackIdentity)
+            .animation(Anim.hud, value: trackIdentity)
 
             StyledVisualizer(
                 isPlaying: media.playback.isPlaying,
@@ -145,7 +145,7 @@ struct MediaExpandedView: View {
             ) {
                 media.send(.togglePlayPause)
             }
-            .contentTransition(.symbolEffect(.replace))
+            .contentTransition(Anim.symbolReplace)
             TransportButton(symbol: "forward.fill", size: 17) {
                 media.send(.nextTrack)
             }

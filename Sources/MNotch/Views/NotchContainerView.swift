@@ -83,6 +83,13 @@ struct NotchBodyView: View {
                     services.calendar.ensureStarted()
                 }
             }
+            .onChange(of: enabledTabs) { _, tabs in
+                guard case .expanded(let current) = viewModel.status,
+                      !tabs.contains(current),
+                      let fallback = tabs.first
+                else { return }
+                viewModel.selectTab(fallback)
+            }
     }
 
     /// Media chrome shows when enabled, playing, and (optionally) the source
@@ -97,6 +104,10 @@ struct NotchBodyView: View {
             return false
         }
         return true
+    }
+
+    private var enabledTabs: [NotchTab] {
+        NotchTab.allCases.filter(viewModel.isTabEnabled)
     }
 
     @ViewBuilder
@@ -148,6 +159,8 @@ struct NotchBodyView: View {
     @ViewBuilder
     private func popView(_ kind: PopKind) -> some View {
         switch kind {
+        case .accessibility:
+            AccessibilityPopView(geometry: viewModel.geometry)
         case .charging(let percentage):
             BatteryPopView(percentage: percentage, kind: .charging, geometry: viewModel.geometry)
         case .lowBattery(let percentage):
@@ -181,22 +194,27 @@ struct NotchBodyView: View {
         }
     }
 
-    @ViewBuilder
     private func expanded(_ tab: NotchTab) -> some View {
-        switch tab {
-        case .media:
-            MediaExpandedView(
-                viewModel: viewModel,
-                media: services.media,
-                audio: services.audio,
-                namespace: notchSpace
-            )
-        case .shelf:
-            ShelfView(viewModel: viewModel)
-        case .calendar:
-            CalendarStripView(viewModel: viewModel, calendar: services.calendar)
-        case .agent:
-            AgentTabView(viewModel: viewModel)
+        Group {
+            switch tab {
+            case .media:
+                MediaExpandedView(
+                    viewModel: viewModel,
+                    media: services.media,
+                    audio: services.audio,
+                    namespace: notchSpace
+                )
+            case .shelf:
+                ShelfView(viewModel: viewModel)
+            case .calendar:
+                CalendarStripView(viewModel: viewModel, calendar: services.calendar)
+            case .agent:
+                AgentTabView(viewModel: viewModel)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            viewModel.setExpandedContentHeight(height, for: tab)
         }
     }
 }
@@ -209,15 +227,17 @@ struct TabStrip: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            tabButton(.media, symbol: "music.note")
+            if viewModel.isTabEnabled(.media) {
+                tabButton(.media, symbol: "music.note", label: "Now Playing")
+            }
             if settings.shelfEnabled {
-                tabButton(.shelf, symbol: "tray.fill")
+                tabButton(.shelf, symbol: "tray.fill", label: "File Tray")
             }
             if settings.calendarEnabled {
-                tabButton(.calendar, symbol: "calendar")
+                tabButton(.calendar, symbol: "calendar", label: "Calendar")
             }
             if settings.agentEnabled {
-                tabButton(.agent, symbol: "terminal.fill")
+                tabButton(.agent, symbol: "terminal.fill", label: "Agents")
             }
             Button {
                 SettingsWindowController.shared.show()
@@ -225,26 +245,31 @@ struct TabStrip: View {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.35))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 26, height: 26)
             }
             .buttonStyle(.plain)
+            .help("MNotch Settings")
+            .accessibilityLabel("MNotch Settings")
         }
         .padding(.top, 7)
         .padding(.trailing, 12)
     }
 
-    private func tabButton(_ tab: NotchTab, symbol: String) -> some View {
+    private func tabButton(_ tab: NotchTab, symbol: String, label: String) -> some View {
         Button {
             viewModel.selectTab(tab)
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(current == tab ? .white : .white.opacity(0.35))
-                .frame(width: 22, height: 22)
+                .frame(width: 26, height: 26)
                 .background(
                     Circle().fill(.white.opacity(current == tab ? 0.14 : 0))
                 )
         }
         .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(current == tab ? .isSelected : [])
     }
 }

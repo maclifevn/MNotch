@@ -2,6 +2,17 @@ import AppKit
 import Observation
 
 private actor ShelfFileWorker {
+    private enum WorkerError: LocalizedError {
+        case capacity(Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .capacity(let limit): "File Tray can hold up to \(limit) items."
+            }
+        }
+    }
+
+    private static let itemLimit = 100
     private let directory: URL
     private let fm = FileManager.default
 
@@ -27,9 +38,28 @@ private actor ShelfFileWorker {
 
     func add(_ urls: [URL]) throws -> [URL] {
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        for url in urls {
-            let destination = uniqueDestination(for: url)
-            try fm.copyItem(at: url, to: destination)
+        let existing = try fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        guard existing.count + urls.count <= Self.itemLimit else {
+            throw WorkerError.capacity(Self.itemLimit)
+        }
+
+        var copied: [URL] = []
+        do {
+            for url in urls {
+                let destination = uniqueDestination(for: url)
+                try fm.copyItem(at: url, to: destination)
+                copied.append(destination)
+            }
+        } catch {
+            // Keep a failed multi-file drop atomic; no invisible partial batch.
+            for destination in copied {
+                try? fm.removeItem(at: destination)
+            }
+            throw error
         }
         return try list()
     }
