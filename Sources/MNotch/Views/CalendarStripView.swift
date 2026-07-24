@@ -13,9 +13,13 @@ struct CalendarStripView: View {
             } else if calendar.today.isEmpty && calendar.upcoming.isEmpty {
                 message("No upcoming events", symbol: "checkmark.circle")
             } else {
-                HStack(alignment: .top, spacing: 18) {
-                    dateBlock
-                    eventsColumn
+                HStack(alignment: .top, spacing: 16) {
+                    leftColumn
+                    if SettingsStore.shared.calendarMonthView {
+                        MonthGridView(eventDays: calendar.monthEventDays)
+                    } else {
+                        upcomingColumn
+                    }
                 }
             }
         }
@@ -31,45 +35,42 @@ struct CalendarStripView: View {
         }
     }
 
-    /// Big date (or the mini month grid) anchoring the left edge.
-    private var dateBlock: some View {
-        Group {
-            if SettingsStore.shared.calendarMonthView {
-                MonthGridView(eventDays: calendar.monthEventDays)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.red)
-                        .kerning(0.5)
-                    Text(Date().formatted(.dateTime.day()))
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+    /// Alcove's left column: the big weekday + day, then today's events.
+    private var leftColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: -2) {
+                Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.red)
+                    .kerning(0.5)
+                Text(Date().formatted(.dateTime.day()))
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(.white)
             }
-        }
-        .fixedSize()
-    }
-
-    /// One left-aligned flow: today's events, then each upcoming day under its
-    /// label. Fills the remaining width so nothing floats off in a corner.
-    private var eventsColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(calendar.today.prefix(3)) { item in
-                EventChip(item: item)
-            }
-            ForEach(calendar.upcoming) { section in
-                Text(Self.dayLabel(section.day))
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .kerning(0.6)
-                    .padding(.top, calendar.today.isEmpty ? 0 : 3)
-                ForEach(section.items.prefix(2)) { item in
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(calendar.today.prefix(4)) { item in
                     EventChip(item: item)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Fallback right column when the month grid is off: upcoming days as a
+    /// labelled list, sized to the grid's slot so the panel width is stable.
+    private var upcomingColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(calendar.upcoming) { section in
+                Text(Self.dayLabel(section.day))
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .kerning(0.6)
+                ForEach(section.items.prefix(2)) { item in
+                    EventChip(item: item)
+                }
+            }
+        }
+        .frame(width: 190, alignment: .leading)
     }
 
     static func dayLabel(_ day: Date) -> String {
@@ -130,23 +131,28 @@ struct EventChip: View {
     }
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(tint)
-                .frame(width: 5, height: 5)
+                .frame(width: 14, height: 14)
+                .overlay {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
             if !item.isAllDay {
                 Text(item.start, style: .time)
                     .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(tint.opacity(0.9))
+                    .foregroundStyle(.white.opacity(0.5))
             }
             Text(item.title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(tint.opacity(0.18), in: Capsule())
-        .frame(maxWidth: 320, alignment: alignment)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.white.opacity(0.07), in: Capsule())
+        .frame(maxWidth: 300, alignment: alignment)
     }
 }

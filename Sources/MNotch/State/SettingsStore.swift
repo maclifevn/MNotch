@@ -303,7 +303,7 @@ final class SettingsStore {
         calendarUseColor = flag("cal.useColor", true)
         calendarDisableDuringEvents = flag("cal.noDuringEvents", false)
         calendarEventIndicators = flag("cal.indicators", false)
-        calendarMonthView = flag("cal.monthView", false)
+        calendarMonthView = flag("cal.monthView", true)
         calendarQuickPeek = flag("cal.peek", true)
         calendarPeekBeforeStart = flag("cal.peekBefore", false)
         calendarPeekWhenStarting = flag("cal.peekStarting", true)
