@@ -174,8 +174,12 @@ final class AppServices {
             self?.collapseIfIdle?()
         }
         notifications.onNotification = { [weak self] item in
-            guard SettingsStore.shared.notifMirrorEnabled else { return }
-            self?.showPop?(.systemNotification(
+            guard let self, SettingsStore.shared.notifMirrorEnabled else { return }
+            // Respect Focus / Do Not Disturb: macOS still records notifications
+            // to the store while suppressing their banners, so don't resurface
+            // them on the notch when a Focus is active.
+            guard !self.focus.isFocused else { return }
+            self.showPop?(.systemNotification(
                 bundleID: item.bundleID,
                 app: item.appName,
                 title: item.title,

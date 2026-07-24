@@ -234,10 +234,15 @@ struct NotificationPopView: View {
     let bodyText: String
     let geometry: NotchGeometry
 
+    private static let iconCache = NSCache<NSString, NSImage>()
+
     private var icon: NSImage? {
+        if let cached = Self.iconCache.object(forKey: bundleID as NSString) { return cached }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
         else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        Self.iconCache.setObject(image, forKey: bundleID as NSString)
+        return image
     }
 
     var body: some View {

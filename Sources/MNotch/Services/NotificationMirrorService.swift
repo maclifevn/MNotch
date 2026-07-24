@@ -55,6 +55,7 @@ final class NotificationMirrorService {
         // stopped (e.g. during display sleep) aren't replayed as a burst.
         baselined = false
         lastSignature = nil
+        lastRecID = -1
         let timer = Timer(timeInterval: 1.5, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.requestPoll() }
         }
@@ -72,10 +73,7 @@ final class NotificationMirrorService {
     }
 
     func openFullDiskAccessSettings() {
-        let anchor = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-        if let url = URL(string: anchor) {
-            NSWorkspace.shared.open(url)
-        }
+        SystemSettings.open(.fullDiskAccess)
     }
 
     // MARK: - Polling
@@ -131,12 +129,20 @@ final class NotificationMirrorService {
             return PollResult(access: .granted, signature: signature, maxRecID: nil, items: [])
         }
         guard let copy = try? copyDatabase(db) else {
-            return PollResult(access: .granted, signature: signature, maxRecID: nil, items: [])
+            // Don't mark this change consumed — retry on the next tick.
+            return PollResult(access: .granted, signature: nil, maxRecID: nil, items: [])
         }
         defer { try? FileManager.default.removeItem(at: copy.dir) }
 
-        let (items, maxID) = readRecords(dbPath: copy.dbPath, since: since)
-        return PollResult(access: .granted, signature: signature, maxRecID: maxID, items: items)
+        let (items, maxID, hitLimit) = readRecords(dbPath: copy.dbPath, since: since)
+        // A full batch may leave more behind; keep the signature unconsumed so
+        // the next poll drains the rest instead of waiting for a new record.
+        return PollResult(
+            access: .granted,
+            signature: hitLimit ? nil : signature,
+            maxRecID: maxID,
+            items: items
+        )
     }
 
     /// db + wal modification times. Throws (EPERM) when Full Disk Access is
@@ -170,26 +176,35 @@ final class NotificationMirrorService {
         return (dir, destDB.path)
     }
 
-    private nonisolated static func readRecords(dbPath: String, since: Int64) -> ([Item], Int64?) {
+    /// Returns (new items, highest rec_id seen, whether the batch hit its limit).
+    private nonisolated static func readRecords(dbPath: String, since: Int64) -> ([Item], Int64?, Bool) {
         var handle: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
             sqlite3_close(handle)
-            return ([], nil)
+            return ([], nil, false)
         }
         defer { sqlite3_close(handle) }
 
+        // Baseline: adopt the current max id so pre-existing history is never
+        // replayed. An ASC-ordered LIMIT batch would return the OLDEST rows and
+        // baseline to the wrong id, so read MAX(rec_id) directly instead.
+        if since < 0 {
+            return ([], currentMaxRecID(handle), false)
+        }
+
+        let limit = 30
         let sql = """
         SELECT r.rec_id, a.identifier, r.data
         FROM record r JOIN app a ON r.app_id = a.app_id
         WHERE r.rec_id > ?
-        ORDER BY r.rec_id ASC LIMIT 30;
+        ORDER BY r.rec_id ASC LIMIT \(limit);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else {
             // Schema differs from the known layout — log its shape (names only,
             // no content) so it can be adapted, then skip.
             mnotchLog.error("Notification DB schema unexpected: \(schemaDescription(handle), privacy: .public)")
-            return ([], nil)
+            return ([], nil, false)
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, since)
@@ -220,27 +235,45 @@ final class NotificationMirrorService {
                 body: content.body
             ))
         }
-        return (items, maxID)
+        return (items, maxID, rowsSeen >= limit)
+    }
+
+    /// Highest rec_id currently in the store (0 when empty).
+    private nonisolated static func currentMaxRecID(_ handle: OpaquePointer?) -> Int64 {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT MAX(rec_id) FROM record", -1, &stmt, nil) == SQLITE_OK
+        else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int64(stmt, 0) : 0
     }
 
     /// The record blob is a binary plist whose title/subtitle/body live under
     /// short keys (`titl`/`subt`/`body`). Their exact nesting has shifted across
     /// macOS versions, so search the whole tree instead of a fixed path.
-    private nonisolated static func decode(_ data: Data) -> (title: String, body: String)? {
+    nonisolated static func decode(_ data: Data) -> (title: String, body: String)? {
         guard let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         else { return nil }
-        var title = "", subtitle = "", body = ""
-        func walk(_ any: Any) {
-            if let dict = any as? [String: Any] {
-                if title.isEmpty, let value = dict["titl"] as? String { title = value }
-                if subtitle.isEmpty, let value = dict["subt"] as? String { subtitle = value }
-                if body.isEmpty, let value = dict["body"] as? String { body = value }
-                for value in dict.values { walk(value) }
-            } else if let array = any as? [Any] {
-                for value in array { walk(value) }
-            }
+        // Take title/subtitle/body from ONE request dict — prefer an explicit
+        // `req`, else the first dict carrying any of them — so fields can't be
+        // mismatched across coalesced entries or picked in nondeterministic order.
+        func fields(_ dict: [String: Any]) -> (String, String, String)? {
+            let t = dict["titl"] as? String
+            let s = dict["subt"] as? String
+            let b = dict["body"] as? String
+            guard t != nil || s != nil || b != nil else { return nil }
+            return (t ?? "", s ?? "", b ?? "")
         }
-        walk(root)
+        func find(_ any: Any) -> (String, String, String)? {
+            if let dict = any as? [String: Any] {
+                if let req = dict["req"] as? [String: Any], let hit = find(req) { return hit }
+                if let hit = fields(dict) { return hit }
+                for value in dict.values { if let hit = find(value) { return hit } }
+            } else if let array = any as? [Any] {
+                for value in array { if let hit = find(value) { return hit } }
+            }
+            return nil
+        }
+        guard let (title, subtitle, body) = find(root) else { return nil }
         let fullBody = [subtitle, body].filter { !$0.isEmpty }.joined(separator: " — ")
         guard !(title.isEmpty && fullBody.isEmpty) else { return nil }
         return (title, fullBody)
@@ -288,9 +321,6 @@ final class NotificationMirrorService {
     }
 
     private nonisolated static func displayName(for bundleID: String) -> String {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-        else { return bundleID }
-        return FileManager.default.displayName(atPath: url.path)
-            .replacingOccurrences(of: ".app", with: "")
+        NSWorkspace.shared.appDisplayName(forBundleID: bundleID)
     }
 }

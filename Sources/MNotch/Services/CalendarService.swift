@@ -147,10 +147,7 @@ final class CalendarService {
             requested = false        // let ensureStarted() run the prompt again
             ensureStarted()
         } else {
-            let anchor = "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
-            if let url = URL(string: anchor) {
-                NSWorkspace.shared.open(url)
-            }
+            SystemSettings.open(.calendars)
         }
     }
 

@@ -17,11 +17,12 @@ struct NowPlayingPane: View {
                     step: 1
                 ) { "\(Int($0)) s" }
 
-                if !MediaRemoteService.installedPlayers.isEmpty {
+                let players = MediaRemoteService.installedPlayers
+                if !players.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Picker("Play button starts", selection: $settings.mediaPreferredPlayer) {
                             Text("System default").tag("")
-                            ForEach(MediaRemoteService.installedPlayers) { player in
+                            ForEach(players) { player in
                                 Text(player.name).tag(player.bundleID)
                             }
                         }
@@ -120,8 +121,7 @@ struct SourceLabel: View {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                     .resizable()
                     .frame(width: 18, height: 18)
-                Text(FileManager.default.displayName(atPath: url.path)
-                    .replacingOccurrences(of: ".app", with: ""))
+                Text(NSWorkspace.shared.appDisplayName(forBundleID: bundleID))
             } else {
                 Text(bundleID)
             }

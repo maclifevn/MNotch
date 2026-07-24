@@ -252,6 +252,28 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertNil(AgentHookResponse.data(event: "PermissionRequest", decision: .ask))
     }
 
+    func testNotificationDecodePrefersRequestDictAndKeepsFieldsTogether() throws {
+        // The canonical title/subtitle/body live in `req`; a stray sibling body
+        // must not leak in, and subtitle+body must come from the same dict.
+        let payload: [String: Any] = [
+            "req": ["titl": "Hello", "subt": "Sub", "body": "World"],
+            "other": ["body": "STRAY"],
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: payload, format: .binary, options: 0
+        )
+        let result = NotificationMirrorService.decode(data)
+        XCTAssertEqual(result?.title, "Hello")
+        XCTAssertEqual(result?.body, "Sub — World")
+    }
+
+    func testNotificationDecodeReturnsNilWhenNoTitleOrBody() throws {
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: ["req": ["foo": "bar"]], format: .binary, options: 0
+        )
+        XCTAssertNil(NotificationMirrorService.decode(data))
+    }
+
     @MainActor
     func testExternallyEndedRequestClearsTheStuckCardAndCollapses() throws {
         // Reproduces the "approve in Claude, notch card hangs open" bug: when

@@ -97,7 +97,9 @@ struct FeatureDemand: Equatable {
             || flags.hideInMissionControl
             || flags.hideWhileGaming
             || (media && flags.mediaHideWhileSourceActive)
-        focus = flags.focusEnabled || (lock && flags.lockWidgetFocus)
+        // Notification mirroring needs Focus state to honor Do Not Disturb, so
+        // it keeps FocusWatcher running even when the Focus pop feature is off.
+        focus = flags.focusEnabled || (lock && flags.lockWidgetFocus) || flags.notifMirrorEnabled
         agents = flags.agentEnabled
         quota = flags.agentEnabled
         notifications = flags.notifMirrorEnabled

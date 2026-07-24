@@ -99,10 +99,6 @@ final class SettingsStore {
 
     var focusEnabled: Bool { didSet { save("focus.enabled", focusEnabled) } }
     var focusDuration: Double { didSet { save("focus.duration", focusDuration) } }
-
-    // System notification mirroring (experimental; needs Full Disk Access).
-    var notifMirrorEnabled: Bool { didSet { save("notif.mirror", notifMirrorEnabled) } }
-    var notifMirrorDuration: Double { didSet { save("notif.duration", notifMirrorDuration) } }
     var focusSoundOnSleep: Bool { didSet { save("focus.sleepSound", focusSoundOnSleep) } }
     var focusReplaceWaveform: Bool { didSet { save("focus.replaceWaveform", focusReplaceWaveform) } }
     var focusHideLabel: Bool { didSet { save("focus.hideLabel", focusHideLabel) } }
@@ -110,6 +106,11 @@ final class SettingsStore {
     var focusAllowConnectivity: Bool { didSet { save("focus.allowBt", focusAllowConnectivity) } }
     var focusAllowDisplay: Bool { didSet { save("focus.allowDisplay", focusAllowDisplay) } }
     var focusAllowSound: Bool { didSet { save("focus.allowSound", focusAllowSound) } }
+
+    // MARK: System notification mirroring (experimental; needs Full Disk Access)
+
+    var notifMirrorEnabled: Bool { didSet { save("notif.mirror", notifMirrorEnabled) } }
+    var notifMirrorDuration: Double { didSet { save("notif.duration", notifMirrorDuration) } }
 
     // MARK: Display HUD (brightness)
 
@@ -262,8 +263,6 @@ final class SettingsStore {
 
         focusEnabled = flag("focus.enabled", true)
         focusDuration = num("focus.duration", 5)
-        notifMirrorEnabled = flag("notif.mirror", false)
-        notifMirrorDuration = num("notif.duration", 5)
         focusSoundOnSleep = flag("focus.sleepSound", false)
         focusReplaceWaveform = flag("focus.replaceWaveform", false)
         focusHideLabel = flag("focus.hideLabel", false)
@@ -271,6 +270,8 @@ final class SettingsStore {
         focusAllowConnectivity = flag("focus.allowBt", true)
         focusAllowDisplay = flag("focus.allowDisplay", true)
         focusAllowSound = flag("focus.allowSound", true)
+        notifMirrorEnabled = flag("notif.mirror", false)
+        notifMirrorDuration = num("notif.duration", 5)
 
         displayHUDEnabled = flag("display.enabled", true, legacy: "feature.hud")
         displayHUDDuration = num("display.duration", 1.5)

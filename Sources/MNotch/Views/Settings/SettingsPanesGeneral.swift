@@ -283,11 +283,7 @@ struct FocusPane: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                         Button("Open Privacy Settings") {
-                            if let url = URL(
-                                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-                            ) {
-                                NSWorkspace.shared.open(url)
-                            }
+                            SystemSettings.open(.fullDiskAccess)
                         }
                         .controlSize(.small)
                     }

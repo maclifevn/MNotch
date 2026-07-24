@@ -342,11 +342,12 @@ final class MediaRemoteService {
         let candidates = Set(scriptablePlayers.keys)
             .union(SettingsStore.shared.mediaKnownSources)
         return candidates.compactMap { bundle -> PreferredPlayer? in
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle)
+            guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) != nil
             else { return nil }
-            let name = FileManager.default.displayName(atPath: url.path)
-                .replacingOccurrences(of: ".app", with: "")
-            return PreferredPlayer(bundleID: bundle, name: name)
+            return PreferredPlayer(
+                bundleID: bundle,
+                name: NSWorkspace.shared.appDisplayName(forBundleID: bundle)
+            )
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -386,7 +387,7 @@ final class MediaRemoteService {
         setPlayingOptimistically(true)
         let scriptName = Self.scriptablePlayers[preferred]
         let nudge = Self.adapterPaths.map { [$0.script, $0.framework, "send", "0"] }
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .userInitiated) { [weak self] in
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
             _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
@@ -403,8 +404,10 @@ final class MediaRemoteService {
                 try? await Task.sleep(for: .milliseconds(900))
                 Self.runAdapterSync(nudge)
             }
+            // Confirm state only AFTER the play action, so the poll doesn't run
+            // (and revert the optimistic flip) before the app has started.
+            await self?.pollSoon()
         }
-        pollSoon()
         return true
     }
 
