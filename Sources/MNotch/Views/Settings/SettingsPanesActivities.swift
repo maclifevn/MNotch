@@ -184,8 +184,12 @@ struct CalendarPane: View {
             }
             Section("Calendars") {
                 if calendar.calendars.isEmpty {
-                    Text("Open the calendar tab once to grant access.")
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("MNotch needs access to your calendars.")
+                            .foregroundStyle(.secondary)
+                        Button("Grant Access") { calendar.requestAccess() }
+                            .controlSize(.small)
+                    }
                 } else {
                     ForEach(calendar.calendars) { info in
                         CalendarRow(info: info)
