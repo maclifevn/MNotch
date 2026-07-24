@@ -63,11 +63,7 @@ struct AgentUsageHeader: View {
                             UsageProviderBadge(provider: provider.provider)
                                 .gridColumnAlignment(.leading)
                             ForEach(slots, id: \.self) { slot in
-                                if let window = window(provider, in: slot) {
-                                    UsageWindowCell(window: window, now: context.date)
-                                } else {
-                                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                                }
+                                UsageWindowCell(window: window(provider, in: slot), now: context.date)
                             }
                         }
                     }
@@ -110,54 +106,74 @@ private struct UsageProviderBadge: View {
 
 /// One rolling window as an aligned quartet: `label · slim bar · left% · reset`,
 /// each on a fixed rhythm so numbers and countdowns form clean vertical columns.
+/// A nil window renders a dim placeholder at the same widths, so a provider that
+/// lacks a slot keeps the table aligned instead of leaving a ragged void.
 private struct UsageWindowCell: View {
-    let window: QuotaWindow
+    let window: QuotaWindow?
     let now: Date
 
+    private let labelWidth: CGFloat = 16
     private let barWidth: CGFloat = 30
     private let barHeight: CGFloat = 5
+    private let percentWidth: CGFloat = 48
+    private let resetWidth: CGFloat = 38
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(window.label)
+            Text(window?.label ?? "")
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
-                .frame(width: 16, alignment: .leading)
+                .frame(width: labelWidth, alignment: .leading)
 
-            ZStack(alignment: .leading) {
-                Capsule(style: .continuous)
-                    .fill(.white.opacity(0.12))
-                    .frame(width: barWidth, height: barHeight)
-                Capsule(style: .continuous)
-                    .fill(usageColor)
-                    .frame(width: fillWidth, height: barHeight)
+            if let window {
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(.white.opacity(0.12))
+                        .frame(width: barWidth, height: barHeight)
+                    Capsule(style: .continuous)
+                        .fill(color(window))
+                        .frame(width: fillWidth(window), height: barHeight)
+                }
+                Text("\(remainingInt(window))% left")
+                    .font(.system(size: 10, weight: .bold).monospacedDigit())
+                    .foregroundStyle(color(window))
+                    .frame(width: percentWidth, alignment: .trailing)
+                Text(resetText(window) ?? "")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.32))
+                    .frame(width: resetWidth, alignment: .trailing)
+            } else {
+                Text("—")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.16))
+                    .frame(width: barWidth, alignment: .center)
+                Color.clear.frame(width: percentWidth, height: barHeight)
+                Color.clear.frame(width: resetWidth, height: barHeight)
             }
-
-            Text("\(remainingInt)% left")
-                .font(.system(size: 10, weight: .bold).monospacedDigit())
-                .foregroundStyle(usageColor)
-                .frame(width: 46, alignment: .trailing)
-
-            Text(resetText ?? "")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.32))
-                .frame(width: 32, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.label) \(remainingInt) percent remaining\(resetText.map { ", resets in \($0)" } ?? "")")
+        .accessibilityLabel(accessibilityText)
     }
 
-    private var fraction: Double { window.remainingPercent / 100 }
-    private var remainingInt: Int { Int(window.remainingPercent.rounded()) }
+    private var accessibilityText: String {
+        guard let window else { return "no data" }
+        let reset = resetText(window).map { ", resets in \($0)" } ?? ""
+        return "\(window.label) \(remainingInt(window)) percent remaining\(reset)"
+    }
+
+    private func remainingInt(_ window: QuotaWindow) -> Int {
+        Int(window.remainingPercent.rounded())
+    }
 
     /// Zero stays empty; anything above keeps a thin sliver so tiny usage is
     /// visible without overstating it.
-    private var fillWidth: CGFloat {
-        fraction <= 0 ? 0 : max(2.5, barWidth * fraction)
+    private func fillWidth(_ window: QuotaWindow) -> CGFloat {
+        let fraction = window.remainingPercent / 100
+        return fraction <= 0 ? 0 : max(2.5, barWidth * fraction)
     }
 
     /// Remaining quota is the product promise: green with headroom, red near 0.
-    private var usageColor: Color {
+    private func color(_ window: QuotaWindow) -> Color {
         switch window.remainingPercent {
         case ..<15: Color(red: 1.0, green: 0.45, blue: 0.42)
         case ..<40: Color(red: 0.98, green: 0.75, blue: 0.35)
@@ -165,7 +181,7 @@ private struct UsageWindowCell: View {
         }
     }
 
-    private var resetText: String? {
+    private func resetText(_ window: QuotaWindow) -> String? {
         guard let date = window.resetsAt else { return nil }
         let minutes = max(Int(date.timeIntervalSince(now) / 60), 0)
         if minutes <= 0 { return "now" }

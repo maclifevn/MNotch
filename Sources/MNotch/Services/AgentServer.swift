@@ -60,6 +60,7 @@ struct AgentEvent: Decodable {
     let itermSession: String?
     let tmux: String?
     let tmuxPane: String?
+    let hostBundle: String?       // host app bundle id (GUI-embedded agents)
 
     enum CodingKeys: String, CodingKey {
         case event, cwd, title, notification
@@ -74,6 +75,7 @@ struct AgentEvent: Decodable {
         case termSession = "term_session"
         case itermSession = "iterm_session"
         case tmux, tmuxPane = "tmux_pane"
+        case hostBundle = "host_bundle"
     }
 
     init(from decoder: Decoder) throws {
@@ -93,6 +95,7 @@ struct AgentEvent: Decodable {
         itermSession = try? c.decode(String.self, forKey: .itermSession)
         tmux = try? c.decode(String.self, forKey: .tmux)
         tmuxPane = try? c.decode(String.self, forKey: .tmuxPane)
+        hostBundle = try? c.decode(String.self, forKey: .hostBundle)
         // tool_input is arbitrary JSON — re-encode it back to a string so the
         // UI can pull specific fields (e.g. an ExitPlanMode plan) on demand.
         if let raw = try? c.decode(AnyCodable.self, forKey: .toolInputJSON),

@@ -46,6 +46,9 @@ my %extra = (
     iterm_session=> $ENV{ITERM_SESSION_ID},
     tmux         => $ENV{TMUX},
     tmux_pane    => $ENV{TMUX_PANE},
+    # Host app bundle id (e.g. Claude for Desktop) — a fallback jump target when
+    # TERM_PROGRAM is unset because the agent runs inside a GUI app, not a shell.
+    host_bundle  => $ENV{__CFBundleIdentifier},
 );
 
 my $event_json = splice_fields($stdin, \%extra);

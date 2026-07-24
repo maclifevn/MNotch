@@ -31,6 +31,10 @@ struct TerminalLocator: Equatable {
     var itermSession: String?
     var tmux: String?
     var tmuxPane: String?
+    /// Host app bundle id when the agent runs inside a GUI app (e.g. Claude for
+    /// Desktop) rather than a shell, so TERM_PROGRAM is unset. Jump target of
+    /// last resort.
+    var hostBundle: String?
 }
 
 /// A permission request awaiting the user's approve/reject on the notch.
@@ -110,7 +114,8 @@ final class AgentMonitorService {
             termSession: event.termSession,
             itermSession: event.itermSession,
             tmux: event.tmux,
-            tmuxPane: event.tmuxPane
+            tmuxPane: event.tmuxPane,
+            hostBundle: event.hostBundle
         )
 
         switch event.event {
@@ -270,11 +275,17 @@ final class AgentMonitorService {
     /// just activating the app.
     func jump(_ session: AgentSession) {
         let term = session.terminal
-        let bundleID = Self.terminalBundleID(term.program)
+        // Fall back to the host app bundle (e.g. Claude for Desktop) when the
+        // agent isn't in a recognized shell so TERM_PROGRAM was unset.
+        let bundleID = Self.terminalBundleID(term.program) ?? term.hostBundle
 
         if let bundleID,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
+        } else {
+            mnotchLog.error("Agent jump: no resolvable app for program=\(term.program ?? "nil", privacy: .public)")
         }
 
         // Precise tmux pane switch (works regardless of the outer terminal).
