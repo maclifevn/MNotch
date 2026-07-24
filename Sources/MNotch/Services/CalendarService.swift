@@ -1,3 +1,4 @@
+import AppKit
 import EventKit
 import Observation
 
@@ -135,6 +136,22 @@ final class CalendarService {
     func reconfigure() {
         guard requested, authorized else { return }
         reload()
+    }
+
+    /// Driven by the "Calendar access needed" button. If the user hasn't been
+    /// asked yet, show the system prompt; once they've decided, macOS won't ask
+    /// again, so send them to System Settings where a denied grant can be
+    /// flipped (returning to the app re-checks via permissionMayHaveChanged).
+    func requestAccess() {
+        if EKEventStore.authorizationStatus(for: .event) == .notDetermined {
+            requested = false        // let ensureStarted() run the prompt again
+            ensureStarted()
+        } else {
+            let anchor = "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
+            if let url = URL(string: anchor) {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     /// TCC can be changed in System Settings while MNotch remains running.

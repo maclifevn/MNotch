@@ -9,7 +9,7 @@ struct CalendarStripView: View {
     var body: some View {
         Group {
             if !calendar.authorized && calendar.requested {
-                message("Calendar access needed", symbol: "lock.fill")
+                accessNeeded
             } else if calendar.today.isEmpty && calendar.upcoming.isEmpty {
                 message("No upcoming events", symbol: "checkmark.circle")
             } else {
@@ -25,6 +25,8 @@ struct CalendarStripView: View {
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
+            // Pick up a grant just made in System Settings, then start/refresh.
+            calendar.permissionMayHaveChanged()
             calendar.ensureStarted()
             calendar.reload()
         }
@@ -71,6 +73,30 @@ struct CalendarStripView: View {
         if cal.isDateInTomorrow(day) { return "TMRW" }
         return day.formatted(.dateTime.weekday(.abbreviated).day())
             .uppercased()
+    }
+
+    private var accessNeeded: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.white.opacity(0.35))
+            Text("Calendar access needed")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.45))
+            Button {
+                calendar.requestAccess()
+            } label: {
+                Text("Grant Access")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 104)
     }
 
     private func message(_ text: String, symbol: String) -> some View {
