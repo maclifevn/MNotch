@@ -161,11 +161,8 @@ struct NotchBodyView: View {
             .transition(Anim.contentSwap)
         case .expanded(let tab):
             expanded(tab)
-                .overlay(alignment: .topLeading) {
-                    TabStrip(viewModel: viewModel, current: tab, side: .leading)
-                }
-                .overlay(alignment: .topTrailing) {
-                    TabStrip(viewModel: viewModel, current: tab, side: .trailing)
+                .overlay(alignment: .top) {
+                    TabStrip(viewModel: viewModel, current: tab)
                 }
                 .transition(Anim.contentSwap)
         }
@@ -241,19 +238,19 @@ struct NotchBodyView: View {
     }
 }
 
-/// Tab/settings icons flanking the notch in the expanded panel: the enabled
-/// tabs split into a left and right group (gear always right-most) so neither
-/// wing crowds, with comfortably large hit targets.
+/// Tab/settings icons hugging the notch cutout in the expanded panel: the
+/// enabled tabs split into a left and right group (gear always right-most)
+/// straddling the camera like a Dynamic Island, with comfortably large hit
+/// targets — never glued to the panel's outer corners.
 struct TabStrip: View {
-    enum Side { case leading, trailing }
-
     let viewModel: NotchViewModel
     let current: NotchTab
-    let side: Side
     private let settings = SettingsStore.shared
 
     static let buttonSize: CGFloat = 30
     private static let symbolSize: CGFloat = 12
+    /// Breathing room between each group and the cutout's edge.
+    private static let notchGap: CGFloat = 14
 
     private struct Entry: Identifiable {
         let tab: NotchTab?          // nil = the Settings gear
@@ -283,26 +280,27 @@ struct TabStrip: View {
         return entries
     }
 
-    /// First half left of the notch, the rest (incl. gear) right — right-heavy
-    /// on odd counts so Settings never migrates leftward.
-    private var visibleEntries: [Entry] {
-        let all = allEntries
-        let leftCount = all.count / 2
-        switch side {
-        case .leading: return Array(all.prefix(leftCount))
-        case .trailing: return Array(all.dropFirst(leftCount))
-        }
-    }
-
     var body: some View {
+        // First half left of the notch, the rest (incl. gear) right —
+        // right-heavy on odd counts so Settings never migrates leftward. The
+        // clear spacer spans the cutout, and centering the whole strip keeps
+        // both groups pinned to the notch's edges.
+        let all = allEntries
+        let left = Array(all.prefix(all.count / 2))
+        let right = Array(all.dropFirst(all.count / 2))
+
         HStack(spacing: 4) {
-            ForEach(visibleEntries) { entry in
+            ForEach(left) { entry in
+                button(entry)
+            }
+            Color.clear
+                .frame(width: viewModel.geometry.notchWidth + Self.notchGap * 2, height: 1)
+            ForEach(right) { entry in
                 button(entry)
             }
         }
         .padding(.top, 5)
-        .padding(.leading, side == .leading ? 14 : 0)
-        .padding(.trailing, side == .trailing ? 14 : 0)
+        .fixedSize()
     }
 
     private func button(_ entry: Entry) -> some View {
