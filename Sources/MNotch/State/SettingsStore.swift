@@ -185,6 +185,8 @@ final class SettingsStore {
     var calendarDisableDuringEvents: Bool { didSet { save("cal.noDuringEvents", calendarDisableDuringEvents) } }
     var calendarEventIndicators: Bool { didSet { save("cal.indicators", calendarEventIndicators) } }
     var calendarMonthView: Bool { didSet { save("cal.monthView", calendarMonthView) } }
+    /// How far ahead the tab lists events: "off" (today only) | "week" | "month".
+    var calendarUpcomingScope: String { didSet { save("cal.upcomingScope", calendarUpcomingScope) } }
     var calendarQuickPeek: Bool { didSet { save("cal.peek", calendarQuickPeek) } }
     var calendarPeekBeforeStart: Bool { didSet { save("cal.peekBefore", calendarPeekBeforeStart) } }
     var calendarPeekWhenStarting: Bool { didSet { save("cal.peekStarting", calendarPeekWhenStarting) } }
@@ -356,6 +358,7 @@ final class SettingsStore {
         calendarDisableDuringEvents = flag("cal.noDuringEvents", false)
         calendarEventIndicators = flag("cal.indicators", false)
         calendarMonthView = flag("cal.monthView", true)
+        calendarUpcomingScope = str("cal.upcomingScope", "week")
         calendarQuickPeek = flag("cal.peek", true)
         calendarPeekBeforeStart = flag("cal.peekBefore", false)
         calendarPeekWhenStarting = flag("cal.peekStarting", true)

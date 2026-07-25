@@ -33,6 +33,7 @@ private actor CalendarWorker {
     func load(
         disabledCalendarIDs: [String],
         includeMonthDays: Bool,
+        upcomingDays: Int = 7,
         now: Date = Date()
     ) -> Snapshot {
         let allCalendars = store.calendars(for: .event)
@@ -60,8 +61,10 @@ private actor CalendarWorker {
         let startOfTomorrow = calendar.date(
             byAdding: .day, value: 1, to: startOfToday
         ) ?? now
+        // Always at least tomorrow so peek scheduling keeps working; the
+        // user-facing horizon (today / week / month) trims what's listed.
         let windowEnd = calendar.date(
-            byAdding: .day, value: 8, to: startOfToday
+            byAdding: .day, value: max(upcomingDays, 1) + 1, to: startOfToday
         ) ?? now
         let predicate = store.predicateForEvents(
             withStart: startOfToday,
@@ -80,7 +83,7 @@ private actor CalendarWorker {
             grouping: events.filter { $0.start >= startOfTomorrow }
         ) { calendar.startOfDay(for: $0.start) }
         let upcoming = byDay.keys.sorted()
-            .prefix(3)
+            .prefix(4)
             .map { day in
                 CalendarService.DaySection(
                     day: day,
@@ -324,6 +327,11 @@ final class CalendarService {
         let token = startToken
         let disabled = SettingsStore.shared.calendarDisabledCalendars
         let includeMonthDays = SettingsStore.shared.calendarMonthView
+        let upcomingDays = switch SettingsStore.shared.calendarUpcomingScope {
+        case "off": 0
+        case "month": 31
+        default: 7
+        }
         reloadTask = Task { [weak self] in
             if delay != .zero {
                 try? await Task.sleep(for: delay)
@@ -331,7 +339,8 @@ final class CalendarService {
             guard !Task.isCancelled else { return }
             let snapshot = await worker.load(
                 disabledCalendarIDs: disabled,
-                includeMonthDays: includeMonthDays
+                includeMonthDays: includeMonthDays,
+                upcomingDays: upcomingDays
             )
             guard !Task.isCancelled,
                   let self,

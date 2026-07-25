@@ -36,9 +36,16 @@ struct CalendarStripView: View {
         }
     }
 
-    /// Alcove's left column: the big weekday + day, then today's events.
+    /// Alcove's left column: the big weekday + day, then today's events, then —
+    /// per the "Upcoming events" setting — the next days' events under compact
+    /// day labels, so a quiet today still shows the week/month ahead.
     private var leftColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let showUpcoming = SettingsStore.shared.calendarUpcomingScope != "off"
+        // Shared row budget keeps the column from outgrowing the panel.
+        let todayItems = Array(calendar.today.prefix(3))
+        let sectionBudget = max(0, (5 - todayItems.count) / 2)
+
+        return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: -2) {
                 Text(Date().formatted(.dateTime.weekday(.abbreviated)).uppercased())
                     .font(.system(size: 12, weight: .bold))
@@ -49,8 +56,20 @@ struct CalendarStripView: View {
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 5) {
-                ForEach(calendar.today.prefix(4)) { item in
+                ForEach(todayItems) { item in
                     EventChip(item: item)
+                }
+                if showUpcoming {
+                    ForEach(calendar.upcoming.prefix(sectionBudget)) { section in
+                        Text(Self.dayLabel(section.day))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .kerning(0.6)
+                            .padding(.top, 2)
+                        ForEach(section.items.prefix(2)) { item in
+                            EventChip(item: item)
+                        }
+                    }
                 }
             }
         }
@@ -77,8 +96,14 @@ struct CalendarStripView: View {
     static func dayLabel(_ day: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInTomorrow(day) { return L10n.string("TMRW") }
-        return day.formatted(.dateTime.weekday(.abbreviated).day())
-            .uppercased()
+        let ahead = cal.dateComponents(
+            [.day], from: cal.startOfDay(for: Date()), to: day
+        ).day ?? 0
+        // Within a week a weekday reads naturally; beyond that the weekday is
+        // ambiguous, so switch to day + month.
+        return ahead < 7
+            ? day.formatted(.dateTime.weekday(.abbreviated).day()).uppercased()
+            : day.formatted(.dateTime.day().month(.abbreviated)).uppercased()
     }
 
     private var accessNeeded: some View {

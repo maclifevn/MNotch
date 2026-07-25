@@ -279,3 +279,9 @@
 "Start" = "Bắt đầu";
 "Skip to the next phase" = "Chuyển sang phiên kế tiếp";
 "Reset the session" = "Đặt lại phiên";
+
+/* Calendar upcoming scope */
+"Upcoming events" = "Sự kiện sắp tới";
+"Today only" = "Chỉ hôm nay";
+"Next week" = "Tuần tới";
+"Next month" = "Tháng tới";

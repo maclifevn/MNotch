@@ -154,6 +154,7 @@ private struct CalendarRuntimeConfiguration: Equatable {
     let timeBefore: Double
     let disabledCalendars: [String]
     let uses: [String: String]
+    let upcomingScope: String
 
     init(_ settings: SettingsStore) {
         enabled = settings.calendarEnabled
@@ -165,6 +166,7 @@ private struct CalendarRuntimeConfiguration: Equatable {
         timeBefore = settings.calendarTimeBefore
         disabledCalendars = settings.calendarDisabledCalendars
         uses = settings.calendarUses
+        upcomingScope = settings.calendarUpcomingScope
     }
 }
 

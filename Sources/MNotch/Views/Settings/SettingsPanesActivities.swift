@@ -182,6 +182,11 @@ struct CalendarPane: View {
                 Toggle("Disable activity during events", isOn: $settings.calendarDisableDuringEvents)
                 Toggle("Use event indicators", isOn: $settings.calendarEventIndicators)
                 Toggle("Always show month view", isOn: $settings.calendarMonthView)
+                Picker("Upcoming events", selection: $settings.calendarUpcomingScope) {
+                    Text("Today only").tag("off")
+                    Text("Next week").tag("week")
+                    Text("Next month").tag("month")
+                }
             }
             Section("Calendars") {
                 if calendar.calendars.isEmpty {
