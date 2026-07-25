@@ -10,19 +10,31 @@ import Observation
 @Observable
 final class QuotaService {
     private(set) var codexQuota = ProviderQuota.loading(.codex)
-    private(set) var claudeQuota = ProviderQuota(
-        provider: .claude,
-        state: .waiting("Run a Claude prompt"),
-        windows: [],
-        planName: nil,
-        creditsBalance: nil,
-        resetCredits: nil,
-        lastUpdated: nil
-    )
+    private(set) var claudeQuota: ProviderQuota
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private let codexClient = CodexQuotaClient()
     @ObservationIgnored private let claudeClient = ClaudeUsageClient()
     @ObservationIgnored private var codexCallbacksConfigured = false
+
+    private static let claudeCacheKey = "agent.claudeQuotaCache.v1"
+    private static let claudeCacheLifetime: TimeInterval = 12 * 60 * 60
+
+    private struct ClaudeCache: Codable {
+        let windows: [QuotaWindow]
+        let updatedAt: Date
+    }
+
+    init() {
+        claudeQuota = Self.loadClaudeCache() ?? ProviderQuota(
+            provider: .claude,
+            state: .waiting("Loading Claude usage…"),
+            windows: [],
+            planName: nil,
+            creditsBalance: nil,
+            resetCredits: nil,
+            lastUpdated: nil
+        )
+    }
 
     var providers: [ProviderQuota] { [codexQuota, claudeQuota] }
 
@@ -98,6 +110,31 @@ final class QuotaService {
             resetCredits: nil,
             lastUpdated: updatedAt
         )
+        Self.saveClaudeCache(windows: windows, updatedAt: updatedAt)
+    }
+
+    private static func loadClaudeCache(now: Date = .now) -> ProviderQuota? {
+        guard let data = UserDefaults.standard.data(forKey: claudeCacheKey),
+              let cached = try? JSONDecoder().decode(ClaudeCache.self, from: data),
+              !cached.windows.isEmpty,
+              now.timeIntervalSince(cached.updatedAt) >= 0,
+              now.timeIntervalSince(cached.updatedAt) <= claudeCacheLifetime
+        else { return nil }
+        return ProviderQuota(
+            provider: .claude,
+            state: .cached,
+            windows: cached.windows,
+            planName: nil,
+            creditsBalance: nil,
+            resetCredits: nil,
+            lastUpdated: cached.updatedAt
+        )
+    }
+
+    private static func saveClaudeCache(windows: [QuotaWindow], updatedAt: Date) {
+        let cache = ClaudeCache(windows: windows, updatedAt: updatedAt)
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        UserDefaults.standard.set(data, forKey: claudeCacheKey)
     }
 
     private func applyCodex(_ snapshot: CodexQuotaSnapshot) {

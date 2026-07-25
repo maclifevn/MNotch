@@ -86,8 +86,8 @@ struct ArtworkView: View {
         .overlay(alignment: .bottomTrailing) {
             if SettingsStore.shared.mediaBadge == .appIcon,
                !badgeBundleID.isEmpty,
-               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: badgeBundleID) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+               let icon = ApplicationIconCache.shared.icon(for: badgeBundleID) {
+                Image(nsImage: icon)
                     .resizable()
                     .frame(width: cornerRadius > 10 ? 22 : 10, height: cornerRadius > 10 ? 22 : 10)
                     .offset(x: 3, y: 3)

@@ -1,0 +1,3 @@
+"NSAppleEventsUsageDescription" = "MNotch chỉ dùng Apple Events khi bạn chọn thao tác điều khiển ứng dụng media hoặc quay lại phiên AI Agent trong Terminal.";
+"NSCalendarsFullAccessUsageDescription" = "MNotch hiển thị các sự kiện sắp tới trong tiện ích lịch trên notch.";
+"NSBluetoothAlwaysUsageDescription" = "MNotch hiển thị mức pin khi AirPods hoặc thiết bị Bluetooth khác kết nối.";

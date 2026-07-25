@@ -12,6 +12,138 @@ enum CalendarSourceSelection {
     }
 }
 
+/// Own EventKit on a dedicated serial actor. `EKEventStore.events(matching:)`
+/// is synchronous and can touch Calendar's database; running it on MainActor
+/// made the first notch expansion and Settings changes visibly hitch on users
+/// with large calendars.
+private actor CalendarWorker {
+    struct Snapshot: Sendable {
+        let today: [CalendarService.Item]
+        let upcoming: [CalendarService.DaySection]
+        let calendars: [CalendarService.CalendarInfo]
+        let monthEventDays: Set<Int>
+    }
+
+    private let store = EKEventStore()
+
+    func requestAccess() async -> Bool {
+        (try? await store.requestFullAccessToEvents()) ?? false
+    }
+
+    func load(
+        disabledCalendarIDs: [String],
+        includeMonthDays: Bool,
+        now: Date = Date()
+    ) -> Snapshot {
+        let allCalendars = store.calendars(for: .event)
+        let calendarInfos = allCalendars.map { calendarInfo($0) }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+
+        let enabledIDs = Set(CalendarSourceSelection.enabledIdentifiers(
+            available: allCalendars.map(\.calendarIdentifier),
+            disabled: disabledCalendarIDs
+        ))
+        let enabledCalendars = allCalendars.filter {
+            enabledIDs.contains($0.calendarIdentifier)
+        }
+        guard !enabledCalendars.isEmpty else {
+            return Snapshot(
+                today: [],
+                upcoming: [],
+                calendars: calendarInfos,
+                monthEventDays: []
+            )
+        }
+
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfTomorrow = calendar.date(
+            byAdding: .day, value: 1, to: startOfToday
+        ) ?? now
+        let windowEnd = calendar.date(
+            byAdding: .day, value: 8, to: startOfToday
+        ) ?? now
+        let predicate = store.predicateForEvents(
+            withStart: startOfToday,
+            end: windowEnd,
+            calendars: enabledCalendars
+        )
+        let events = store.events(matching: predicate)
+            .sorted {
+                if $0.isAllDay != $1.isAllDay { return $0.isAllDay }
+                return $0.startDate < $1.startDate
+            }
+            .map(eventItem)
+
+        let today = events.filter { $0.start < startOfTomorrow }
+        let byDay = Dictionary(
+            grouping: events.filter { $0.start >= startOfTomorrow }
+        ) { calendar.startOfDay(for: $0.start) }
+        let upcoming = byDay.keys.sorted()
+            .prefix(3)
+            .map { day in
+                CalendarService.DaySection(
+                    day: day,
+                    items: Array((byDay[day] ?? []).prefix(2))
+                )
+            }
+
+        var monthDays: Set<Int> = []
+        if includeMonthDays,
+           let interval = calendar.dateInterval(of: .month, for: now) {
+            let monthPredicate = store.predicateForEvents(
+                withStart: interval.start,
+                end: interval.end,
+                calendars: enabledCalendars
+            )
+            monthDays = Set(store.events(matching: monthPredicate).map {
+                calendar.component(.day, from: $0.startDate)
+            })
+        }
+
+        return Snapshot(
+            today: today,
+            upcoming: upcoming,
+            calendars: calendarInfos,
+            monthEventDays: monthDays
+        )
+    }
+
+    private func calendarInfo(_ calendar: EKCalendar) -> CalendarService.CalendarInfo {
+        let color = calendar.cgColor?.components ?? [0.6, 0.5, 1, 1]
+        return CalendarService.CalendarInfo(
+            id: calendar.calendarIdentifier,
+            title: calendar.title,
+            red: Double(color.count > 0 ? color[0] : 0.6),
+            green: Double(color.count > 1 ? color[1] : 0.5),
+            blue: Double(color.count > 2 ? color[2] : 1)
+        )
+    }
+
+    private func eventItem(_ event: EKEvent) -> CalendarService.Item {
+        let color = event.calendar?.cgColor?.components ?? [0.6, 0.5, 1, 1]
+        let calendarID = event.calendar?.calendarIdentifier ?? ""
+        let title = event.title ?? L10n.string("Untitled")
+        let start = event.startDate ?? Date.distantPast
+        let end = event.endDate ?? start
+        // Some subscribed calendars expose no eventIdentifier. Derive a stable
+        // identity so SwiftUI doesn't discard/recreate every event chip on each
+        // refresh (the previous random UUID caused needless transitions).
+        let fallbackID = "\(calendarID)|\(title)|\(start.timeIntervalSince1970)|\(end.timeIntervalSince1970)"
+        return CalendarService.Item(
+            id: event.eventIdentifier ?? fallbackID,
+            title: title,
+            start: start,
+            end: end,
+            isAllDay: event.isAllDay,
+            calendarID: calendarID,
+            colorRed: Double(color.count > 0 ? color[0] : 0.6),
+            colorGreen: Double(color.count > 1 ? color[1] : 0.5),
+            colorBlue: Double(color.count > 2 ? color[2] : 1)
+        )
+    }
+}
+
 /// Calendar events via EventKit: today's (including all-day — holidays and
 /// birthdays are the events people actually see up here) plus the next week,
 /// grouped by day. Access is requested lazily, the first time the calendar
@@ -19,7 +151,7 @@ enum CalendarSourceSelection {
 @MainActor
 @Observable
 final class CalendarService {
-    struct Item: Identifiable, Equatable {
+    struct Item: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
         let start: Date
@@ -52,13 +184,13 @@ final class CalendarService {
             ?? upcoming.first?.items.first(where: usable)
     }
 
-    struct DaySection: Identifiable, Equatable {
+    struct DaySection: Identifiable, Equatable, Sendable {
         let day: Date
         let items: [Item]
         var id: Date { day }
     }
 
-    struct CalendarInfo: Identifiable, Equatable {
+    struct CalendarInfo: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
         let red: Double
@@ -78,7 +210,10 @@ final class CalendarService {
     @ObservationIgnored var onPeek: ((Item, Bool) -> Void)?
     @ObservationIgnored var onChime: (() -> Void)?
 
-    @ObservationIgnored private var store: EKEventStore?
+    @ObservationIgnored private var worker: CalendarWorker?
+    @ObservationIgnored private var startToken: UUID?
+    @ObservationIgnored private var startTask: Task<Void, Never>?
+    @ObservationIgnored private var reloadTask: Task<Void, Never>?
     @ObservationIgnored private var peekTimers: [Timer] = []
     @ObservationIgnored private var chimeTimer: Timer?
     @ObservationIgnored private var refreshTimer: Timer?
@@ -87,23 +222,26 @@ final class CalendarService {
     func ensureStarted() {
         guard !requested else { return }
         requested = true
-        let store = EKEventStore()
-        self.store = store
-        Task { [weak self] in
-            let granted = (try? await store.requestFullAccessToEvents()) ?? false
+        let worker = CalendarWorker()
+        let token = UUID()
+        self.worker = worker
+        startToken = token
+        startTask = Task { [weak self] in
+            let granted = await worker.requestAccess()
             // stop() (e.g. display sleep) or a newer ensureStarted() may have run
             // during the await; without this guard the observer + 600s timer
             // below would be installed after teardown and leak, one per race.
-            guard let self, self.requested, self.store === store else { return }
+            guard let self, self.requested, self.startToken == token else { return }
+            self.startTask = nil
             self.authorized = granted
             guard granted else { return }
             self.reload()
             self.storeChangeObserver = NotificationCenter.default.addObserver(
                 forName: .EKEventStoreChanged,
-                object: store,
+                object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.reload() }
+                Task { @MainActor in self?.scheduleReload(after: .milliseconds(250)) }
             }
             // Keep peeks/idle fresh as time passes.
             let refresh = Timer(timeInterval: 600, repeats: true) { [weak self] _ in
@@ -120,13 +258,18 @@ final class CalendarService {
             NotificationCenter.default.removeObserver(storeChangeObserver)
         }
         storeChangeObserver = nil
+        startTask?.cancel()
+        startTask = nil
+        reloadTask?.cancel()
+        reloadTask = nil
+        startToken = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
         peekTimers.forEach { $0.invalidate() }
         peekTimers = []
         chimeTimer?.invalidate()
         chimeTimer = nil
-        store = nil
+        worker = nil
         requested = false
         authorized = false
     }
@@ -135,7 +278,7 @@ final class CalendarService {
     /// Safe before authorization; the first successful start performs a reload.
     func reconfigure() {
         guard requested, authorized else { return }
-        reload()
+        scheduleReload(after: .milliseconds(250))
     }
 
     /// Driven by the "Calendar access needed" button. If the user hasn't been
@@ -148,7 +291,7 @@ final class CalendarService {
             // can fail to surface the EventKit permission prompt when it's
             // triggered from the non-activating notch panel.
             NSApp.activate()
-            requested = false        // let ensureStarted() run the prompt again
+            stop()
             ensureStarted()
         } else {
             SystemSettings.open(.calendars)
@@ -164,102 +307,45 @@ final class CalendarService {
         stop()
         if nowAuthorized {
             ensureStarted()
+        } else {
+            // Preserve the fact that Calendar UI has been requested so it
+            // immediately shows the access-recovery state after revocation.
+            requested = true
         }
     }
 
     func reload() {
-        guard let store, authorized else { return }
-
-        calendars = store.calendars(for: .event).map { cal in
-            let c = cal.cgColor?.components ?? [0.6, 0.5, 1, 1]
-            return CalendarInfo(
-                id: cal.calendarIdentifier,
-                title: cal.title,
-                red: Double(c.count > 0 ? c[0] : 0.6),
-                green: Double(c.count > 1 ? c[1] : 0.5),
-                blue: Double(c.count > 2 ? c[2] : 1)
-            )
-        }.sorted { $0.title < $1.title }
-
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
-        let windowEnd = calendar.date(byAdding: .day, value: 8, to: startOfToday) ?? now
-
-        let disabled = SettingsStore.shared.calendarDisabledCalendars
-        let allCalendars = store.calendars(for: .event)
-        let enabledIDs = Set(CalendarSourceSelection.enabledIdentifiers(
-            available: allCalendars.map(\.calendarIdentifier),
-            disabled: disabled
-        ))
-        let enabledCalendars = allCalendars
-            .filter { enabledIDs.contains($0.calendarIdentifier) }
-        // EventKit interprets `nil` as "all calendars". Returning early is
-        // therefore required when the user explicitly disables every source.
-        guard !enabledCalendars.isEmpty else {
-            today = []
-            upcoming = []
-            monthEventDays = []
-            schedulePeeks()
-            scheduleChime()
-            return
-        }
-        let predicate = store.predicateForEvents(
-            withStart: startOfToday,
-            end: windowEnd,
-            calendars: enabledCalendars
-        )
-        let events = store.events(matching: predicate)
-            .sorted {
-                if $0.isAllDay != $1.isAllDay { return $0.isAllDay }
-                return $0.startDate < $1.startDate
-            }
-            .map { event in
-                let color = event.calendar?.cgColor?.components ?? [0.6, 0.5, 1, 1]
-                return Item(
-                    id: (event.eventIdentifier ?? UUID().uuidString)
-                        + "\(event.startDate.timeIntervalSince1970)",
-                    title: event.title ?? "Untitled",
-                    start: event.startDate,
-                    end: event.endDate ?? event.startDate,
-                    isAllDay: event.isAllDay,
-                    calendarID: event.calendar?.calendarIdentifier ?? "",
-                    colorRed: Double(color.count > 0 ? color[0] : 0.6),
-                    colorGreen: Double(color.count > 1 ? color[1] : 0.5),
-                    colorBlue: Double(color.count > 2 ? color[2] : 1)
-                )
-            }
-
-        // Uncapped: peeks/ongoing-event checks need every timed event even
-        // when several all-day events sort first; views cap for display.
-        today = events.filter { $0.start < startOfTomorrow }
-
-        let byDay = Dictionary(grouping: events.filter { $0.start >= startOfTomorrow }) {
-            calendar.startOfDay(for: $0.start)
-        }
-        upcoming = byDay.keys.sorted()
-            .prefix(3)
-            .map { day in
-                DaySection(day: day, items: Array(byDay[day]!.prefix(2)))
-            }
-
-        reloadMonthDays(store: store, calendars: enabledCalendars)
-        schedulePeeks()
-        scheduleChime()
+        scheduleReload(after: .zero)
     }
 
-    private func reloadMonthDays(store: EKEventStore, calendars: [EKCalendar]) {
-        let cal = Calendar.current
-        guard let interval = cal.dateInterval(of: .month, for: Date()) else { return }
-        let predicate = store.predicateForEvents(
-            withStart: interval.start,
-            end: interval.end,
-            calendars: calendars
-        )
-        monthEventDays = Set(
-            store.events(matching: predicate).map { cal.component(.day, from: $0.startDate) }
-        )
+    private func scheduleReload(after delay: Duration) {
+        guard let worker, authorized else { return }
+        reloadTask?.cancel()
+        let token = startToken
+        let disabled = SettingsStore.shared.calendarDisabledCalendars
+        let includeMonthDays = SettingsStore.shared.calendarMonthView
+        reloadTask = Task { [weak self] in
+            if delay != .zero {
+                try? await Task.sleep(for: delay)
+            }
+            guard !Task.isCancelled else { return }
+            let snapshot = await worker.load(
+                disabledCalendarIDs: disabled,
+                includeMonthDays: includeMonthDays
+            )
+            guard !Task.isCancelled,
+                  let self,
+                  self.startToken == token,
+                  self.worker != nil
+            else { return }
+            self.reloadTask = nil
+            self.today = snapshot.today
+            self.upcoming = snapshot.upcoming
+            self.calendars = snapshot.calendars
+            self.monthEventDays = snapshot.monthEventDays
+            self.schedulePeeks()
+            self.scheduleChime()
+        }
     }
 
     // MARK: - Quick Peek & chime

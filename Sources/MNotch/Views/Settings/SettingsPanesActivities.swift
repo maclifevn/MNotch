@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import SwiftUI
 
 struct NowPlayingPane: View {
@@ -117,11 +118,11 @@ struct SourceLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+            if let icon = ApplicationIconCache.shared.icon(for: bundleID) {
+                Image(nsImage: icon)
                     .resizable()
                     .frame(width: 18, height: 18)
-                Text(NSWorkspace.shared.appDisplayName(forBundleID: bundleID))
+                Text(ApplicationIconCache.shared.displayName(for: bundleID))
             } else {
                 Text(bundleID)
             }
@@ -213,7 +214,11 @@ struct CalendarPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            calendar.ensureStarted()
+            // Populate an already-authorized account without ever triggering a
+            // permission prompt merely because Settings was opened.
+            if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+                calendar.ensureStarted()
+            }
         }
     }
 }
@@ -256,6 +261,55 @@ struct CalendarRow: View {
     }
 }
 
+struct PomodoroPane: View {
+    @Bindable var settings = SettingsStore.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: $settings.pomodoroEnabled) {
+                    Label("Pomodoro", systemImage: "timer")
+                }
+                .onChange(of: settings.pomodoroEnabled) { _, on in
+                    // Turning the feature off must not leave a session ticking
+                    // (its wing would linger with no tab to manage it).
+                    if !on { AppServices.shared.pomodoro.reset() }
+                }
+                Text("A focus timer in the notch: the countdown lives beside the camera while a session runs, and the notch nudges you when it's time for a break.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                SliderRow(
+                    title: "Focus length",
+                    value: $settings.pomodoroWorkMinutes,
+                    range: 10...60,
+                    step: 5
+                ) { "\(Int($0)) m" }
+                SliderRow(
+                    title: "Short break",
+                    value: $settings.pomodoroShortBreakMinutes,
+                    range: 3...15,
+                    step: 1
+                ) { "\(Int($0)) m" }
+                SliderRow(
+                    title: "Long break",
+                    value: $settings.pomodoroLongBreakMinutes,
+                    range: 10...30,
+                    step: 5
+                ) { "\(Int($0)) m" }
+                SliderRow(
+                    title: "Sessions before long break",
+                    value: $settings.pomodoroCyclesPerLongBreak,
+                    range: 2...6,
+                    step: 1
+                ) { "\(Int($0))" }
+                Toggle("Play sound on phase change", isOn: $settings.pomodoroSound)
+                Toggle("Start next phase automatically", isOn: $settings.pomodoroAutoContinue)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 struct FileTrayPane: View {
     @Bindable var settings = SettingsStore.shared
 
@@ -265,7 +319,15 @@ struct FileTrayPane: View {
                 Toggle(isOn: $settings.shelfEnabled) {
                     Label("File Tray", systemImage: "tray.fill")
                 }
+                Toggle(
+                    "Clear successfully dragged files",
+                    isOn: $settings.shelfClearAfterDrag
+                )
+                .disabled(!settings.shelfEnabled)
                 Text("Drop files onto the notch, select one or many, then Quick Look, open, reveal in Finder, drag out, or AirDrop them.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Text("When enabled, a successful drop removes only the dragged files from the tray. MNotch retains an invisible backing copy for 24 hours so apps such as browsers can finish importing or uploading it safely.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -327,7 +389,7 @@ struct LockScreenPane: View {
                     label: { style in
                         switch style {
                         case .glass: "Glass"
-                        case .clear: "Clear"
+                        case .clear: "Transparent"
                         case .frosted: "Frosted"
                         }
                     }
@@ -449,7 +511,11 @@ struct AboutPane: View {
     private static var versionString: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "Version \(v) (\(b)) · SwiftPM"
+        return String(
+            format: L10n.string("Version %@ (%@) · SwiftPM"),
+            v,
+            b
+        )
     }
 
     private static func bundledImage(_ name: String) -> Image? {

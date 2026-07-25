@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 APP="$ROOT/build/MNotch.app"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-1.1}"
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
 # Stable signing identity keeps TCC grants (Accessibility, Calendar, Bluetooth)
@@ -38,6 +38,8 @@ sips -z 512 512 "$ROOT/Support/icon_mnotch.png" \
     --out "$APP/Contents/Resources/icon_mnotch.png" >/dev/null
 cp "$ROOT/Support/donate-qr.png" "$APP/Contents/Resources/"
 cp "$ROOT/Support/menubar-icon.png" "$APP/Contents/Resources/"
+cp -R "$ROOT/Support/Localization/en.lproj" "$APP/Contents/Resources/"
+cp -R "$ROOT/Support/Localization/vi.lproj" "$APP/Contents/Resources/"
 
 # MediaRemote adapter (vendored source from ungive/mediaremote-adapter, BSD-3)
 ADAPTER_DIR="$ROOT/Vendor/mediaremote-adapter"
@@ -57,13 +59,18 @@ cp "$ROOT/Vendor/agent-relay/mnotch-notify.pl" "$APP/Contents/Resources/"
 # notarization. Local development identities stay lightweight so rebuilds do
 # not unexpectedly change their runtime behavior.
 SIGN_ARGS=(--force --sign "$SIGN_ID")
-APP_SIGN_ARGS=()
 if [[ "$SIGN_ID" == Developer\ ID\ Application:* ]]; then
     SIGN_ARGS+=(--timestamp --options runtime)
-    APP_SIGN_ARGS+=(--entitlements "$ROOT/Support/MNotch.entitlements")
 fi
 
 codesign "${SIGN_ARGS[@]}" "$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
-codesign "${SIGN_ARGS[@]}" "${APP_SIGN_ARGS[@]}" "$APP"
+if [[ "$SIGN_ID" == Developer\ ID\ Application:* ]]; then
+    codesign "${SIGN_ARGS[@]}" --entitlements "$ROOT/Support/MNotch.entitlements" "$APP"
+else
+    # Bash 3.2 + `set -u` treats an expanded empty array as unbound. Keep the
+    # ad-hoc/dev path explicit instead of passing a conditionally empty args
+    # array, so local builds exercise the same bundle assembly reliably.
+    codesign "${SIGN_ARGS[@]}" "$APP"
+fi
 
 echo "Built $APP (version $VERSION build $BUILD_NUM, signed: $SIGN_ID)"

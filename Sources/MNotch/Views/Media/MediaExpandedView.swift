@@ -18,7 +18,7 @@ struct MediaExpandedView: View {
     }
 
     private var displayTitle: String {
-        if media.playback.title.isEmpty { return "Not Playing" }
+        if media.playback.title.isEmpty { return L10n.string("Not Playing") }
         return SettingsStore.shared.mediaHideTitleExtras
             ? media.playback.cleanTitle
             : media.playback.title
@@ -145,7 +145,6 @@ struct MediaExpandedView: View {
             ) {
                 media.send(.togglePlayPause)
             }
-            .contentTransition(Anim.symbolReplace)
             TransportButton(symbol: "forward.fill", size: 17) {
                 media.send(.nextTrack)
             }
@@ -220,6 +219,10 @@ struct TransportButton: View {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .bold))
                 .foregroundStyle(.white)
+                // Apply replacement to the glyph, not the whole Button. The
+                // fixed label frame then stays perfectly still when play and
+                // pause (different intrinsic widths) swap.
+                .contentTransition(Anim.symbolReplace)
                 .frame(width: size + 21, height: size + 17)
                 .background(
                     RoundedRectangle(cornerRadius: 9)

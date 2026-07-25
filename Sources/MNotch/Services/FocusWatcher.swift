@@ -75,9 +75,10 @@ private actor FocusDatabaseReader {
 }
 
 private func focusFallbackName(for identifier: String) -> String {
-    if identifier.contains("default") { return "Do Not Disturb" }
-    if identifier.contains("sleep") { return "Sleep" }
-    return identifier.components(separatedBy: ".").last?.capitalized ?? "Focus"
+    if identifier.contains("default") { return L10n.string("Do Not Disturb") }
+    if identifier.contains("sleep") { return L10n.string("Sleep") }
+    return identifier.components(separatedBy: ".").last?.capitalized
+        ?? L10n.string("Focus")
 }
 
 /// Focus (Do Not Disturb) state from ~/Library/DoNotDisturb/DB — the same

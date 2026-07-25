@@ -1,6 +1,12 @@
 import AppKit
 import IOKit.pwr_mgt
 
+enum LockPresentationPolicy {
+    static func shouldElevateNotch(isLocked: Bool, featureEnabled: Bool) -> Bool {
+        isLocked && featureEnabled
+    }
+}
+
 /// Lock/unlock sounds, the keep-awake assertion, and the lock screen overlay
 /// (widgets + Now Playing card drawn above the shield window).
 @MainActor
@@ -14,8 +20,10 @@ final class LockScreenWatcher {
     private let overlay = LockOverlayController()
     private var observers: [NSObjectProtocol] = []
 
-    /// Fired on lock/unlock so the notch panels can (un)elevate above the shield.
-    var onLockStateChanged: ((Bool) -> Void)?
+    /// Tells the window controller whether it should use the private lock-space
+    /// path. This is deliberately gated by the Lock Screen feature: a disabled
+    /// optional feature must never touch WindowServer's private space APIs.
+    var onLockPresentationChanged: ((Bool) -> Void)?
 
     func start() {
         guard observers.isEmpty else { return }
@@ -66,8 +74,12 @@ final class LockScreenWatcher {
 
     /// Apply live Settings changes without waiting for the next lock/saver event.
     func reconfigure() {
+        updateLockPresentation()
         refreshOverlay()
         overlay.reconfigure()
+        if !SettingsStore.shared.lockEnabled {
+            releaseAssertion()
+        }
     }
 
     private func refreshOverlay() {
@@ -79,10 +91,17 @@ final class LockScreenWatcher {
 
     private func screenLocked() {
         isLocked = true
-        onLockStateChanged?(true)
+        updateLockPresentation()
         refreshOverlay()
 
         let settings = SettingsStore.shared
+        // Sounds and power assertions are part of the Lock Screen feature,
+        // not global lock side effects. Disabled must mean fully inert even if
+        // a subordinate preference was saved from an earlier configuration.
+        guard settings.lockEnabled else {
+            releaseAssertion()
+            return
+        }
         if settings.lockSoundOnLock {
             SoundPlayer.play(.lock)
         }
@@ -106,13 +125,21 @@ final class LockScreenWatcher {
 
     private func screenUnlocked() {
         isLocked = false
-        onLockStateChanged?(false)
+        updateLockPresentation()
         refreshOverlay()
 
-        if SettingsStore.shared.lockSoundOnUnlock {
+        if SettingsStore.shared.lockEnabled,
+           SettingsStore.shared.lockSoundOnUnlock {
             SoundPlayer.play(.unlock)
         }
         releaseAssertion()
+    }
+
+    private func updateLockPresentation() {
+        onLockPresentationChanged?(LockPresentationPolicy.shouldElevateNotch(
+            isLocked: isLocked,
+            featureEnabled: SettingsStore.shared.lockEnabled
+        ))
     }
 
     private func releaseAssertion() {

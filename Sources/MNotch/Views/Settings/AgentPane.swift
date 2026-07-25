@@ -26,7 +26,10 @@ struct AgentPane: View {
 
             Section("Claude Code") {
                 LabeledContent("Hooks") {
-                    Text(claudeHooksInstalled ? "Installed" : "Not installed")
+                    Text(
+                        claudeHooksInstalled
+                            ? L10n.string("Installed") : L10n.string("Not installed")
+                    )
                         .foregroundStyle(claudeHooksInstalled ? .green : .secondary)
                 }
                 if claudeHooksInstalled {
@@ -93,7 +96,10 @@ struct AgentPane: View {
 
             Section("Codex") {
                 LabeledContent("Approval hooks") {
-                    Text(codexHooksInstalled ? "Installed" : "Not installed")
+                    Text(
+                        codexHooksInstalled
+                            ? L10n.string("Installed") : L10n.string("Not installed")
+                    )
                         .foregroundStyle(codexHooksInstalled ? .green : .secondary)
                 }
                 if codexHooksInstalled {
@@ -211,12 +217,16 @@ struct AgentPane: View {
 
     private func quotaSummary(_ provider: ProviderQuota) -> String {
         if let primary = provider.primaryWindow {
-            return "\(Int(primary.remainingPercent.rounded()))% left"
+            return String(
+                format: L10n.string("%d%% left"),
+                Int(primary.remainingPercent.rounded())
+            )
         }
         switch provider.state {
-        case .loading: return "Connecting…"
-        case .waiting(let message), .unavailable(let message): return message
-        case .live, .cached: return "Unavailable"
+        case .loading: return L10n.string("Connecting…")
+        case .waiting(let message), .unavailable(let message):
+            return L10n.string(message)
+        case .live, .cached: return L10n.string("Unavailable")
         }
     }
 }

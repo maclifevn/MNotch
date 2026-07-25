@@ -2,6 +2,15 @@ import CoreImage
 import Foundation
 
 enum DominantColor {
+    private final class ContextBox: @unchecked Sendable {
+        let value = CIContext(options: [.workingColorSpace: NSNull()])
+    }
+
+    /// CIContext is expensive to construct and explicitly reusable across
+    /// threads. Keep one renderer for all artwork rather than rebuilding a GPU
+    /// context on every track change.
+    private nonisolated static let context = ContextBox()
+
     struct Components: Sendable {
         let red: Double
         let green: Double
@@ -19,8 +28,7 @@ enum DominantColor {
         ]), let output = filter.outputImage else { return white }
 
         var pixel = [UInt8](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        context.render(
+        context.value.render(
             output,
             toBitmap: &pixel,
             rowBytes: 4,

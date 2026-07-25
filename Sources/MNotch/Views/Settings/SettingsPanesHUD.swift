@@ -16,7 +16,7 @@ struct HUDSettingsPane: View {
         Form {
             Section {
                 Toggle(isOn: $enabled) {
-                    Label(title, systemImage: symbol)
+                    Label(LocalizedStringKey(title), systemImage: symbol)
                 }
                 Group {
                     SliderRow(
@@ -85,7 +85,7 @@ struct HUDPane: View {
         VStack(spacing: 0) {
             Picker("HUD", selection: $kind) {
                 ForEach(HUDSettingsKind.allCases, id: \.self) { kind in
-                    Text(kind.rawValue).tag(kind)
+                    Text(LocalizedStringKey(kind.rawValue)).tag(kind)
                 }
             }
             .pickerStyle(.segmented)

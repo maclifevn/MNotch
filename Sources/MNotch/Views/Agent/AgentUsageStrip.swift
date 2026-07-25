@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// The usage header pinned atop the Agent panel: a tidy, column-aligned
-/// micro-dashboard with one row per provider that has data. Windows are bucketed
+/// micro-dashboard with one stable row per provider. Windows are bucketed
 /// into short (5h) / long (7d) slots by duration, so every provider's bars line
 /// up in the same columns instead of reading as ragged text lines. Falls back to
-/// a single dim explanatory line when nothing is available.
+/// an inline status when a provider is still loading or temporarily unavailable.
 struct AgentUsageHeader: View {
     let claude: ProviderQuota
     let codex: ProviderQuota
@@ -14,9 +14,7 @@ struct AgentUsageHeader: View {
     /// Claude's "5h"/"7d".
     private enum Slot: CaseIterable { case short, long }
 
-    private var providersWithData: [ProviderQuota] {
-        [claude, codex].filter { !$0.windows.isEmpty }
-    }
+    private var providers: [ProviderQuota] { [claude, codex] }
 
     /// A provider's window for a slot: short = a sub-day rolling window,
     /// long = a multi-day (or open-ended, e.g. a credit budget) window.
@@ -32,12 +30,13 @@ struct AgentUsageHeader: View {
     /// Only render slots at least one provider actually fills.
     private var activeSlots: [Slot] {
         Slot.allCases.filter { slot in
-            providersWithData.contains { window($0, in: slot) != nil }
+            providers.contains { window($0, in: slot) != nil }
         }
     }
 
     var body: some View {
         content
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
             .background(
@@ -52,18 +51,23 @@ struct AgentUsageHeader: View {
 
     @ViewBuilder
     private var content: some View {
-        if providersWithData.isEmpty {
-            UsageEmptyRow(quota: emptyStateQuota)
-        } else {
-            let slots = activeSlots
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 8) {
-                    ForEach(providersWithData) { provider in
-                        GridRow {
-                            UsageProviderBadge(provider: provider.provider)
-                                .gridColumnAlignment(.leading)
+        let slots = activeSlots
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(providers) { provider in
+                    HStack(spacing: 8) {
+                        UsageProviderBadge(provider: provider.provider)
+                            .frame(width: 62, alignment: .leading)
+                        if provider.windows.isEmpty {
+                            Text(stateMessage(provider))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.34))
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
                             ForEach(slots, id: \.self) { slot in
                                 UsageWindowCell(window: window(provider, in: slot), now: context.date)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -72,16 +76,18 @@ struct AgentUsageHeader: View {
         }
     }
 
-    /// Prefer a provider that carries an explanatory message so the fallback
-    /// line says *why* it's empty rather than a generic string.
-    private var emptyStateQuota: ProviderQuota {
-        for quota in [claude, codex] {
-            switch quota.state {
-            case .waiting, .unavailable, .loading: return quota
-            case .live, .cached: break
+    private func stateMessage(_ quota: ProviderQuota) -> String {
+        switch quota.state {
+        case .waiting(let text), .unavailable(let text):
+            return L10n.string(text)
+        case .loading:
+            return L10n.string("Loading usage…")
+        case .live, .cached:
+            switch quota.provider {
+            case .claude: return L10n.string("Claude usage unavailable")
+            case .codex: return L10n.string("Codex usage unavailable")
             }
         }
-        return claude
     }
 }
 
@@ -104,49 +110,57 @@ private struct UsageProviderBadge: View {
     }
 }
 
-/// One rolling window as an aligned quartet: `label · slim bar · left% · reset`,
-/// each on a fixed rhythm so numbers and countdowns form clean vertical columns.
-/// A nil window renders a dim placeholder at the same widths, so a provider that
-/// lacks a slot keeps the table aligned instead of leaving a ragged void.
+/// One rolling window as `label · flexible bar · left% · reset`. The bar absorbs
+/// spare width, keeping both two-window Claude rows and one-window Codex rows
+/// balanced without wrapping the percentage at 100%.
 private struct UsageWindowCell: View {
     let window: QuotaWindow?
     let now: Date
 
-    private let labelWidth: CGFloat = 16
-    private let barWidth: CGFloat = 30
+    private let labelWidth: CGFloat = 18
     private let barHeight: CGFloat = 5
-    private let percentWidth: CGFloat = 48
-    private let resetWidth: CGFloat = 38
+    private let percentWidth: CGFloat = 54
+    private let resetWidth: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(window?.label ?? "")
+            Text(window.map { L10n.string($0.label) } ?? "")
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
                 .frame(width: labelWidth, alignment: .leading)
 
             if let window {
-                ZStack(alignment: .leading) {
-                    Capsule(style: .continuous)
-                        .fill(.white.opacity(0.12))
-                        .frame(width: barWidth, height: barHeight)
-                    Capsule(style: .continuous)
-                        .fill(color(window))
-                        .frame(width: fillWidth(window), height: barHeight)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.12))
+                        Capsule(style: .continuous)
+                            .fill(color(window))
+                            .frame(width: fillWidth(window, available: geometry.size.width))
+                    }
                 }
-                Text("\(remainingInt(window))% left")
+                .frame(minWidth: 28, maxWidth: .infinity)
+                .frame(height: barHeight)
+                Text(String(
+                    format: L10n.string("%d%% left"),
+                    remainingInt(window)
+                ))
                     .font(.system(size: 10, weight: .bold).monospacedDigit())
                     .foregroundStyle(color(window))
                     .frame(width: percentWidth, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .allowsTightening(true)
                 Text(resetText(window) ?? "")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.32))
                     .frame(width: resetWidth, alignment: .trailing)
+                    .lineLimit(1)
             } else {
                 Text("—")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.16))
-                    .frame(width: barWidth, alignment: .center)
+                    .frame(minWidth: 28, maxWidth: .infinity, alignment: .center)
                 Color.clear.frame(width: percentWidth, height: barHeight)
                 Color.clear.frame(width: resetWidth, height: barHeight)
             }
@@ -156,9 +170,16 @@ private struct UsageWindowCell: View {
     }
 
     private var accessibilityText: String {
-        guard let window else { return "no data" }
-        let reset = resetText(window).map { ", resets in \($0)" } ?? ""
-        return "\(window.label) \(remainingInt(window)) percent remaining\(reset)"
+        guard let window else { return L10n.string("no data") }
+        let reset = resetText(window).map {
+            String(format: L10n.string(", resets in %@"), $0)
+        } ?? ""
+        return String(
+            format: L10n.string("%@ %d percent remaining%@"),
+            window.label,
+            remainingInt(window),
+            reset
+        )
     }
 
     private func remainingInt(_ window: QuotaWindow) -> Int {
@@ -167,9 +188,9 @@ private struct UsageWindowCell: View {
 
     /// Zero stays empty; anything above keeps a thin sliver so tiny usage is
     /// visible without overstating it.
-    private func fillWidth(_ window: QuotaWindow) -> CGFloat {
+    private func fillWidth(_ window: QuotaWindow, available: CGFloat) -> CGFloat {
         let fraction = window.remainingPercent / 100
-        return fraction <= 0 ? 0 : max(2.5, barWidth * fraction)
+        return fraction <= 0 ? 0 : min(available, max(2.5, available * fraction))
     }
 
     /// Remaining quota is the product promise: green with headroom, red near 0.
@@ -184,43 +205,10 @@ private struct UsageWindowCell: View {
     private func resetText(_ window: QuotaWindow) -> String? {
         guard let date = window.resetsAt else { return nil }
         let minutes = max(Int(date.timeIntervalSince(now) / 60), 0)
-        if minutes <= 0 { return "now" }
+        if minutes <= 0 { return L10n.string("now") }
         if minutes >= 1_440 { return "\(minutes / 1_440)d\((minutes % 1_440) / 60)h" }
         if minutes >= 60 { return "\(minutes / 60)h\(minutes % 60)m" }
         return "\(minutes)m"
-    }
-}
-
-/// Single dim line when neither provider has usage yet — surfaces the live
-/// state message (e.g. "Sign in to Claude Code for usage").
-private struct UsageEmptyRow: View {
-    let quota: ProviderQuota
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: quota.provider.glyph)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.3))
-            Text(message)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.34))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var message: String {
-        switch quota.state {
-        case .waiting(let text), .unavailable(let text):
-            return text
-        case .loading:
-            return "Loading usage…"
-        case .live, .cached:
-            switch quota.provider {
-            case .claude: return "Claude usage unavailable"
-            case .codex: return "Codex usage unavailable"
-            }
-        }
     }
 }
 

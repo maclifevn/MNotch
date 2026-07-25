@@ -9,21 +9,49 @@ struct AgentRequestCard: View {
     let agents: AgentMonitorService
     let viewModel: NotchViewModel
 
-    private var diff: (rows: [DiffRow], adds: Int, dels: Int)? {
-        switch request.detail {
+    @State private var diff: DiffResult?
+
+    private nonisolated static func buildDiff(_ detail: RequestDetail) -> DiffResult? {
+        func bounded(_ text: String) -> String {
+            text.count > 40_000 ? String(text.prefix(40_000)) : text
+        }
+        let full: DiffResult?
+        switch detail {
         case .edit(_, let old, let new):
-            return DiffEngine.rows(old: old, new: new)
+            full = DiffEngine.rows(old: bounded(old), new: bounded(new))
         case .multiEdit(_, let edits):
             var all: [DiffRow] = []
             var adds = 0, dels = 0
-            for pair in edits {
-                let r = DiffEngine.rows(old: pair.old, new: pair.new)
-                all += r.rows; adds += r.adds; dels += r.dels
+            for pair in edits.prefix(20) {
+                let r = DiffEngine.rows(
+                    old: bounded(pair.old),
+                    new: bounded(pair.new)
+                )
+                // This is a bounded preview, not an editor. Cap both work and
+                // row construction so a generated mega-patch cannot make
+                // SwiftUI create thousands of views.
+                let remaining = max(300 - all.count, 0)
+                if remaining > 0 {
+                    let base = all.count
+                    all += r.rows.prefix(remaining).enumerated().map { offset, row in
+                        DiffRow(
+                            id: base + offset,
+                            kind: row.kind,
+                            text: row.text,
+                            oldNo: row.oldNo,
+                            newNo: row.newNo
+                        )
+                    }
+                }
+                adds += r.adds
+                dels += r.dels
             }
-            return (all, adds, dels)
+            full = DiffResult(rows: all, adds: adds, dels: dels)
         default:
-            return nil
+            full = nil
         }
+        guard let full else { return nil }
+        return DiffResult(rows: Array(full.rows.prefix(300)), adds: full.adds, dels: full.dels)
     }
 
     var body: some View {
@@ -40,12 +68,24 @@ struct AgentRequestCard: View {
             }
             buttons
         }
+        .task(id: request.id) {
+            diff = nil
+            let detail = request.detail
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.buildDiff(detail)
+            }.value
+            guard !Task.isCancelled else { return }
+            diff = result
+        }
     }
 
     private var header: some View {
         HStack(spacing: 7) {
             Circle().fill(.orange).frame(width: 6, height: 6)
-            Text("\(session.kind.capitalized) Permission")
+            Text(String(
+                format: L10n.string("%@ Permission"),
+                session.kind.capitalized
+            ))
                 .font(.system(size: 11, weight: .semibold))
                 .textCase(.uppercase)
                 .tracking(0.4)
@@ -69,7 +109,7 @@ struct AgentRequestCard: View {
             Image(systemName: style.glyph)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(style.tint)
-            Text(style.verb)
+            Text(LocalizedStringKey(style.verb))
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white)
             if let path = style.path {
@@ -100,7 +140,7 @@ struct AgentRequestCard: View {
 
     private func buttonLabel(_ title: String, _ hint: String, fg: Color, bg: Color) -> some View {
         HStack(spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(LocalizedStringKey(title)).font(.system(size: 13, weight: .semibold))
             Text(hint).font(.system(size: 11, weight: .medium)).opacity(0.5)
         }
         .foregroundStyle(fg)
@@ -126,7 +166,12 @@ struct AgentRequestCard: View {
         case .edit(let path, _, _):
             ToolStyle(glyph: "exclamationmark.triangle.fill", verb: "Edit", tint: .orange, path: path)
         case .multiEdit(let path, let edits):
-            ToolStyle(glyph: "exclamationmark.triangle.fill", verb: "Edit ×\(edits.count)", tint: .orange, path: path)
+            ToolStyle(
+                glyph: "exclamationmark.triangle.fill",
+                verb: String(format: L10n.string("Edit ×%d"), edits.count),
+                tint: .orange,
+                path: path
+            )
         case .write(let path, _):
             ToolStyle(glyph: "square.and.pencil", verb: "Write", tint: .orange, path: path)
         case .bash:

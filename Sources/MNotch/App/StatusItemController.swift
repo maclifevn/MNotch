@@ -33,7 +33,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.accessibilitySeparator = accessibilitySeparator
 
         let settings = NSMenuItem(
-            title: "Settings…",
+            title: L10n.string("Settings…"),
             action: #selector(openSettings),
             keyEquivalent: ","
         )
@@ -41,7 +41,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         settings.image = Self.menuIcon("gearshape")
         menu.addItem(settings)
         let welcome = NSMenuItem(
-            title: "Welcome…",
+            title: L10n.string("Welcome…"),
             action: #selector(showWelcome),
             keyEquivalent: ""
         )
@@ -50,7 +50,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(welcome)
         menu.addItem(.separator())
         let quit = NSMenuItem(
-            title: "Quit MNotch",
+            title: L10n.string("Quit MNotch"),
             action: #selector(quit),
             keyEquivalent: "q"
         )
@@ -133,16 +133,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             accessibilityItem?.isHidden = true
             accessibilitySeparator?.isHidden = true
         } else if state.required {
-            statusItem?.button?.toolTip = "MNotch — Accessibility required"
+            statusItem?.button?.toolTip = L10n.string(
+                "MNotch — Accessibility required"
+            )
             accessibilityItem?.isHidden = false
             accessibilitySeparator?.isHidden = false
-            accessibilityItem?.title = "Accessibility Required…"
+            accessibilityItem?.title = L10n.string("Accessibility Required…")
             accessibilityItem?.image = Self.menuIcon("exclamationmark.triangle.fill")
         } else {
-            statusItem?.button?.toolTip = "MNotch — Accessibility not granted"
+            statusItem?.button?.toolTip = L10n.string(
+                "MNotch — Accessibility not granted"
+            )
             accessibilityItem?.isHidden = false
             accessibilitySeparator?.isHidden = false
-            accessibilityItem?.title = "Accessibility: Not Granted…"
+            accessibilityItem?.title = L10n.string("Accessibility: Not Granted…")
             accessibilityItem?.image = Self.menuIcon("accessibility")
         }
     }

@@ -79,5 +79,10 @@ struct VisualizerView: View {
             stopTask?.cancel()
             engineRunning = isPlaying && !reduceMotion
         }
+        .onDisappear {
+            stopTask?.cancel()
+            stopTask = nil
+            engineRunning = false
+        }
     }
 }

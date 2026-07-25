@@ -4,9 +4,30 @@ import SwiftUI
 struct GeneralPane: View {
     @Bindable var settings = SettingsStore.shared
     private let accessibility = AppServices.shared.accessibility
+    @State private var hasPhysicalNotch = Self.detectPhysicalNotch()
 
     var body: some View {
         Form {
+            Section("Language") {
+                Picker("Application language", selection: $settings.appLanguage) {
+                    ForEach(AppLanguage.allCases, id: \.self) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                if settings.languageRestartRequired {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Restart MNotch to apply the new language.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Restart MNotch") {
+                            ApplicationRestart.restart()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
             if !accessibility.isGranted {
                 Section("Permissions") {
                     AccessibilityPermissionRow()
@@ -24,7 +45,16 @@ struct GeneralPane: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                Toggle("Force simulated notch", isOn: $settings.forceSimulatedNotch)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Simulated notch", isOn: simulatedNotchBinding)
+                        // With no physical notch, disabling the effective state
+                        // would make the app's only UI disappear. The runtime
+                        // fallback is mandatory, so reflect that honestly.
+                        .disabled(!hasPhysicalNotch)
+                    Text(simulatedNotchExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 Picker("Display on", selection: $settings.displayTarget) {
                     Text("All displays").tag("all")
                     Text("Main display").tag("main")
@@ -127,6 +157,38 @@ struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didChangeScreenParametersNotification
+        )) { _ in
+            hasPhysicalNotch = Self.detectPhysicalNotch()
+        }
+    }
+
+    private var simulatedNotchBinding: Binding<Bool> {
+        Binding(
+            get: {
+                SimulatedNotchPolicy.isEnabled(
+                    force: settings.forceSimulatedNotch,
+                    hasPhysicalNotch: hasPhysicalNotch
+                )
+            },
+            set: { settings.forceSimulatedNotch = $0 }
+        )
+    }
+
+    private var simulatedNotchExplanation: String {
+        if !hasPhysicalNotch {
+            return L10n.string(
+                "Enabled automatically because no physical notch was detected."
+            )
+        }
+        return settings.forceSimulatedNotch
+            ? L10n.string("Also show MNotch on displays without a physical notch.")
+            : L10n.string("Using the MacBook's physical notch.")
+    }
+
+    private static func detectPhysicalNotch() -> Bool {
+        NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
     }
 }
 
@@ -246,7 +308,7 @@ struct FocusPane: View {
                 Toggle(isOn: $settings.focusEnabled) {
                     Label("Focus", systemImage: "moon.fill")
                 }
-                if !AppServices.shared.focus.available {
+                if settings.focusEnabled, !AppServices.shared.focus.available {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Needs Full Disk Access to read Focus state.")
                             .font(.caption)

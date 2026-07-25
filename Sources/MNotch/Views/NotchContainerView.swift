@@ -56,26 +56,32 @@ struct NotchBodyView: View {
             }
             .overlay {
                 if SettingsStore.shared.contrastOutline {
-                    shape
+                    NotchOutlineShape(
+                        topRadius: viewModel.topRadius,
+                        bottomRadius: viewModel.bottomRadius
+                    )
                         .stroke(.white.opacity(0.14), lineWidth: 1)
-                        .padding(.top, 1)
                 }
             }
             .contentShape(Rectangle())
-            .onHover { inside in
-                viewModel.setPointerInside(inside)
-            }
             .onTapGesture {
                 viewModel.handleTap()
             }
             .animation(Anim.open, value: viewModel.mediaActive)
             .animation(Anim.open, value: viewModel.resolvedIdle)
+            .animation(Anim.open, value: viewModel.pomodoroActive)
             .onChange(of: mediaVisible, initial: true) { _, active in
                 viewModel.mediaActive = active
+            }
+            .onChange(of: services.pomodoro.isActive, initial: true) { _, active in
+                viewModel.pomodoroActive = active
             }
             .onChange(of: services.media.playback.trackIdentity) {
                 // Fresh content revives a swiped-away activity.
                 viewModel.reviveActivity()
+            }
+            .onChange(of: SettingsStore.shared.mediaIdleDuration) { _, duration in
+                services.media.scheduleIdleExpiry(after: duration)
             }
             .onAppear {
                 if SettingsStore.shared.idleActivity == .calendar
@@ -114,6 +120,11 @@ struct NotchBodyView: View {
     private var content: some View {
         switch viewModel.status {
         case .closed:
+            if viewModel.pomodoroActive {
+                // A running Pomodoro session owns the closed wings.
+                PomodoroCompactView(viewModel: viewModel, pomodoro: services.pomodoro)
+                    .transition(Anim.contentSwap)
+            } else {
             switch viewModel.resolvedIdle {
             case .playing:
                 MediaCompactView(
@@ -135,6 +146,7 @@ struct NotchBodyView: View {
                 .transition(Anim.contentSwap)
             case .empty:
                 Color.clear
+            }
             }
         case .pop(let kind):
             popView(kind)
@@ -161,6 +173,11 @@ struct NotchBodyView: View {
         switch kind {
         case .accessibility:
             AccessibilityPopView(geometry: viewModel.geometry)
+        case .pomodoro(let title, let symbol, let detail):
+            PomodoroPopView(
+                title: title, symbol: symbol, detail: detail,
+                geometry: viewModel.geometry
+            )
         case .charging(let percentage):
             BatteryPopView(percentage: percentage, kind: .charging, geometry: viewModel.geometry)
         case .lowBattery(let percentage):
@@ -208,6 +225,8 @@ struct NotchBodyView: View {
                 ShelfView(viewModel: viewModel)
             case .calendar:
                 CalendarStripView(viewModel: viewModel, calendar: services.calendar)
+            case .pomodoro:
+                PomodoroTabView(viewModel: viewModel, pomodoro: services.pomodoro)
             case .agent:
                 AgentTabView(viewModel: viewModel)
             }
@@ -235,6 +254,9 @@ struct TabStrip: View {
             }
             if settings.calendarEnabled {
                 tabButton(.calendar, symbol: "calendar", label: "Calendar")
+            }
+            if settings.pomodoroEnabled {
+                tabButton(.pomodoro, symbol: "timer", label: "Pomodoro")
             }
             if settings.agentEnabled {
                 tabButton(.agent, symbol: "terminal.fill", label: "Agents")
@@ -268,8 +290,8 @@ struct TabStrip: View {
                 )
         }
         .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
+        .help(L10n.string(label))
+        .accessibilityLabel(L10n.string(label))
         .accessibilityAddTraits(current == tab ? .isSelected : [])
     }
 }

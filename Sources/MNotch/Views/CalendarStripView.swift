@@ -75,7 +75,7 @@ struct CalendarStripView: View {
 
     static func dayLabel(_ day: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInTomorrow(day) { return "TMRW" }
+        if cal.isDateInTomorrow(day) { return L10n.string("TMRW") }
         return day.formatted(.dateTime.weekday(.abbreviated).day())
             .uppercased()
     }
@@ -109,7 +109,7 @@ struct CalendarStripView: View {
             Image(systemName: symbol)
                 .font(.system(size: 20))
                 .foregroundStyle(.white.opacity(0.35))
-            Text(text)
+            Text(LocalizedStringKey(text))
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.45))
         }

@@ -20,7 +20,7 @@ enum QuotaConnectionState: Equatable, Sendable {
     case unavailable(String)
 }
 
-struct QuotaWindow: Identifiable, Equatable, Sendable {
+struct QuotaWindow: Identifiable, Equatable, Codable, Sendable {
     let id: String
     var label: String
     var usedPercent: Double

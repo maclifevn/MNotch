@@ -1,0 +1,3 @@
+"NSAppleEventsUsageDescription" = "MNotch uses Apple Events only when you choose an action that controls your media app or returns to an agent session in Terminal.";
+"NSCalendarsFullAccessUsageDescription" = "MNotch shows your upcoming events in the notch calendar widget.";
+"NSBluetoothAlwaysUsageDescription" = "MNotch shows a popup with battery level when your AirPods or other Bluetooth devices connect.";

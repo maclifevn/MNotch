@@ -3,6 +3,207 @@ import XCTest
 @testable import MNotch
 
 final class CoreLogicTests: XCTestCase {
+    func testLanguageDefaultsToTheMacSystemPreference() {
+        XCTAssertEqual(AppLanguage.resolvedPreference(from: nil), .system)
+        XCTAssertEqual(AppLanguage.resolvedPreference(from: "unknown"), .system)
+        XCTAssertEqual(AppLanguage.resolvedPreference(from: "vi"), .vietnamese)
+        XCTAssertEqual(AppLanguage.resolvedPreference(from: "en"), .english)
+    }
+
+    func testLanguageRestartPromptTracksTheActuallyLaunchedLanguage() {
+        XCTAssertFalse(AppLanguageRestartPolicy.requiresRestart(
+            selected: .vietnamese,
+            launched: .vietnamese
+        ))
+        XCTAssertTrue(AppLanguageRestartPolicy.requiresRestart(
+            selected: .vietnamese,
+            launched: .english
+        ))
+        XCTAssertFalse(AppLanguageRestartPolicy.requiresRestart(
+            selected: .system,
+            launched: .system
+        ))
+    }
+
+    func testShelfDragCarriesTheWholeSelectionInTrayOrder() {
+        let a = URL(fileURLWithPath: "/tmp/a.png")
+        let b = URL(fileURLWithPath: "/tmp/b.png")
+        let c = URL(fileURLWithPath: "/tmp/c.png")
+        let available = [a, b, c]
+
+        XCTAssertEqual(
+            ShelfDragSelection.urls(
+                dragged: c,
+                selection: [a, c],
+                available: available
+            ),
+            [a, c]
+        )
+        XCTAssertEqual(
+            ShelfDragSelection.urls(
+                dragged: b,
+                selection: [a, c],
+                available: available
+            ),
+            [b]
+        )
+    }
+
+    func testShelfRejectsItsOwnOutgoingDragButAcceptsExternalFiles() {
+        XCTAssertTrue(ShelfDropPolicy.accepts(
+            featureEnabled: true,
+            outgoingShelfDrag: false
+        ))
+        XCTAssertFalse(ShelfDropPolicy.accepts(
+            featureEnabled: true,
+            outgoingShelfDrag: true
+        ))
+        XCTAssertFalse(ShelfDropPolicy.accepts(
+            featureEnabled: false,
+            outgoingShelfDrag: false
+        ))
+    }
+
+    func testShelfOnlyClearsAfterAnEnabledSuccessfulDrag() {
+        XCTAssertTrue(ShelfDragCompletionPolicy.shouldClear(
+            settingEnabled: true,
+            operationSucceeded: true
+        ))
+        XCTAssertFalse(ShelfDragCompletionPolicy.shouldClear(
+            settingEnabled: false,
+            operationSucceeded: true
+        ))
+        XCTAssertFalse(ShelfDragCompletionPolicy.shouldClear(
+            settingEnabled: true,
+            operationSucceeded: false
+        ))
+    }
+
+    func testClaudeSearchPathKeepsFallbacksAndRemovesDuplicates() {
+        XCTAssertEqual(
+            ClaudeUsageClient.mergeSearchPaths([
+                "/custom/bin:/usr/bin",
+                "/usr/bin:/Users/test/.local/bin",
+                "/custom/bin:/bin",
+            ]),
+            "/custom/bin:/usr/bin:/Users/test/.local/bin:/bin"
+        )
+    }
+
+    func testPreferredPlayerPlayNeverTargetsAnUnconfirmedSource() {
+        let mmusic = "com.mtube.mmusic"
+
+        XCTAssertFalse(MediaRemoteService.shouldSendPreferredPlay(
+            preferredBundleID: mmusic,
+            observedBundleID: nil,
+            observedPlaying: false
+        ))
+        XCTAssertFalse(MediaRemoteService.shouldSendPreferredPlay(
+            preferredBundleID: mmusic,
+            observedBundleID: "com.apple.Music",
+            observedPlaying: false
+        ))
+        XCTAssertFalse(MediaRemoteService.shouldSendPreferredPlay(
+            preferredBundleID: mmusic,
+            observedBundleID: mmusic,
+            observedPlaying: true
+        ))
+        XCTAssertTrue(MediaRemoteService.shouldSendPreferredPlay(
+            preferredBundleID: mmusic,
+            observedBundleID: mmusic,
+            observedPlaying: false
+        ))
+    }
+
+    func testPausedSignalWinsAStalePlayingField() {
+        XCTAssertFalse(MediaRemoteService.reportedPlaying(
+            flag: true,
+            playbackRate: 0
+        ))
+        XCTAssertFalse(MediaRemoteService.reportedPlaying(
+            flag: false,
+            playbackRate: 1
+        ))
+        XCTAssertTrue(MediaRemoteService.reportedPlaying(
+            flag: true,
+            playbackRate: 1
+        ))
+    }
+
+    func testStaleConfirmationCannotImmediatelyUndoOptimisticPause() {
+        let now = Date()
+        XCTAssertTrue(MediaRemoteService.shouldHoldOptimisticState(
+            desired: false,
+            reported: true,
+            deadline: now.addingTimeInterval(1),
+            now: now
+        ))
+        XCTAssertFalse(MediaRemoteService.shouldHoldOptimisticState(
+            desired: false,
+            reported: true,
+            deadline: now,
+            now: now
+        ))
+    }
+
+    func testTimestampOnlyMediaPollDoesNotRepublishTheViewTree() {
+        let now = Date()
+        var current = MediaPlayback()
+        current.title = "Track"
+        current.artist = "Artist"
+        current.duration = 180
+        current.elapsedTime = 40
+        current.timestamp = now.addingTimeInterval(-2)
+        current.playbackRate = 1
+        current.isPlaying = true
+
+        var candidate = current
+        candidate.elapsedTime = 42
+        candidate.timestamp = now
+
+        XCTAssertFalse(MediaRemoteService.shouldPublishPlayback(
+            current: current,
+            candidate: candidate,
+            at: now
+        ))
+        candidate.isPlaying = false
+        XCTAssertTrue(MediaRemoteService.shouldPublishPlayback(
+            current: current,
+            candidate: candidate,
+            at: now
+        ))
+    }
+
+    func testSimulatedNotchPolicyFollowsHardwareAndUserOverride() {
+        XCTAssertTrue(SimulatedNotchPolicy.isEnabled(
+            force: false,
+            hasPhysicalNotch: false
+        ))
+        XCTAssertFalse(SimulatedNotchPolicy.isEnabled(
+            force: false,
+            hasPhysicalNotch: true
+        ))
+        XCTAssertTrue(SimulatedNotchPolicy.isEnabled(
+            force: true,
+            hasPhysicalNotch: true
+        ))
+    }
+
+    func testPrivateLockSpaceIsOnlyUsedForTheEnabledFeatureWhileLocked() {
+        XCTAssertFalse(LockPresentationPolicy.shouldElevateNotch(
+            isLocked: true,
+            featureEnabled: false
+        ))
+        XCTAssertFalse(LockPresentationPolicy.shouldElevateNotch(
+            isLocked: false,
+            featureEnabled: true
+        ))
+        XCTAssertTrue(LockPresentationPolicy.shouldElevateNotch(
+            isLocked: true,
+            featureEnabled: true
+        ))
+    }
+
     func testEventTapSafetyLatchRequiresANewPermissionGrant() {
         var latch = KeyTapSafetyLatch()
         XCTAssertFalse(latch.blocksRestart)
@@ -67,7 +268,7 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertTrue(demand.audio)
         XCTAssertTrue(demand.occlusion)
         XCTAssertFalse(demand.displayControls)
-        XCTAssertFalse(demand.keys)
+        XCTAssertTrue(demand.keys)
         XCTAssertFalse(demand.power)
         XCTAssertFalse(demand.calendar)
         XCTAssertFalse(demand.agents)
@@ -252,6 +453,49 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertNil(AgentHookResponse.data(event: "PermissionRequest", decision: .ask))
     }
 
+    func testPomodoroPhaseMachineCyclesWorkBreaksAndLongBreak() {
+        // Work → short break until the cycle target is met, then a long break,
+        // and any break always returns to work.
+        XCTAssertEqual(
+            PomodoroService.nextPhase(after: .work, completedWorkSessions: 1, cyclesPerLongBreak: 4),
+            .shortBreak
+        )
+        XCTAssertEqual(
+            PomodoroService.nextPhase(after: .work, completedWorkSessions: 4, cyclesPerLongBreak: 4),
+            .longBreak
+        )
+        XCTAssertEqual(
+            PomodoroService.nextPhase(after: .shortBreak, completedWorkSessions: 2, cyclesPerLongBreak: 4),
+            .work
+        )
+        XCTAssertEqual(
+            PomodoroService.nextPhase(after: .longBreak, completedWorkSessions: 4, cyclesPerLongBreak: 4),
+            .work
+        )
+    }
+
+    @MainActor
+    func testPomodoroStartPauseKeepsRemainingAndStaysInert() {
+        let pomodoro = PomodoroService()
+        // Inert before start: no live activity, nothing running.
+        XCTAssertFalse(pomodoro.isActive)
+        XCTAssertFalse(pomodoro.isRunning)
+
+        pomodoro.start()
+        XCTAssertTrue(pomodoro.isRunning)
+        XCTAssertGreaterThan(pomodoro.remaining, 0)
+
+        pomodoro.pause()
+        XCTAssertFalse(pomodoro.isRunning)
+        XCTAssertTrue(pomodoro.isActive)          // paused still shows the wing
+        let frozen = pomodoro.remaining
+        XCTAssertGreaterThan(frozen, 0)
+
+        pomodoro.reset()
+        XCTAssertFalse(pomodoro.isActive)
+        XCTAssertEqual(pomodoro.phase, .work)
+    }
+
     @MainActor
     func testExternallyEndedRequestClearsTheStuckCardAndCollapses() throws {
         // Reproduces the "approve in Claude, notch card hangs open" bug: when
@@ -393,6 +637,7 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertEqual(result.rows.map(\.kind), [.equal, .remove, .add, .equal])
         XCTAssertEqual(result.rows.map(\.oldNo), [1, 2, nil, 3])
         XCTAssertEqual(result.rows.map(\.newNo), [1, nil, 2, 3])
+        XCTAssertEqual(result.rows.map(\.id), [0, 1, 2, 3])
     }
 
     func testDiffEngineUsesBoundedFallbackForLargeInput() {

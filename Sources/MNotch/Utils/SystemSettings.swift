@@ -8,6 +8,7 @@ enum SystemSettings {
         case accessibility = "Privacy_Accessibility"
     }
 
+    @MainActor
     static func open(_ pane: Pane) {
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)"

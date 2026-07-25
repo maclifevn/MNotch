@@ -7,7 +7,7 @@ import SwiftUI
 struct AgentPreview: View {
     let detail: RequestDetail
     let summary: String
-    let diff: (rows: [DiffRow], adds: Int, dels: Int)?
+    let diff: DiffResult?
 
     var body: some View {
         switch detail {
@@ -23,7 +23,10 @@ struct AgentPreview: View {
             codeBox(patch, maxHeight: 210, wrap: false)
         case .plan(let markdown):
             ScrollView {
-                Text(Self.rendered(markdown))
+                // Permission payloads can contain an entire generated plan.
+                // Parsing a bounded preview avoids reprocessing megabytes on
+                // every view update while preserving the useful first page.
+                Text(Self.rendered(String(markdown.prefix(12_000))))
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.8))
                     .textSelection(.enabled)
@@ -72,7 +75,7 @@ private struct DiffBox: View {
 
     var body: some View {
         ScrollView([.vertical, .horizontal]) {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
                     HStack(spacing: 0) {
                         Text(row.newNo.map(String.init) ?? row.oldNo.map(String.init) ?? "")

@@ -6,6 +6,24 @@ import AppKit
 final class NotchWindowController {
     private var panels: [NotchPanel] = []
     private var viewModels: [NotchViewModel] = []
+    private var rebuildTask: Task<Void, Never>?
+    private var pointerTimer: Timer?
+    /// SkyLight removes windows from their desktop spaces. Only a full rebuild
+    /// can safely restore them, and only after we actually attempted elevation.
+    private var needsDesktopRebuild = false
+
+    init() {
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            // Installed on the main run loop below, so this isolation assertion
+            // avoids allocating a Swift Task on every pointer sample.
+            MainActor.assumeIsolated {
+                self?.refreshPointerInteractions()
+            }
+        }
+        timer.tolerance = 0.004
+        RunLoop.main.add(timer, forMode: .common)
+        pointerTimer = timer
+    }
 
     var debugPanels: [NotchPanel] { panels }
     var debugViewModels: [NotchViewModel] { viewModels }
@@ -15,10 +33,12 @@ final class NotchWindowController {
     }
 
     func repositionAll() {
-        rebuild()
+        scheduleRebuild()
     }
 
     private func rebuild() {
+        rebuildTask?.cancel()
+        rebuildTask = nil
         for panel in panels {
             panel.orderOut(nil)
         }
@@ -26,14 +46,20 @@ final class NotchWindowController {
         viewModels = []
 
         let settings = SettingsStore.shared
-        let locked = AppServices.shared.lockScreen.isLocked
+        let elevateForLock = LockPresentationPolicy.shouldElevateNotch(
+            isLocked: AppServices.shared.lockScreen.isLocked,
+            featureEnabled: settings.lockEnabled
+        )
         let hidden = AppServices.shared.occlusion.shouldHide
 
         // When no display has a real notch (Mac mini/Studio, Intel Macs, or a
         // MacBook running lid-closed on an external), fall back to a simulated
         // notch automatically — otherwise the app would draw nothing at all.
         let anyRealNotch = NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
-        let simulate = settings.forceSimulatedNotch || !anyRealNotch
+        let simulate = SimulatedNotchPolicy.isEnabled(
+            force: settings.forceSimulatedNotch,
+            hasPhysicalNotch: anyRealNotch
+        )
 
         for screen in NSScreen.screens
         where (screen.safeAreaInsets.top > 0 || simulate)
@@ -44,25 +70,32 @@ final class NotchWindowController {
             // Rebuilds can happen mid-lock (display sleep/wake fires screen
             // parameter changes) or while hidden for a fullscreen app; new
             // panels must adopt the CURRENT state, not the default one.
-            if locked {
+            if elevateForLock {
                 panel.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
             }
             if hidden {
                 panel.alphaValue = 0
-                panel.ignoresMouseEvents = true
+                panel.setInteractionSuppressed(true)
             }
-            if locked, !SkyLightOperator.shared.addToLockSpace(panel) {
-                panel.ignoresMouseEvents = true
-                panel.orderOut(nil)
+            if elevateForLock {
+                // The window must already be ordered before SkyLight moves it;
+                // ordering it afterward can pull it back to the desktop space.
+                panel.orderFrontRegardless()
+                needsDesktopRebuild = true
+                if !SkyLightOperator.shared.addToLockSpace(panel) {
+                    panel.setInteractionSuppressed(true)
+                    panel.orderOut(nil)
+                }
             } else {
                 panel.orderFrontRegardless()
             }
             panels.append(panel)
             viewModels.append(viewModel)
         }
+        refreshPointerInteractions()
 
         SettingsStore.shared.onDisplayConfigChanged = { [weak self] in
-            self?.rebuild()
+            self?.scheduleRebuild()
         }
         AppServices.shared.showHUD = { [weak self] kind, value, muted in
             self?.viewModels.forEach { $0.showHUD(kind, value: value, muted: muted) }
@@ -87,17 +120,19 @@ final class NotchWindowController {
         // normal spaces permanently, so unlocking rebuilds the panels from
         // scratch — a level reset alone would leave them parked in the
         // level-400 lock space forever.
-        AppServices.shared.lockScreen.onLockStateChanged = { [weak self] locked in
+        AppServices.shared.lockScreen.onLockPresentationChanged = { [weak self] elevate in
             guard let self else { return }
-            if locked {
+            if elevate {
+                self.needsDesktopRebuild = true
                 self.panels.forEach {
                     $0.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
                     if !SkyLightOperator.shared.addToLockSpace($0) {
-                        $0.ignoresMouseEvents = true
+                        $0.setInteractionSuppressed(true)
                         $0.orderOut(nil)
                     }
                 }
-            } else {
+            } else if self.needsDesktopRebuild {
+                self.needsDesktopRebuild = false
                 self.rebuild()
             }
         }
@@ -110,8 +145,32 @@ final class NotchWindowController {
                 }
             }
             for panel in self.panels {
-                panel.ignoresMouseEvents = hide
+                panel.setInteractionSuppressed(hide)
             }
+            if !hide { self.refreshPointerInteractions() }
+        }
+    }
+
+    /// Display notifications and tuning sliders can arrive in bursts. Reusing
+    /// one short debounce prevents repeatedly destroying/recreating every panel
+    /// on the main thread while the user drags a slider or opens a laptop lid.
+    private func scheduleRebuild() {
+        rebuildTask?.cancel()
+        rebuildTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            self?.rebuild()
+        }
+    }
+
+    private func refreshPointerInteractions() {
+        let location = NSEvent.mouseLocation
+        let pressed = NSEvent.pressedMouseButtons != 0
+        for panel in panels where panel.isVisible {
+            panel.updatePointerInteraction(
+                at: location,
+                mouseButtonPressed: pressed
+            )
         }
     }
 

@@ -17,6 +17,8 @@ final class OcclusionWatcher {
     @ObservationIgnored private var activationObserver: NSObjectProtocol?
     @ObservationIgnored private var evaluationTask: Task<Void, Never>?
     @ObservationIgnored private var evaluationRequested = false
+    @ObservationIgnored private var frontmostPID: pid_t?
+    @ObservationIgnored private var frontmostIsGame = false
 
     func start() {
         guard timer == nil else { return }
@@ -24,8 +26,13 @@ final class OcclusionWatcher {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.evaluate() }
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication
+            Task { @MainActor in
+                self?.updateFrontmost(app)
+                self?.evaluate()
+            }
         }
 
         let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
@@ -34,6 +41,7 @@ final class OcclusionWatcher {
         timer.tolerance = 0.3
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+        updateFrontmost(NSWorkspace.shared.frontmostApplication)
         evaluate()
     }
 
@@ -48,6 +56,8 @@ final class OcclusionWatcher {
         evaluationTask = nil
         evaluationRequested = false
         frontmostBundleID = nil
+        frontmostPID = nil
+        frontmostIsGame = false
         if shouldHide {
             shouldHide = false
             onHideChanged?(false)
@@ -61,12 +71,10 @@ final class OcclusionWatcher {
         }
 
         let settings = SettingsStore.shared
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        frontmostBundleID = frontmost?.bundleIdentifier
 
         var hide = false
 
-        if settings.hideWhileGaming, let app = frontmost, Self.isGame(app) {
+        if settings.hideWhileGaming, frontmostIsGame {
             hide = true
         }
 
@@ -77,8 +85,8 @@ final class OcclusionWatcher {
 
         let hideFullscreen = settings.hideInFullscreen
         let hideMissionControl = settings.hideInMissionControl
-        let frontmostPID = frontmost?.processIdentifier
-        let frontmostIsMNotch = frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier
+        let frontmostPID = self.frontmostPID
+        let frontmostIsMNotch = frontmostBundleID == Bundle.main.bundleIdentifier
         let screenSizes = NSScreen.screens.map(\.frame.size)
         let ownPID = ProcessInfo.processInfo.processIdentifier
 
@@ -111,6 +119,15 @@ final class OcclusionWatcher {
                 self.evaluate()
             }
         }
+    }
+
+    /// `NSRunningApplication` lazily fetches properties through LaunchServices
+    /// XPC. Cache that snapshot only when AppKit reports an activation instead
+    /// of paying for synchronous XPC on every one-second fullscreen poll.
+    private func updateFrontmost(_ app: NSRunningApplication?) {
+        frontmostBundleID = app?.bundleIdentifier
+        frontmostPID = app?.processIdentifier
+        frontmostIsGame = app.map(Self.isGame) ?? false
     }
 
     private func apply(_ hide: Bool) {

@@ -34,9 +34,11 @@ final class BluetoothWatcher: NSObject {
     private var connectNotification: IOBluetoothUserNotification?
     private var disconnectNotifications: [String: BluetoothNotificationBox] = [:]
     private var batteryTimer: Timer?
+    private var runGeneration: UInt64 = 0
 
     func start() {
         guard batteryTimer == nil else { return }
+        runGeneration &+= 1
         connectNotification = IOBluetoothDevice.register(
             forConnectNotifications: self,
             selector: #selector(deviceConnected(_:device:))
@@ -53,6 +55,7 @@ final class BluetoothWatcher: NSObject {
     }
 
     func stop() {
+        runGeneration &+= 1
         batteryTimer?.invalidate()
         batteryTimer = nil
         connectNotification?.unregister()
@@ -70,12 +73,17 @@ final class BluetoothWatcher: NSObject {
         let threshold = Int(settings.connectivityLowThreshold)
 
         for (key, device) in connected where !warnedLow.contains(key) {
+            let generation = runGeneration
             Task { [weak self] in
                 let battery = await Task.detached {
                     Self.hidBatteryPercent(address: device.address, name: device.name)
                 }.value
                 guard let battery, battery > 0, battery <= threshold else { return }
-                guard let self, !self.warnedLow.contains(key) else { return }
+                guard let self,
+                      self.runGeneration == generation,
+                      self.batteryTimer != nil,
+                      !self.warnedLow.contains(key)
+                else { return }
                 self.warnedLow.insert(key)
                 self.onLowBattery?(device.name, device.symbol, battery)
                 if SettingsStore.shared.connectivitySoundOnLow {
@@ -114,6 +122,11 @@ final class BluetoothWatcher: NSObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            let generation = self.runGeneration
+            guard self.batteryTimer != nil else {
+                disconnectNotification?.value.unregister()
+                return
+            }
             let key = address ?? name
             self.connected[key] = Connected(
                 name: name, symbol: symbol, address: address
@@ -131,9 +144,16 @@ final class BluetoothWatcher: NSObject {
 
             // Registry entries appear shortly after connect.
             try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled,
+                  self.runGeneration == generation,
+                  self.batteryTimer != nil
+            else { return }
             let battery = await Task.detached {
                 Self.hidBatteryPercent(address: address, name: name)
             }.value
+            guard self.runGeneration == generation,
+                  self.batteryTimer != nil
+            else { return }
             self.onConnect?(name, symbol, battery)
         }
     }

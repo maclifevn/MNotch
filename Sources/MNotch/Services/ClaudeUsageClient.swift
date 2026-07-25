@@ -4,6 +4,25 @@ import Foundation
 /// can be drained concurrently without a full-buffer deadlock.
 private final class PipeDataBox: @unchecked Sendable { var data = Data() }
 
+/// A tiny synchronized buffer used by `FileHandle.readabilityHandler`.  Reading
+/// subprocess output this way matters for login shells: a broken shell startup
+/// file can keep a descendant (and therefore the pipe) alive after zsh exits.
+/// `readDataToEndOfFile()` would then wait forever even though we timed zsh out.
+private final class LockedPipeDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock(); defer { lock.unlock() }
+        data.append(chunk)
+    }
+
+    func snapshot() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return data
+    }
+}
+
 /// Reads Claude subscription usage by asking the local `claude` CLI itself
 /// (`claude -p /usage`). The CLI owns its own OAuth login, so MNotch never
 /// touches the Keychain, never triggers an access prompt, and never risks
@@ -22,6 +41,8 @@ final class ClaudeUsageClient {
     var onUnavailable: ((String) -> Void)?
 
     private var task: Task<Void, Never>?
+    private var isActive = false
+    private var refreshAfterFlight = false
     /// After a failure, suppress the timer-driven poll until this time so a
     /// throttled endpoint isn't hammered every interval (manual refresh forces).
     private var throttledUntil: Date?
@@ -31,32 +52,47 @@ final class ClaudeUsageClient {
     private nonisolated(unsafe) static var runningProcess: Process?
     private nonisolated static let processLock = NSLock()
 
-    func start() { refresh(force: true) }
+    func start() {
+        isActive = true
+        refresh(force: true)
+    }
 
     func refresh(force: Bool = false) {
-        guard task == nil else { return }   // single-flight
+        guard task == nil else {
+            // stop→start can occur before the terminated CLI has fully reaped.
+            // Remember the new demand so completion immediately starts a fresh
+            // fetch instead of leaving Claude absent until the 3-minute timer.
+            if force { refreshAfterFlight = true }
+            return
+        }
         if !force, let until = throttledUntil, until > Date() { return }
         task = Task { [weak self] in
             let outcome = await Self.fetch()
             guard let self else { return }
-            // Always clear the in-flight task so a restart isn't wedged, but
-            // apply the result only if we weren't cancelled meanwhile.
-            defer { self.task = nil }
-            guard !Task.isCancelled else { return }
-            switch outcome {
-            case .windows(let windows):
-                self.throttledUntil = nil
-                self.backoff = 180
-                self.onWindows?(windows)
-            case .unavailable(let message):
-                self.throttledUntil = Date().addingTimeInterval(self.backoff)
-                self.backoff = min(self.backoff * 2, 900)
-                self.onUnavailable?(message)
+            let cancelled = Task.isCancelled
+            self.task = nil
+            if !cancelled {
+                switch outcome {
+                case .windows(let windows):
+                    self.throttledUntil = nil
+                    self.backoff = 180
+                    self.onWindows?(windows)
+                case .unavailable(let message):
+                    self.throttledUntil = Date().addingTimeInterval(self.backoff)
+                    self.backoff = min(self.backoff * 2, 900)
+                    self.onUnavailable?(message)
+                }
+            }
+            if self.isActive, self.refreshAfterFlight {
+                self.refreshAfterFlight = false
+                self.refresh(force: true)
             }
         }
     }
 
     func stop() {
+        isActive = false
+        refreshAfterFlight = false
         task?.cancel()
         // Terminate the running process and let the task nil itself once the
         // (now-terminated) fetch returns — never nil `task` here, or a restart
@@ -313,9 +349,9 @@ final class ClaudeUsageClient {
     private nonisolated(unsafe) static var cachedResolution: Resolution?
     private nonisolated static let resolutionLock = NSLock()
 
-    /// Find `claude` the way the user's terminal does: an interactive login
-    /// shell's PATH (so nvm/fnm/volta/custom npm-prefix installs resolve), with
-    /// a sane fallback list. Cached once found.
+    /// Find `claude` using the login PATH, inherited PATH and deterministic
+    /// package-manager locations. Cached once found. The shell is deliberately
+    /// non-interactive: interactive plug-ins can wait for input indefinitely.
     private nonisolated static func resolveClaude() -> Resolution? {
         resolutionLock.lock(); defer { resolutionLock.unlock() }
         if let cached = cachedResolution,
@@ -332,31 +368,57 @@ final class ClaudeUsageClient {
 
     private nonisolated static func loginPath() -> String {
         let mark = "__MNOTCH_PATH__"
-        let out = runZsh(["-ilc", "printf '%s%s%s' '\(mark)' \"$PATH\" '\(mark)'"])
+        let out = runZsh(["-lc", "printf '%s%s%s' '\(mark)' \"$PATH\" '\(mark)'"])
+        var shellPath: String?
         if let start = out.range(of: mark),
            let end = out.range(of: mark, range: start.upperBound..<out.endIndex) {
             let value = String(out[start.upperBound..<end.lowerBound])
-            if !value.isEmpty { return value }
+            if !value.isEmpty { shellPath = value }
         }
-        return fallbackPath()
+        return mergeSearchPaths([
+            shellPath,
+            ProcessInfo.processInfo.environment["PATH"],
+            fallbackPath(),
+        ].compactMap { $0 })
     }
 
     private nonisolated static func runZsh(_ args: [String]) -> String {
-        let task = Process()
+        let process = Process()
         let pipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        task.arguments = args
-        task.standardOutput = pipe
-        task.standardError = Pipe()
-        task.standardInput = FileHandle.nullDevice
+        let output = LockedPipeDataBox()
+        let finished = DispatchSemaphore(value: 0)
+        let reader = pipe.fileHandleForReading
+
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        process.terminationHandler = { _ in finished.signal() }
+        reader.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { output.append(chunk) }
+        }
+
         do {
-            try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            return String(decoding: data, as: UTF8.self)
+            try process.run()
         } catch {
+            reader.readabilityHandler = nil
             return ""
         }
+
+        // Shell profiles are user-controlled. A prompt, network plug-in, or
+        // stale mount must never occupy a worker forever or wedge quota refresh.
+        if finished.wait(timeout: .now() + 5) == .timedOut {
+            process.terminate()
+            if finished.wait(timeout: .now() + 0.5) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 0.5)
+            }
+        }
+        reader.readabilityHandler = nil
+        try? reader.close()
+        return String(decoding: output.snapshot(), as: UTF8.self)
     }
 
     private nonisolated static func locate(_ name: String, onPath path: String) -> String? {
@@ -370,10 +432,51 @@ final class ClaudeUsageClient {
 
     private nonisolated static func fallbackPath() -> String {
         let home = NSHomeDirectory()
-        return [
+        var directories = [
             "\(home)/.local/bin", "\(home)/.local/node/bin",
+            "\(home)/.volta/bin", "\(home)/.asdf/shims",
+            "\(home)/.local/share/mise/shims", "\(home)/.bun/bin",
+            "\(home)/Library/pnpm", "\(home)/.npm-global/bin",
+            "\(home)/.local/share/fnm/aliases/default/bin",
             "/opt/homebrew/bin", "/opt/homebrew/sbin",
             "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-        ].joined(separator: ":")
+        ]
+        directories += versionedBinDirectories(
+            root: "\(home)/.nvm/versions/node",
+            suffix: "bin"
+        )
+        directories += versionedBinDirectories(
+            root: "\(home)/.local/share/fnm/node-versions",
+            suffix: "installation/bin"
+        )
+        directories += versionedBinDirectories(
+            root: "\(home)/.fnm/node-versions",
+            suffix: "installation/bin"
+        )
+        return mergeSearchPaths(directories)
+    }
+
+    private nonisolated static func versionedBinDirectories(
+        root: String,
+        suffix: String
+    ) -> [String] {
+        let fm = FileManager.default
+        guard let versions = try? fm.contentsOfDirectory(atPath: root) else { return [] }
+        return versions.sorted(by: >).map {
+            (root as NSString).appendingPathComponent("\($0)/\(suffix)")
+        }
+    }
+
+    /// Preserve first-hit precedence while preventing a huge duplicated PATH.
+    nonisolated static func mergeSearchPaths(_ paths: [String]) -> String {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for path in paths {
+            for component in path.split(separator: ":").map(String.init)
+            where !component.isEmpty && seen.insert(component).inserted {
+                result.append(component)
+            }
+        }
+        return result.joined(separator: ":")
     }
 }

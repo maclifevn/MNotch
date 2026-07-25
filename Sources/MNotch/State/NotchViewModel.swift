@@ -4,6 +4,7 @@ enum NotchTab: String, CaseIterable {
     case media
     case shelf
     case calendar
+    case pomodoro
     case agent
 }
 
@@ -23,6 +24,7 @@ enum PopKind: Equatable {
     case event(title: String, red: Double, green: Double, blue: Double, startingNow: Bool, start: Date)
     case agent(name: String, kind: String, needsInput: Bool)
     case agentConfirm(approved: Bool)
+    case pomodoro(title: String, symbol: String, detail: String)
 }
 
 enum NotchStatus: Equatable {
@@ -136,9 +138,14 @@ final class NotchViewModel {
         }
     }
 
+    /// Set from NotchBodyView while a Pomodoro session is active; the countdown
+    /// takes over the closed wings for the session's duration.
+    var pomodoroActive = false
+
     /// Extra width added to each side of the closed notch per activity.
     private var wingWidth: CGFloat {
-        switch resolvedIdle {
+        if pomodoroActive { return 46 }
+        return switch resolvedIdle {
         case .empty: 0
         case .playing: 26
         case .calendar, .duo: 96
@@ -159,12 +166,15 @@ final class NotchViewModel {
     /// Fake-notch panels have no physical occlusion, so this stays 0 there.
     private var tabStripClearWidth: CGFloat {
         guard geometry.isPhysical else { return 0 }
-        return geometry.notchWidth + 320
+        // A fifth tab (Pomodoro) widens the strip past the 320pt clearance.
+        let extra: CGFloat = SettingsStore.shared.pomodoroEnabled ? 60 : 0
+        return geometry.notchWidth + 320 + extra
     }
     static let expandedSeedHeights: [NotchTab: CGFloat] = [
         .media: 205,
         .shelf: 148,
         .calendar: 205,
+        .pomodoro: 190,
     ]
     static let hudExtraWidth: CGFloat = 160
     static let hudExtraHeight: CGFloat = 10
@@ -234,6 +244,7 @@ final class NotchViewModel {
         case .media: 176...240
         case .shelf: 124...220
         case .calendar: 132...310
+        case .pomodoro: 150...240
         case .agent: 0...0
         }
         return min(max(height, range.lowerBound), range.upperBound)
@@ -401,7 +412,9 @@ final class NotchViewModel {
 
     /// Click on the closed (or hovered) notch opens the panel.
     func handleTap() {
-        guard !status.isExpanded else { return }
+        // Buttons inside HUD/pop content must not also trigger the root
+        // fallback and expand the whole notch on mouse-up.
+        guard status == .closed else { return }
         expand(lastTab)
     }
 
@@ -453,6 +466,7 @@ final class NotchViewModel {
         case .event: settings.calendarPeekDuration
         case .agent: settings.agentDuration
         case .agentConfirm: 1.2   // driven by confirmAgentDecision, not showPop
+        case .pomodoro: 4
         }
 
         let logKind = switch kind {
@@ -465,6 +479,7 @@ final class NotchViewModel {
         case .event: "calendar-event"
         case .agent: "agent"
         case .agentConfirm: "agent-confirm"
+        case .pomodoro: "pomodoro"
         }
         mnotchLog.debug("showPop kind=\(logKind, privacy: .public)")
         withAnimation(Anim.pop) { status = .pop(kind) }
@@ -520,6 +535,7 @@ final class NotchViewModel {
         case .media: settings.mediaEnabled
         case .shelf: settings.shelfEnabled
         case .calendar: settings.calendarEnabled
+        case .pomodoro: settings.pomodoroEnabled
         case .agent: settings.agentEnabled
         }
     }

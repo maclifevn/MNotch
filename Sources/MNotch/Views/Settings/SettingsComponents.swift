@@ -11,7 +11,7 @@ struct SliderRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title)
+                Text(LocalizedStringKey(title))
                 Spacer()
                 Text(format(value))
                     .font(.system(size: 12, weight: .medium).monospacedDigit())
@@ -50,7 +50,7 @@ struct OptionCardPicker<T: Hashable, Preview: View>: View {
                                         lineWidth: 2.5
                                     )
                             )
-                        Text(label(option))
+                        Text(LocalizedStringKey(label(option)))
                             .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
                             .foregroundStyle(selection == option ? .primary : .secondary)
                     }
@@ -95,7 +95,7 @@ struct IconCardPicker<T: Hashable>: View {
                                         lineWidth: 2
                                     )
                             )
-                        Text(label(option))
+                        Text(LocalizedStringKey(label(option)))
                             .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
                             .foregroundStyle(selection == option ? .primary : .secondary)
                     }
@@ -116,7 +116,7 @@ struct SoundToggleRow: View {
 
     var body: some View {
         HStack {
-            Text(title)
+            Text(LocalizedStringKey(title))
             Button {
                 SoundPlayer.play(effect)
             } label: {

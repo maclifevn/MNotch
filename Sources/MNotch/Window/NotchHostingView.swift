@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Hosts the SwiftUI tree and implements mouse pass-through: anything outside
 /// the current notch shape falls through to the menu bar / app beneath.
-/// Hover is computed here from raw mouse events against the view model's
-/// interactive rect — not SwiftUI `onHover` — so an animating shape never
-/// flickers hover state.
+/// The window controller computes hover from the live interactive rect, rather
+/// than SwiftUI tracking areas, so an animating shape never flickers at its
+/// boundary.
 final class NotchHostingView: NSHostingView<NotchRootView> {
     private let viewModel: NotchViewModel
 
@@ -23,20 +23,38 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         fatalError("init(rootView:) is not supported")
     }
 
-    /// Accept the first click even when the panel isn't yet key, so a tap that
-    /// arrives before NotchPanel.sendEvent promotes the panel still lands.
+    /// Deliver controls their first click without making the overlay key or
+    /// deactivating the user's current Finder/application window.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // The content-view hit-test chain supplies this point in the
+        // superview's non-flipped coordinates. Convert it before comparing
+        // with our top-left-origin interactive rect; otherwise the real notch
+        // is rejected and the click falls through to the menu bar below.
         let local = convert(point, from: superview)
         guard viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local) else { return nil }
         return super.hitTest(point)
     }
 
-    // Hover detection lives in SwiftUI (`.onHover` on the notch body): its
-    // tracking areas follow the animated layout automatically, which raw
-    // NSTrackingArea + mouseMoved did not do reliably in a non-activating
-    // panel. This view only handles click pass-through (hitTest) and drops.
+    /// Region-aware window pass-through support. `hitTest(nil)` only declines
+    /// a view inside this window; it does not make the NSWindow transparent to
+    /// the application underneath. NotchPanel uses this result to drive the
+    /// authoritative `ignoresMouseEvents` property.
+    func containsInteractivePoint(_ screenPoint: NSPoint) -> Bool {
+        guard let window else { return false }
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let local = convert(windowPoint, from: nil)
+        return viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local)
+    }
+
+    func setPointerInsideFromWindow(_ inside: Bool) {
+        viewModel.setPointerInside(inside)
+    }
+
+    // Hover and window pass-through intentionally share the same rectangle in
+    // NotchPanel. A second SwiftUI onHover source would disagree over the 8pt
+    // apron and rapidly toggle the spring while the pointer sits at the edge.
 
     /// Fallback for SwiftUI gestures being unreliable in a never-key panel:
     /// a click on the closed notch expands it. No-op when already expanded
@@ -122,13 +140,19 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard SettingsStore.shared.shelfEnabled else { return [] }
+        guard ShelfDropPolicy.accepts(
+            featureEnabled: SettingsStore.shared.shelfEnabled,
+            outgoingShelfDrag: ShelfOutgoingDragState.isActive
+        ) else { return [] }
         viewModel.expand(.shelf)
         return .copy
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard SettingsStore.shared.shelfEnabled else { return false }
+        guard ShelfDropPolicy.accepts(
+            featureEnabled: SettingsStore.shared.shelfEnabled,
+            outgoingShelfDrag: ShelfOutgoingDragState.isActive
+        ) else { return false }
         let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]

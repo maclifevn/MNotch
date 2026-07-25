@@ -72,18 +72,32 @@ final class MediaRemoteService {
 
     private var pollTask: Task<Void, Never>?
     private var confirmationTask: Task<Void, Never>?
+    private var artworkTask: Task<Void, Never>?
+    private var idleExpiryTask: Task<Void, Never>?
+    private var preferredStartTask: Task<Void, Never>?
+    private var preferredStartRevision: UInt64 = 0
+    private var playbackIntent: PlaybackIntent?
+    private(set) var visibilityRevision: UInt64 = 0
     private var pollInFlight = false
     private var pollRequested = false
+    private var runGeneration: UInt64 = 0
     private var missCount = 0
     private var artworkIdentity = ""
     private(set) var lastPlayingAt = Date.distantPast
     private(set) var lastActiveAt = Date.distantPast
+
+    private struct PlaybackIntent {
+        let desiredPlaying: Bool
+        let sourceBundleID: String
+        let expiresAt: Date
+    }
 
     /// Compact-chrome visibility. A loaded track shows whether playing or
     /// paused — many apps (MMusic, some browsers) misreport `isPlaying`, and
     /// a paused track should stay visible to resume anyway. `idleDuration` is
     /// the grace kept after the track fully clears (player closed).
     func idleVisible(after idleDuration: Double) -> Bool {
+        _ = visibilityRevision
         if hasActiveMedia { return true }
         return Date().timeIntervalSince(lastActiveAt) < idleDuration
     }
@@ -168,10 +182,12 @@ final class MediaRemoteService {
 
     func start() {
         guard pollTask == nil else { return }
+        runGeneration &+= 1
+        let generation = runGeneration
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.requestPoll()
-                guard let self else { return }
+                await self?.requestPoll(generation: generation)
+                guard let self, self.runGeneration == generation else { return }
                 let interval = self.hasActiveMedia
                     ? Self.activePollInterval
                     : Self.idlePollInterval
@@ -181,16 +197,35 @@ final class MediaRemoteService {
     }
 
     func stop() {
+        runGeneration &+= 1
         pollTask?.cancel()
         pollTask = nil
         confirmationTask?.cancel()
         confirmationTask = nil
+        artworkTask?.cancel()
+        artworkTask = nil
+        idleExpiryTask?.cancel()
+        idleExpiryTask = nil
+        preferredStartRevision &+= 1
+        preferredStartTask?.cancel()
+        preferredStartTask = nil
+        playbackIntent = nil
         pollRequested = false
+        pollInFlight = false
+        missCount = 0
+        playback = MediaPlayback()
+        artwork = nil
+        accentColor = .white
+        artworkIdentity = ""
+        lastPlayingAt = .distantPast
+        lastActiveAt = .distantPast
+        visibilityRevision &+= 1
     }
 
     // MARK: - Polling
 
-    private func requestPoll() async {
+    private func requestPoll(generation: UInt64) async {
+        guard generation == runGeneration else { return }
         if pollInFlight {
             pollRequested = true
             return
@@ -198,16 +233,20 @@ final class MediaRemoteService {
         pollInFlight = true
         repeat {
             pollRequested = false
-            await pollOnce()
-        } while pollRequested && !Task.isCancelled
+            await pollOnce(generation: generation)
+        } while generation == runGeneration
+            && pollRequested
+            && !Task.isCancelled
+        guard generation == runGeneration else { return }
         pollInFlight = false
     }
 
-    private func pollOnce() async {
+    private func pollOnce(generation: UInt64) async {
         guard let paths = Self.adapterPaths else { return }
         let line = await Self.captureFirstLine(
             [paths.script, paths.framework, "get", "--now", "--no-artwork"]
         )
+        guard !Task.isCancelled, generation == runGeneration else { return }
         guard let line, line != "null",
               let data = line.data(using: .utf8),
               let payload = try? JSONDecoder().decode(GetPayload.self, from: data),
@@ -237,33 +276,116 @@ final class MediaRemoteService {
             // Never show the previous track's artwork on the new one.
             artwork = nil
             accentColor = .white
-            await fetchArtwork()
+            artworkTask?.cancel()
+            let identity = playback.trackIdentity
+            artworkTask = Task { [weak self] in
+                await self?.fetchArtwork(for: identity)
+                guard let self, self.artworkIdentity == identity else { return }
+                self.artworkTask = nil
+            }
         }
     }
 
     private func apply(_ p: GetPayload) {
+        idleExpiryTask?.cancel()
+        idleExpiryTask = nil
+        let now = Date()
         var new = MediaPlayback()
         new.title = p.title ?? ""
         new.artist = p.artist ?? ""
         new.album = p.album ?? ""
         new.duration = p.duration ?? 0
-        new.playbackRate = p.playbackRate ?? 1
-        new.isPlaying = p.playing ?? false
         new.bundleIdentifier = p.parentApplicationBundleIdentifier ?? p.bundleIdentifier ?? ""
         new.trackIdentity = p.contentItemIdentifier ?? (new.title + "|" + new.artist)
         new.elapsedTime = p.elapsedTimeNow ?? p.elapsedTime ?? 0
-        new.timestamp = Date()
+        new.timestamp = now
         new.shuffleMode = p.shuffleMode
         new.repeatMode = p.repeatMode
         new.isVideo = p.mediaType?.localizedCaseInsensitiveContains("video") ?? false
-        if new.isPlaying {
-            lastPlayingAt = Date()
+
+        let reportedPlaying = Self.reportedPlaying(
+            flag: p.playing,
+            playbackRate: p.playbackRate
+        )
+        var resolvedPlaying = reportedPlaying
+        if let intent = playbackIntent {
+            let sameSource = intent.sourceBundleID.isEmpty
+                || intent.sourceBundleID == new.bundleIdentifier
+            if reportedPlaying == intent.desiredPlaying {
+                playbackIntent = nil
+            } else if sameSource,
+                      Self.shouldHoldOptimisticState(
+                        desired: intent.desiredPlaying,
+                        reported: reportedPlaying,
+                        deadline: intent.expiresAt,
+                        now: now
+                      ) {
+                // MediaRemote's independent `playing` and metadata callbacks
+                // can still describe the frame before our command. Do not let
+                // that stale poll flip the button back and then forward again.
+                resolvedPlaying = intent.desiredPlaying
+            } else {
+                playbackIntent = nil
+            }
         }
-        lastActiveAt = Date()   // a track is present this poll
+        new.isPlaying = resolvedPlaying
+        new.playbackRate = p.playbackRate ?? (resolvedPlaying ? 1 : 0)
+
+        if new.isPlaying {
+            lastPlayingAt = now
+        }
+        lastActiveAt = now   // a track is present this poll
         SettingsStore.shared.rememberSource(new.bundleIdentifier)
-        if playback != new {
+        if Self.shouldPublishPlayback(current: playback, candidate: new, at: now) {
             playback = new
         }
+    }
+
+    /// MediaRemote obtains the boolean and playback-rate metadata through two
+    /// separate callbacks. During a pause transition either one can arrive
+    /// first; a definite paused value wins so the notch never keeps animating
+    /// merely because the other field is one sample behind.
+    nonisolated static func reportedPlaying(
+        flag: Bool?,
+        playbackRate: Double?
+    ) -> Bool {
+        if flag == false { return false }
+        if let playbackRate, playbackRate <= 0 { return false }
+        if flag == true { return true }
+        return (playbackRate ?? 0) > 0
+    }
+
+    nonisolated static func shouldHoldOptimisticState(
+        desired: Bool,
+        reported: Bool,
+        deadline: Date,
+        now: Date
+    ) -> Bool {
+        desired != reported && now < deadline
+    }
+
+    /// Polling is only a correction mechanism; the seek bar extrapolates time
+    /// locally. Ignore timestamp-only samples (and tiny clock drift) so the
+    /// entire observable media tree is not invalidated every two seconds.
+    nonisolated static func shouldPublishPlayback(
+        current: MediaPlayback,
+        candidate: MediaPlayback,
+        at now: Date
+    ) -> Bool {
+        guard current.title == candidate.title,
+              current.artist == candidate.artist,
+              current.album == candidate.album,
+              abs(current.duration - candidate.duration) < 0.05,
+              abs(current.playbackRate - candidate.playbackRate) < 0.01,
+              current.isPlaying == candidate.isPlaying,
+              current.bundleIdentifier == candidate.bundleIdentifier,
+              current.trackIdentity == candidate.trackIdentity,
+              current.shuffleMode == candidate.shuffleMode,
+              current.repeatMode == candidate.repeatMode,
+              current.isVideo == candidate.isVideo
+        else { return true }
+
+        return abs(current.elapsed(at: now) - candidate.elapsedTime) > 1.25
     }
 
     private func registerMiss() {
@@ -275,47 +397,66 @@ final class MediaRemoteService {
             artwork = nil
             accentColor = .white
             artworkIdentity = ""
+            artworkTask?.cancel()
+            artworkTask = nil
+            scheduleIdleExpiry(after: SettingsStore.shared.mediaIdleDuration)
+        }
+    }
+
+    /// `idleVisible` is time-based, but Observation only redraws on a property
+    /// change. Schedule that exact boundary so a 3-second grace doesn't remain
+    /// on screen until the next 10-second idle media poll.
+    func scheduleIdleExpiry(after duration: Double) {
+        idleExpiryTask?.cancel()
+        idleExpiryTask = nil
+        guard !hasActiveMedia else { return }
+        let remaining = duration - Date().timeIntervalSince(lastActiveAt)
+        guard remaining > 0 else {
+            visibilityRevision &+= 1
+            return
+        }
+        idleExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(remaining))
+            guard !Task.isCancelled, let self, !self.hasActiveMedia else { return }
+            self.idleExpiryTask = nil
+            self.visibilityRevision &+= 1
         }
     }
 
     /// Browsers often publish artwork a few seconds after the metadata, so a
     /// miss retries a few times while the track is still the same.
-    private func fetchArtwork(attempt: Int = 0) async {
+    private func fetchArtwork(for identity: String) async {
         guard let paths = Self.adapterPaths else { return }
-        let identity = playback.trackIdentity
-        let line = await Self.captureFirstLine([paths.script, paths.framework, "get"])
-
-        // The track may have changed while the adapter ran.
-        guard playback.trackIdentity == identity else { return }
-
-        guard let line, line != "null",
-              let data = line.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(GetPayload.self, from: data),
-              let artworkString = payload.artworkData
-        else {
-            if attempt < 4 {
-                Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(2))
-                    guard let self, self.playback.trackIdentity == identity else { return }
-                    await self.fetchArtwork(attempt: attempt + 1)
-                }
+        for attempt in 0...4 {
+            if attempt > 0 {
+                try? await Task.sleep(for: .seconds(2))
             }
+            guard !Task.isCancelled, playback.trackIdentity == identity else { return }
+
+            let line = await Self.captureFirstLine([paths.script, paths.framework, "get"])
+            guard !Task.isCancelled, playback.trackIdentity == identity else { return }
+            guard let line, line != "null",
+                  let data = line.data(using: .utf8),
+                  let payload = try? JSONDecoder().decode(GetPayload.self, from: data),
+                  let artworkString = payload.artworkData
+            else { continue }
+
+            let processed = await Task.detached(priority: .utility) {
+                guard let data = Data(base64Encoded: artworkString.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )) else { return nil as (Data, DominantColor.Components)? }
+                return (data, DominantColor.accent(from: data))
+            }.value
+            guard !Task.isCancelled,
+                  playback.trackIdentity == identity,
+                  let (imageData, accent) = processed,
+                  let image = NSImage(data: imageData)
+            else { return }
+            artwork = image
+            accentColor = Color(red: accent.red, green: accent.green, blue: accent.blue)
+            mnotchLog.debug("artwork loaded (attempt \(attempt))")
             return
         }
-
-        let processed = await Task.detached(priority: .utility) {
-            guard let data = Data(base64Encoded: artworkString.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )) else { return nil as (Data, DominantColor.Components)? }
-            return (data, DominantColor.accent(from: data))
-        }.value
-        guard playback.trackIdentity == identity,
-              let (imageData, accent) = processed,
-              let image = NSImage(data: imageData)
-        else { return }
-        artwork = image
-        accentColor = Color(red: accent.red, green: accent.green, blue: accent.blue)
-        mnotchLog.debug("artwork loaded (attempt \(attempt))")
     }
 
     // MARK: - Commands
@@ -352,6 +493,13 @@ final class MediaRemoteService {
     }
 
     func send(_ command: MediaCommand) {
+        // Until a newly opened preferred app has positively become the system
+        // Now Playing source, no command may fall through to the global route.
+        // A second click during launch would otherwise wake the previous target
+        // (commonly Apple Music), recreating the exact cross-player bug this
+        // guarded start path is intended to prevent.
+        guard preferredStartTask == nil else { return }
+
         // Pressing Play from an idle notch normally resumes whatever macOS last
         // treated as Now Playing (usually Apple Music). If the user picked a
         // preferred player and it isn't already the loaded source, start it
@@ -360,19 +508,49 @@ final class MediaRemoteService {
             || (command == .togglePlayPause && !playback.isPlaying)
         if starting, startPreferredPlayerIfNeeded() { return }
 
-        // Optimistic flip so the button responds on the same frame.
+        // Optimistic flip so the button responds on the same frame. Convert a
+        // toggle into an explicit idempotent Play/Pause command; this prevents
+        // rapid clicks or delayed helpers from toggling an already-correct
+        // player back to the wrong state.
+        var adapterCommand = command
         switch command {
         case .togglePlayPause:
-            setPlayingOptimistically(!playback.isPlaying)
+            let desired = !playback.isPlaying
+            beginPlaybackIntent(desired)
+            setPlayingOptimistically(desired)
+            adapterCommand = desired ? .play : .pause
         case .play:
+            beginPlaybackIntent(true)
             setPlayingOptimistically(true)
         case .pause:
+            beginPlaybackIntent(false)
             setPlayingOptimistically(false)
         default:
             break
         }
-        runAdapter(["send", String(command.rawValue)])
+        runAdapter(["send", String(adapterCommand.rawValue)])
         pollSoon()
+    }
+
+    /// Called for a hardware media key observed by the global event tap. The
+    /// event itself is passed through untouched; this method only predicts the
+    /// resulting UI state and schedules confirmation polls.
+    func observeExternalCommand(_ command: MediaCommand) {
+        switch command {
+        case .togglePlayPause:
+            let desired = !playback.isPlaying
+            beginPlaybackIntent(desired)
+            setPlayingOptimistically(desired)
+        case .play:
+            beginPlaybackIntent(true)
+            setPlayingOptimistically(true)
+        case .pause:
+            beginPlaybackIntent(false)
+            setPlayingOptimistically(false)
+        case .nextTrack, .previousTrack:
+            break
+        }
+        pollSoon(initialDelay: .milliseconds(180))
     }
 
     /// Returns true when a configured preferred player handled the start: bring
@@ -386,11 +564,17 @@ final class MediaRemoteService {
         else { return false }
         setPlayingOptimistically(true)
         let scriptName = Self.scriptablePlayers[preferred]
-        let nudge = Self.adapterPaths.map { [$0.script, $0.framework, "send", "0"] }
-        Task.detached(priority: .userInitiated) { [weak self] in
+        let paths = Self.adapterPaths
+        preferredStartRevision &+= 1
+        let revision = preferredStartRevision
+        preferredStartTask = Task.detached(priority: .userInitiated) { [weak self] in
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
             _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            guard !Task.isCancelled else {
+                await self?.finishPreferredStart(revision: revision)
+                return
+            }
             if let scriptName {
                 var error: NSDictionary?
                 NSAppleScript(source: "tell application \"\(scriptName)\" to play")?
@@ -398,17 +582,76 @@ final class MediaRemoteService {
                 if let error {
                     mnotchLog.error("Preferred player script failed: \(error, privacy: .public)")
                 }
-            } else if let nudge {
-                // Give the freshly launched app a moment to register as the
-                // system Now Playing target, then send it a play command.
-                try? await Task.sleep(for: .milliseconds(900))
-                Self.runAdapterSync(nudge)
+            } else if let paths {
+                // MediaRemote's send command has no target bundle ID. Never
+                // broadcast on a timer: wait until the selected player itself
+                // is the observed Now Playing source, then an idempotent Play
+                // is safe. If it never registers, fail closed and merely leave
+                // the requested app open instead of waking Apple Music.
+                await Self.playWhenPreferredTargetIsReady(
+                    preferredBundleID: preferred,
+                    paths: paths
+                )
             }
             // Confirm state only AFTER the play action, so the poll doesn't run
             // (and revert the optimistic flip) before the app has started.
-            await self?.pollSoon()
+            await self?.finishPreferredStart(revision: revision)
         }
         return true
+    }
+
+    private func finishPreferredStart(revision: UInt64) {
+        guard revision == preferredStartRevision else { return }
+        preferredStartTask = nil
+        pollSoon()
+    }
+
+    /// Pure routing rule kept internal for regression tests. Unknown playback
+    /// state is treated as paused only after the source bundle is an exact
+    /// match; a different or missing source must never receive a global Play.
+    nonisolated static func shouldSendPreferredPlay(
+        preferredBundleID: String,
+        observedBundleID: String?,
+        observedPlaying: Bool?
+    ) -> Bool {
+        observedBundleID == preferredBundleID && observedPlaying != true
+    }
+
+    private nonisolated static func playWhenPreferredTargetIsReady(
+        preferredBundleID: String,
+        paths: (script: String, framework: String)
+    ) async {
+        // Three seconds is long enough for a normal app launch/registration but
+        // short enough that a broken player cannot leave the UI in a start state
+        // indefinitely. Each adapter call also owns its existing hard watchdog.
+        for attempt in 0..<12 {
+            guard !Task.isCancelled else { return }
+            let line = await captureFirstLine([
+                paths.script, paths.framework, "get", "--now", "--no-artwork",
+            ])
+            guard !Task.isCancelled else { return }
+
+            if let line, line != "null",
+               let data = line.data(using: .utf8),
+               let payload = try? JSONDecoder().decode(GetPayload.self, from: data) {
+                let observed = payload.parentApplicationBundleIdentifier
+                    ?? payload.bundleIdentifier
+                if observed == preferredBundleID {
+                    if shouldSendPreferredPlay(
+                        preferredBundleID: preferredBundleID,
+                        observedBundleID: observed,
+                        observedPlaying: payload.playing
+                    ) {
+                        runAdapterSync([paths.script, paths.framework, "send", "0"])
+                    }
+                    return
+                }
+            }
+
+            if attempt < 11 {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 
     func seek(to seconds: TimeInterval) {
@@ -469,13 +712,28 @@ final class MediaRemoteService {
     }
 
     /// Quick confirmation poll shortly after a command.
-    private func pollSoon() {
+    private func pollSoon(initialDelay: Duration = .milliseconds(350)) {
+        guard pollTask != nil else { return }
         confirmationTask?.cancel()
+        let generation = runGeneration
         confirmationTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            await self?.requestPoll()
+            // One early read gives responsive shortcut feedback; two spaced
+            // confirmations cover slow players without increasing idle polling
+            // or leaving a stale optimistic state indefinitely.
+            for delay in [initialDelay, .milliseconds(700), .milliseconds(950)] {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                await self?.requestPoll(generation: generation)
+            }
         }
+    }
+
+    private func beginPlaybackIntent(_ desiredPlaying: Bool) {
+        playbackIntent = PlaybackIntent(
+            desiredPlaying: desiredPlaying,
+            sourceBundleID: playback.bundleIdentifier,
+            expiresAt: Date().addingTimeInterval(2.5)
+        )
     }
 
     private func setPlayingOptimistically(_ playing: Bool) {
@@ -502,6 +760,14 @@ final class MediaRemoteService {
         proc.standardError = FileHandle.nullDevice
         do {
             try proc.run()
+            // Reap the command and cap its lifetime. Fire-and-forget Process
+            // objects can accumulate when mediaremoted is unhealthy.
+            let deadline = Date().addingTimeInterval(8)
+            while proc.isRunning, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            if proc.isRunning { proc.terminate() }
+            proc.waitUntilExit()
         } catch {
             mnotchLog.error("Media command failed: \(error)")
         }
@@ -519,6 +785,14 @@ final class MediaRemoteService {
         do {
             try proc.run()
         } catch {
+            return nil
+        }
+        defer {
+            // Covers cancellation/read errors as well as the normal path.
+            if proc.isRunning { proc.terminate() }
+        }
+        if Task.isCancelled {
+            if proc.isRunning { proc.terminate() }
             return nil
         }
         // Watchdog: a wedged adapter (stuck mediaremoted) would otherwise
@@ -539,6 +813,12 @@ final class MediaRemoteService {
         } catch {
             return nil
         }
+        // We need one JSON line only. Close and reap the helper promptly so a
+        // malformed adapter cannot leave Perl children or open pipes behind.
+        try? pipe.fileHandleForReading.close()
+        if proc.isRunning { proc.terminate() }
+        proc.waitUntilExit()
+        guard !Task.isCancelled else { return nil }
         return first
     }
 }

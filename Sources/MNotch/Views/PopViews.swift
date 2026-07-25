@@ -86,9 +86,10 @@ struct BatteryPopView: View {
 
     private var label: String {
         switch kind {
-        case .charging: "Charging"
-        case .low: "Low Battery"
-        case .lowPower(let on): on ? "Low Power On" : "Low Power Off"
+        case .charging: L10n.string("Charging")
+        case .low: L10n.string("Low Battery")
+        case .lowPower(let on): on
+            ? L10n.string("Low Power On") : L10n.string("Low Power Off")
         }
     }
 
@@ -145,7 +146,7 @@ struct FocusPopView: View {
                 }
             }
         } right: {
-            Text(on ? "On" : "Off")
+            Text(on ? L10n.string("On") : L10n.string("Off"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
         }
@@ -218,7 +219,9 @@ struct AgentPopView: View {
                     .lineLimit(1)
             }
         } right: {
-            Text(needsInput ? "Needs input" : "Done")
+            Text(
+                needsInput ? L10n.string("Needs input") : L10n.string("Done")
+            )
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(needsInput ? Color.orange : .green)
         }
@@ -235,7 +238,9 @@ struct AgentConfirmView: View {
             Image(systemName: approved ? "checkmark" : "xmark")
                 .font(.system(size: 12, weight: .bold))
                 .notchBounce()
-            Text(approved ? "Approved" : "Rejected")
+            Text(
+                approved ? L10n.string("Approved") : L10n.string("Rejected")
+            )
                 .font(.system(size: 13, weight: .semibold))
         }
         .foregroundStyle(

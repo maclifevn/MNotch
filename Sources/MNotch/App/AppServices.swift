@@ -20,6 +20,8 @@ final class AppServices {
     let lockScreen = LockScreenWatcher()
     let agents = AgentMonitorService()
     let quota = QuotaService()
+    /// User-driven; inert (no timers) until a session is started from the UI.
+    let pomodoro = PomodoroService()
 
     /// Set by NotchWindowController; opens the Agent tab for a request.
     var expandAgent: (() -> Void)?
@@ -102,7 +104,12 @@ final class AppServices {
             self.showHUD?(.brightness, value, false)
         }
         keys.handler = { [weak self] key, keyDown, isRepeat, modifiers in
-            self?.handleSystemKey(key, keyDown: keyDown, modifiers: modifiers) ?? false
+            self?.handleSystemKey(
+                key,
+                keyDown: keyDown,
+                isRepeat: isRepeat,
+                modifiers: modifiers
+            ) ?? false
         }
         keys.onInterruption = { [weak self] reason in
             mnotchLog.error("event tap interrupted (\(reason.rawValue)); staying fail-open")
@@ -172,10 +179,22 @@ final class AppServices {
         agents.onRequestResolved = { [weak self] in
             self?.collapseIfIdle?()
         }
-        // Claude usage comes solely from the local CLI. Refresh installed hook
-        // scripts and migrate the retired status-line quota wrapper if present.
-        ClaudeHookInstaller.refreshScripts()
-
+        pomodoro.onPhaseEnded = { [weak self] _, next in
+            let settings = SettingsStore.shared
+            let minutes: Double = switch next {
+            case .work: settings.pomodoroWorkMinutes
+            case .shortBreak: settings.pomodoroShortBreakMinutes
+            case .longBreak: settings.pomodoroLongBreakMinutes
+            }
+            self?.showPop?(.pomodoro(
+                title: next.title,
+                symbol: next.symbol,
+                detail: "\(Int(minutes)) min"
+            ))
+            if settings.pomodoroSound {
+                SoundPlayer.play(next == .work ? .chime : .event)
+            }
+        }
         focus.onChange = { [weak self] old, new in
             let settings = SettingsStore.shared
             guard settings.focusEnabled else { return }
@@ -289,6 +308,7 @@ final class AppServices {
     private func handleSystemKey(
         _ key: SystemKey,
         keyDown: Bool,
+        isRepeat: Bool,
         modifiers: NSEvent.ModifierFlags
     ) -> Bool {
         let settings = SettingsStore.shared
@@ -320,6 +340,20 @@ final class AppServices {
                 enqueueSystemKeyAction(key, fine: fine)
             }
             return true
+        case .playPause, .nextTrack, .previousTrack:
+            // Observe media keys but never consume them. macOS/the active
+            // player still performs the command; MNotch only mirrors the
+            // expected state immediately and confirms it through MediaRemote.
+            if keyDown, !isRepeat, settings.mediaEnabled {
+                let command: MediaCommand = switch key {
+                case .playPause: .togglePlayPause
+                case .nextTrack: .nextTrack
+                case .previousTrack: .previousTrack
+                default: .togglePlayPause
+                }
+                media.observeExternalCommand(command)
+            }
+            return false
         }
     }
 
@@ -328,11 +362,11 @@ final class AppServices {
     /// has already been consumed or passed through.
     private func enqueueSystemKeyAction(_ key: SystemKey, fine: Bool) {
         Task { @MainActor [weak self] in
-            self?.performSystemKeyAction(key, fine: fine)
+            await self?.performSystemKeyAction(key, fine: fine)
         }
     }
 
-    private func performSystemKeyAction(_ key: SystemKey, fine: Bool) {
+    private func performSystemKeyAction(_ key: SystemKey, fine: Bool) async {
         let settings = SettingsStore.shared
         switch key {
         case .soundUp, .soundDown:
@@ -351,16 +385,19 @@ final class AppServices {
             }
         case .brightnessUp, .brightnessDown:
             guard settings.displayHUDEnabled, brightness.available else { return }
-            let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
+            let newValue = await brightness.step(up: key == .brightnessUp, fine: fine)
             if allowedNow(.display) {
                 showHUD?(.brightness, newValue, false)
             }
         case .illuminationUp, .illuminationDown:
             guard settings.displayHUDEnabled, backlight.available else { return }
-            let newValue = backlight.step(up: key == .illuminationUp)
+            let newValue = await backlight.step(up: key == .illuminationUp)
             if allowedNow(.display) {
                 showHUD?(.keyboardBacklight, newValue, false)
             }
+        case .playPause, .nextTrack, .previousTrack:
+            // Media keys are observe-only and never enter this action queue.
+            break
         }
     }
 }

@@ -20,6 +20,7 @@ struct WelcomeView: View {
         VStack(spacing: 22) {
             hero
             VStack(alignment: .leading, spacing: 22) {
+                languageSection
                 permissionSection
                 setupSection
             }
@@ -30,6 +31,59 @@ struct WelcomeView: View {
         .padding(.bottom, 26)
         .frame(width: 460)
         .background(background)
+    }
+
+    // MARK: Language
+
+    private var languageSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            SectionLabel("Language")
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.mnBrand)
+                        .frame(width: 30, height: 30)
+                        .background(Color.mnBrand.opacity(0.14), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Application language")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Uses your Mac's system language by default.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Picker("Application language", selection: $settings.appLanguage) {
+                        ForEach(AppLanguage.allCases, id: \.self) { language in
+                            Text(language.displayName).tag(language)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 145)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+
+                if settings.languageRestartRequired {
+                    Divider().padding(.leading, 14)
+                    HStack(spacing: 10) {
+                        Text("Restart MNotch to apply the new language.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Button("Restart MNotch") {
+                            ApplicationRestart.restart()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+            }
+            .cardBackground()
+        }
     }
 
     // MARK: Hero
@@ -228,8 +282,9 @@ private struct SetupToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .medium))
-                Text(subtitle)
+                Text(LocalizedStringKey(title))
+                    .font(.system(size: 14, weight: .medium))
+                Text(LocalizedStringKey(subtitle))
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -250,7 +305,7 @@ private struct SectionLabel: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {
-        Text(text.uppercased())
+        Text(L10n.string(text).uppercased())
             .font(.system(size: 11, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(.secondary)
@@ -339,7 +394,7 @@ final class WelcomeWindowController {
     func show() {
         if window == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 600),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 680),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -349,12 +404,13 @@ final class WelcomeWindowController {
             window.isMovableByWindowBackground = true
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(
-                rootView: WelcomeView(onFinish: { [weak self] in self?.window?.close() })
+                rootView: WelcomeView(onFinish: { [weak self] in
+                    SettingsStore.shared.hasSeenWelcome = true
+                    self?.window?.close()
+                })
             )
             window.center()
             self.window = window
-            // Mark seen on first show so it never reappears, however it's closed.
-            SettingsStore.shared.hasSeenWelcome = true
         }
         // orderFrontRegardless so the accessory app can surface it at launch even
         // when another app is frontmost.

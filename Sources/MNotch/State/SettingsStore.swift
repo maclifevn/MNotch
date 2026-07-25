@@ -1,6 +1,14 @@
 import Observation
 import ServiceManagement
 
+enum SimulatedNotchPolicy {
+    /// A user may force simulation on non-notched displays. When no physical
+    /// notch is available, simulation is mandatory so the app stays reachable.
+    static func isEnabled(force: Bool, hasPhysicalNotch: Bool) -> Bool {
+        force || !hasPhysicalNotch
+    }
+}
+
 /// UserDefaults-backed settings, one property per Alcove-style toggle.
 /// Every stored property persists via its didSet; defaults mirror Alcove's.
 @MainActor
@@ -22,6 +30,19 @@ final class SettingsStore {
     // MARK: General
 
     var launchAtLogin: Bool { didSet { applyLaunchAtLogin() } }
+    var appLanguage: AppLanguage {
+        didSet {
+            save(AppLanguage.preferenceKey, appLanguage.rawValue)
+            guard !loading else { return }
+            AppLanguage.applyOverride(appLanguage)
+            languageRestartRequired = AppLanguageRestartPolicy.requiresRestart(
+                selected: appLanguage,
+                launched: languageAtLaunch
+            )
+        }
+    }
+    private(set) var languageRestartRequired = false
+    @ObservationIgnored private var languageAtLaunch: AppLanguage = .system
     /// Set once the first-launch Welcome window has been dismissed.
     var hasSeenWelcome: Bool { didSet { save("general.seenWelcome", hasSeenWelcome) } }
     var hideInFullscreen: Bool { didSet { save("general.hideFullscreen", hideInFullscreen) } }
@@ -108,6 +129,16 @@ final class SettingsStore {
     var focusAllowDisplay: Bool { didSet { save("focus.allowDisplay", focusAllowDisplay) } }
     var focusAllowSound: Bool { didSet { save("focus.allowSound", focusAllowSound) } }
 
+    // MARK: Pomodoro
+
+    var pomodoroEnabled: Bool { didSet { save("pomo.enabled", pomodoroEnabled) } }
+    var pomodoroWorkMinutes: Double { didSet { save("pomo.work", pomodoroWorkMinutes) } }
+    var pomodoroShortBreakMinutes: Double { didSet { save("pomo.shortBreak", pomodoroShortBreakMinutes) } }
+    var pomodoroLongBreakMinutes: Double { didSet { save("pomo.longBreak", pomodoroLongBreakMinutes) } }
+    var pomodoroCyclesPerLongBreak: Double { didSet { save("pomo.cycles", pomodoroCyclesPerLongBreak) } }
+    var pomodoroSound: Bool { didSet { save("pomo.sound", pomodoroSound) } }
+    var pomodoroAutoContinue: Bool { didSet { save("pomo.autoContinue", pomodoroAutoContinue) } }
+
     // MARK: Display HUD (brightness)
 
     var displayHUDEnabled: Bool { didSet { save("display.enabled", displayHUDEnabled) } }
@@ -166,6 +197,9 @@ final class SettingsStore {
     // MARK: Shelf & Lock Screen
 
     var shelfEnabled: Bool { didSet { save("shelf.enabled", shelfEnabled) } }
+    var shelfClearAfterDrag: Bool {
+        didSet { save("shelf.clearAfterDrag", shelfClearAfterDrag) }
+    }
 
     var lockSoundOnLock: Bool { didSet { save("lock.soundLock", lockSoundOnLock) } }
     var lockSoundOnUnlock: Bool { didSet { save("lock.soundUnlock", lockSoundOnUnlock) } }
@@ -219,14 +253,21 @@ final class SettingsStore {
         }
 
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        let initialLanguage = AppLanguage.resolvedPreference(
+            from: d.string(forKey: AppLanguage.preferenceKey)
+        )
+        appLanguage = initialLanguage
+        languageAtLaunch = initialLanguage
         hasSeenWelcome = flag("general.seenWelcome", false)
         hideInFullscreen = flag("general.hideFullscreen", true)
         hideInMissionControl = flag("general.hideMissionControl", true)
         hideWhileGaming = flag("general.hideGaming", false)
         hideFromScreenCapture = flag("general.hideCapture", false)
-        // Default ON so the notch shows out of the box on every Mac (incl. mini/
-        // Studio/external-only), not just notched MacBooks.
-        forceSimulatedNotch = flag("general.forceNotch", true, legacy: "display.fakeNotch")
+        // This stores only the user's override. The effective state also
+        // includes the automatic no-physical-notch fallback; keeping those
+        // separate lets Settings follow display changes without accidentally
+        // persisting a temporary clamshell state.
+        forceSimulatedNotch = flag("general.forceNotch", false, legacy: "display.fakeNotch")
         hideMenuBarIcon = flag("general.hideMenuBar", false)
         displayTarget = str("general.displayTarget", "all")
         idleActivity = opt("general.idleActivity", IdleActivity.playing)
@@ -258,7 +299,10 @@ final class SettingsStore {
         connectivityLowThreshold = num("bt.threshold", 20)
         connectivitySoundOnLow = flag("bt.sound", false)
 
-        focusEnabled = flag("focus.enabled", true)
+        // Focus reads a protected on-disk database every few seconds and is
+        // unusable without Full Disk Access. Keep this optional integration
+        // opt-in; an absent preference should not create background work.
+        focusEnabled = flag("focus.enabled", false)
         focusDuration = num("focus.duration", 5)
         focusSoundOnSleep = flag("focus.sleepSound", false)
         focusReplaceWaveform = flag("focus.replaceWaveform", false)
@@ -267,6 +311,14 @@ final class SettingsStore {
         focusAllowConnectivity = flag("focus.allowBt", true)
         focusAllowDisplay = flag("focus.allowDisplay", true)
         focusAllowSound = flag("focus.allowSound", true)
+
+        pomodoroEnabled = flag("pomo.enabled", true)
+        pomodoroWorkMinutes = num("pomo.work", 25)
+        pomodoroShortBreakMinutes = num("pomo.shortBreak", 5)
+        pomodoroLongBreakMinutes = num("pomo.longBreak", 15)
+        pomodoroCyclesPerLongBreak = num("pomo.cycles", 4)
+        pomodoroSound = flag("pomo.sound", true)
+        pomodoroAutoContinue = flag("pomo.autoContinue", true)
 
         displayHUDEnabled = flag("display.enabled", true, legacy: "feature.hud")
         displayHUDDuration = num("display.duration", 1.5)
@@ -313,10 +365,13 @@ final class SettingsStore {
         calendarUses = (d.dictionary(forKey: "cal.uses") as? [String: String]) ?? [:]
 
         shelfEnabled = flag("shelf.enabled", true, legacy: "feature.shelf")
+        shelfClearAfterDrag = flag("shelf.clearAfterDrag", false)
         lockSoundOnLock = flag("lock.soundLock", false)
         lockSoundOnUnlock = flag("lock.soundUnlock", false)
         lockKeepAwake = num("lock.keepAwake", 0)
-        lockEnabled = flag("lock.enabled", true)
+        // Lock Screen relies on private WindowServer APIs. Keep the optional,
+        // higher-risk feature opt-in; existing explicit preferences survive.
+        lockEnabled = flag("lock.enabled", false)
         lockShowOnScreenSaver = flag("lock.screensaver", false)
         lockWidgetBattery = flag("lock.widget.battery", true)
         lockWidgetConnectivity = flag("lock.widget.connectivity", true)
@@ -358,6 +413,17 @@ final class SettingsStore {
     }
 
     @ObservationIgnored private var applyingLoginItem = false
+
+    /// Login-item state can be changed from System Settings while MNotch is
+    /// running. Adopt the OS value without feeding it back into register()/
+    /// unregister(), so the toggle remains an honest status indicator.
+    func refreshExternalState() {
+        let enabled = SMAppService.mainApp.status == .enabled
+        guard launchAtLogin != enabled else { return }
+        applyingLoginItem = true
+        launchAtLogin = enabled
+        applyingLoginItem = false
+    }
 
     private func applyLaunchAtLogin() {
         guard !loading, !applyingLoginItem else { return }

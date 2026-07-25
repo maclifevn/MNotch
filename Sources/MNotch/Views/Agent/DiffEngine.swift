@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Typed view of a tool's `tool_input`, parsed once at request ingest so the
 /// UI never touches raw JSON.
-enum RequestDetail: Equatable {
+enum RequestDetail: Equatable, Sendable {
     case edit(path: String, old: String, new: String)
     case multiEdit(path: String, edits: [EditPair])
     case write(path: String, content: String)
@@ -12,37 +12,47 @@ enum RequestDetail: Equatable {
     case generic
 }
 
-struct EditPair: Equatable {
+struct EditPair: Equatable, Sendable {
     let old: String
     let new: String
 }
 
 // MARK: - Line diff
 
-enum DiffKind: Equatable { case equal, remove, add }
+enum DiffKind: Equatable, Sendable { case equal, remove, add }
 
-struct DiffRow: Identifiable {
-    let id = UUID()
+struct DiffRow: Identifiable, Sendable {
+    let id: Int
     let kind: DiffKind
     let text: String
     let oldNo: Int?
     let newNo: Int?
 }
 
+struct DiffResult: Sendable {
+    let rows: [DiffRow]
+    let adds: Int
+    let dels: Int
+}
+
 enum DiffEngine {
     /// Line-level LCS diff with old/new line numbers. Guards against a
     /// pathological n·m blow-up by falling back to a plain remove-all/add-all
     /// block diff.
-    static func rows(old: String, new: String) -> (rows: [DiffRow], adds: Int, dels: Int) {
+    nonisolated static func rows(old: String, new: String) -> DiffResult {
         let a = old.components(separatedBy: "\n")
         let b = new.components(separatedBy: "\n")
         let n = a.count, m = b.count
 
         if n * m > 40_000 {
             var r: [DiffRow] = []
-            for (i, l) in a.enumerated() { r.append(.init(kind: .remove, text: l, oldNo: i + 1, newNo: nil)) }
-            for (j, l) in b.enumerated() { r.append(.init(kind: .add, text: l, oldNo: nil, newNo: j + 1)) }
-            return (r, b.count, a.count)
+            for (i, l) in a.enumerated() {
+                r.append(.init(id: r.count, kind: .remove, text: l, oldNo: i + 1, newNo: nil))
+            }
+            for (j, l) in b.enumerated() {
+                r.append(.init(id: r.count, kind: .add, text: l, oldNo: nil, newNo: j + 1))
+            }
+            return DiffResult(rows: r, adds: b.count, dels: a.count)
         }
 
         var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
@@ -58,9 +68,9 @@ enum DiffEngine {
         var i = 0, j = 0, oNo = 1, nNo = 1, adds = 0, dels = 0
         func emit(_ k: DiffKind, _ t: String) {
             switch k {
-            case .equal:  r.append(.init(kind: .equal, text: t, oldNo: oNo, newNo: nNo)); oNo += 1; nNo += 1
-            case .remove: r.append(.init(kind: .remove, text: t, oldNo: oNo, newNo: nil)); oNo += 1; dels += 1
-            case .add:    r.append(.init(kind: .add, text: t, oldNo: nil, newNo: nNo)); nNo += 1; adds += 1
+            case .equal:  r.append(.init(id: r.count, kind: .equal, text: t, oldNo: oNo, newNo: nNo)); oNo += 1; nNo += 1
+            case .remove: r.append(.init(id: r.count, kind: .remove, text: t, oldNo: oNo, newNo: nil)); oNo += 1; dels += 1
+            case .add:    r.append(.init(id: r.count, kind: .add, text: t, oldNo: nil, newNo: nNo)); nNo += 1; adds += 1
             }
         }
         while i < n && j < m {
@@ -70,7 +80,7 @@ enum DiffEngine {
         }
         while i < n { emit(.remove, a[i]); i += 1 }
         while j < m { emit(.add, b[j]); j += 1 }
-        return (r, adds, dels)
+        return DiffResult(rows: r, adds: adds, dels: dels)
     }
 }
 

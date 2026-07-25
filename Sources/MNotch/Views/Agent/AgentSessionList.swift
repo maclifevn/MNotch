@@ -22,7 +22,10 @@ struct AgentSessionList: View {
                         SessionCard(session: session, agents: agents, now: context.date, featured: false)
                     }
                     if sessions.count > 4 {
-                        Text("+\(sessions.count - 4) more")
+                        Text(String(
+                            format: L10n.string("+%d more"),
+                            sessions.count - 4
+                        ))
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.3))
                             .frame(maxWidth: .infinity)
@@ -139,7 +142,7 @@ private struct SessionCard: View {
     }
 
     private var title: String {
-        session.folderName.isEmpty ? "Agent" : session.folderName
+        session.folderName.isEmpty ? L10n.string("Agent") : session.folderName
     }
 
     private var kindColor: Color {
@@ -170,9 +173,9 @@ private struct SessionCard: View {
 
     private var statusText: String {
         switch session.status {
-        case .working: "Working…"
-        case .waiting: "Waiting for you"
-        case .done: "Done"
+        case .working: L10n.string("Working…")
+        case .waiting: L10n.string("Waiting for you")
+        case .done: L10n.string("Done")
         }
     }
 

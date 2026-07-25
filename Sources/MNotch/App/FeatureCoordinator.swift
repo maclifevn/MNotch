@@ -81,7 +81,9 @@ struct FeatureDemand: Equatable {
         media = flags.mediaEnabled || (lock && flags.lockNowPlaying)
         audio = flags.soundHUDEnabled || media || (lock && flags.lockShowVolume)
         displayControls = flags.displayHUDEnabled
-        keys = flags.soundHUDEnabled || flags.displayHUDEnabled
+        // When Accessibility is already granted, the same fail-open event tap
+        // can observe (not swallow) media keys and keep Now Playing in sync.
+        keys = media || flags.soundHUDEnabled || flags.displayHUDEnabled
         power = flags.batteryEnabled || (lock && flags.lockWidgetBattery)
         bluetooth = flags.connectivityEnabled
             || (lock && flags.lockWidgetConnectivity)
@@ -148,6 +150,7 @@ private struct CalendarRuntimeConfiguration: Equatable {
     let beforeStart: Bool
     let whenStarting: Bool
     let hourlyChime: Bool
+    let monthView: Bool
     let timeBefore: Double
     let disabledCalendars: [String]
     let uses: [String: String]
@@ -158,6 +161,7 @@ private struct CalendarRuntimeConfiguration: Equatable {
         beforeStart = settings.calendarPeekBeforeStart
         whenStarting = settings.calendarPeekWhenStarting
         hourlyChime = settings.calendarHourlyChime
+        monthView = settings.calendarMonthView
         timeBefore = settings.calendarTimeBefore
         disabledCalendars = settings.calendarDisabledCalendars
         uses = settings.calendarUses
@@ -254,6 +258,7 @@ final class FeatureCoordinator {
     /// first start deliberately degraded instead of requiring an app relaunch.
     func applicationDidBecomeActive() {
         guard running else { return }
+        SettingsStore.shared.refreshExternalState()
         services.accessibility.refresh()
         services.calendar.permissionMayHaveChanged()
         if services.accessibility.isGranted,
@@ -292,8 +297,7 @@ final class FeatureCoordinator {
 
         transition(old?.media, demand.media, start: services.media.start, stop: services.media.stop)
         transition(old?.audio, demand.audio, start: services.audio.start, stop: services.audio.stop)
-        if demand.keys,
-           !services.accessibility.isGranted,
+        if services.accessibility.isRequiredForEnabledFeatures,
            !accessibilityPromptShown {
             accessibilityPromptShown = true
             services.showPop?(.accessibility)
@@ -329,6 +333,9 @@ final class FeatureCoordinator {
 
         if old?.agents != demand.agents {
             if demand.agents {
+                // Avoid touching agent config/scripts on normal launches when
+                // the optional integration is disabled.
+                ClaudeHookInstaller.refreshScripts()
                 services.agents.start()
             } else {
                 services.agents.stop()

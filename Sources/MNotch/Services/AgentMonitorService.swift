@@ -41,8 +41,6 @@ struct TerminalLocator: Equatable {
 struct PendingRequest: Equatable {
     let id: Int                // AgentServer request id
     let toolName: String
-    /// Extracted plan / summary Markdown to preview (may be empty).
-    let markdown: String
     let toolSummary: String
     /// Typed tool_input for rich per-tool rendering.
     let detail: RequestDetail
@@ -133,12 +131,12 @@ final class AgentMonitorService {
             if let previousID = session.request?.id, previousID != requestID {
                 server.drop(previousID)
             }
+            let toolInput = Self.toolInputObject(event)
             let request = PendingRequest(
                 id: requestID,
                 toolName: event.toolName ?? "tool",
-                markdown: Self.extractMarkdown(event),
-                toolSummary: Self.summarize(event),
-                detail: Self.detail(event)
+                toolSummary: Self.summarize(event, object: toolInput),
+                detail: Self.detail(event, object: toolInput)
             )
             session.status = .waiting
             session.request = request
@@ -320,12 +318,19 @@ final class AgentMonitorService {
     }
 
     private func runShell(_ launch: String, _ args: [String]) {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: launch)
-        proc.arguments = args
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        try? proc.run()
+        Task.detached(priority: .userInitiated) {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: launch)
+            proc.arguments = args
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+            } catch {
+                mnotchLog.error("Agent jump command failed: \(error)")
+            }
+        }
     }
 
     private func runAppleScript(_ source: String) {
@@ -361,10 +366,14 @@ final class AgentMonitorService {
 
     /// Typed per-tool detail from tool_input; degrades to `.generic`.
     static func detail(_ event: AgentEvent) -> RequestDetail {
-        guard let json = event.toolInputJSON,
-              let data = json.data(using: .utf8),
-              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .generic }
+        detail(event, object: toolInputObject(event))
+    }
+
+    private static func detail(
+        _ event: AgentEvent,
+        object o: [String: Any]?
+    ) -> RequestDetail {
+        guard let o else { return .generic }
         func s(_ k: String) -> String { (o[k] as? String) ?? "" }
         switch event.toolName {
         case "Edit":
@@ -392,10 +401,14 @@ final class AgentMonitorService {
     /// tool name, so this returns the *arguments* — never the bare tool name
     /// (which would just duplicate the header, as an unknown tool used to).
     static func summarize(_ event: AgentEvent) -> String {
-        guard let json = event.toolInputJSON,
-              let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return "" }
+        summarize(event, object: toolInputObject(event))
+    }
+
+    private static func summarize(
+        _ event: AgentEvent,
+        object obj: [String: Any]?
+    ) -> String {
+        guard let obj else { return "" }
 
         if let command = obj["command"] as? String { return command }
         if let path = obj["file_path"] as? String { return path }
@@ -416,14 +429,10 @@ final class AgentMonitorService {
         }
     }
 
-    /// Plan preview: ExitPlanMode carries the plan in tool_input.plan;
-    /// otherwise fall back to the last assistant message.
-    private static func extractMarkdown(_ event: AgentEvent) -> String {
-        if let json = event.toolInputJSON,
-           let data = json.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let plan = obj["plan"] as? String, !plan.isEmpty { return plan }
-        }
-        return event.lastMessage ?? ""
+    private static func toolInputObject(_ event: AgentEvent) -> [String: Any]? {
+        guard let json = event.toolInputJSON,
+              let data = json.data(using: .utf8)
+        else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }

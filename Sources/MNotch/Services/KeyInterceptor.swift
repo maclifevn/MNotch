@@ -8,6 +8,9 @@ enum SystemKey: Int {
     case brightnessUp = 2
     case brightnessDown = 3
     case mute = 7
+    case playPause = 16
+    case nextTrack = 17
+    case previousTrack = 18
     case illuminationUp = 21
     case illuminationDown = 22
 }

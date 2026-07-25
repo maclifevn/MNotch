@@ -4,24 +4,25 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case battery, connectivity, focus, hud
-    case nowPlaying, calendar, fileTray, lockScreen, agent
+    case nowPlaying, calendar, pomodoro, fileTray, lockScreen, agent
     case about
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .general: "General"
-        case .battery: "Battery"
-        case .connectivity: "Connectivity"
-        case .focus: "Focus"
-        case .hud: "Display & Sound"
-        case .nowPlaying: "Now Playing"
-        case .calendar: "Calendar"
-        case .fileTray: "File Tray"
-        case .lockScreen: "Lock Screen"
-        case .agent: "Agents"
-        case .about: "About"
+        case .general: L10n.string("General")
+        case .battery: L10n.string("Battery")
+        case .connectivity: L10n.string("Connectivity")
+        case .focus: L10n.string("Focus")
+        case .hud: L10n.string("Display & Sound")
+        case .nowPlaying: L10n.string("Now Playing")
+        case .calendar: L10n.string("Calendar")
+        case .pomodoro: L10n.string("Pomodoro")
+        case .fileTray: L10n.string("File Tray")
+        case .lockScreen: L10n.string("Lock Screen")
+        case .agent: L10n.string("Agents")
+        case .about: L10n.string("About")
         }
     }
 
@@ -34,6 +35,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .hud: "slider.horizontal.3"
         case .nowPlaying: "play.fill"
         case .calendar: "calendar"
+        case .pomodoro: "timer"
         case .fileTray: "tray.fill"
         case .lockScreen: "lock.fill"
         case .agent: "terminal.fill"
@@ -50,6 +52,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .hud: .purple
         case .nowPlaying: .red
         case .calendar: .red
+        case .pomodoro: .orange
         case .fileTray: Color(white: 0.45)
         case .lockScreen: .black
         case .agent: .teal
@@ -74,6 +77,7 @@ struct SettingsView: View {
                 Section("Live Activities") {
                     sidebarRow(.nowPlaying)
                     sidebarRow(.calendar)
+                    sidebarRow(.pomodoro)
                     sidebarRow(.fileTray)
                     sidebarRow(.lockScreen)
                 }
@@ -114,6 +118,7 @@ struct SettingsView: View {
         case .hud: HUDPane()
         case .nowPlaying: NowPlayingPane()
         case .calendar: CalendarPane()
+        case .pomodoro: PomodoroPane()
         case .fileTray: FileTrayPane()
         case .lockScreen: LockScreenPane()
         case .agent: AgentPane()
@@ -136,7 +141,7 @@ final class SettingsWindowController {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "MNotch Settings"
+            window.title = L10n.string("MNotch Settings")
             window.titlebarAppearsTransparent = true
             window.contentView = NSHostingView(rootView: SettingsView())
             window.isReleasedWhenClosed = false

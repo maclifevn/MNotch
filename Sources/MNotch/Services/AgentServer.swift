@@ -40,7 +40,7 @@ enum AgentHookResponse {
 }
 
 /// One event received from an agent hook relay.
-struct AgentEvent: Decodable {
+struct AgentEvent: Decodable, Sendable {
     /// hook event name: PreToolUse, PermissionRequest, Notification, Stop,
     /// SessionStart, SessionEnd — or "status" from the generic notify helper.
     let event: String
@@ -161,6 +161,10 @@ final class AgentServer {
 
     private(set) var port: UInt16 = 0
     private var listener: NWListener?
+    private let networkQueue = DispatchQueue(
+        label: "com.mnotch.agent-server",
+        qos: .userInitiated
+    )
     private var token = ""
     private struct PendingConnection {
         let connection: NWConnection
@@ -202,7 +206,7 @@ final class AgentServer {
             listener.newConnectionHandler = { [weak self] connection in
                 Task { @MainActor in self?.accept(connection) }
             }
-            listener.start(queue: .main)
+            listener.start(queue: networkQueue)
             self.listener = listener
         } catch {
             mnotchLog.error("AgentServer failed to listen: \(error)")
@@ -243,7 +247,9 @@ final class AgentServer {
                 break
             }
         }
-        connection.start(queue: .main)
+        // Decode potentially large tool payloads away from animations and UI
+        // input. State mutation still hops to MainActor in the callbacks.
+        connection.start(queue: networkQueue)
         receiveLine(on: connection, buffer: Data())
     }
 

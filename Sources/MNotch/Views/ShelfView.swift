@@ -2,14 +2,59 @@
 // where returning a thumbnail across the actor boundary is a hard error.
 @preconcurrency import QuickLookThumbnailing
 @preconcurrency import QuickLookUI
+import AppKit
 import SwiftUI
+
+/// Resolves Finder-style drag semantics independently of the UI framework:
+/// dragging a selected item carries the whole selection; dragging an item that
+/// is not selected carries only that item. Preserve tray order for predictable
+/// file ordering in Finder, browsers and upload targets.
+enum ShelfDragSelection {
+    static func urls(
+        dragged: URL,
+        selection: Set<URL>,
+        available: [URL]
+    ) -> [URL] {
+        guard selection.contains(dragged) else { return [dragged] }
+        let selected = available.filter(selection.contains)
+        return selected.isEmpty ? [dragged] : selected
+    }
+}
+
+/// Process-local guard distinguishing a drag emitted by File Tray from an
+/// external file drag entering MNotch. AppKit's destination callbacks do not
+/// otherwise tell the shelf that the URLs originated from itself.
+@MainActor
+enum ShelfOutgoingDragState {
+    private(set) static var isActive = false
+
+    static func begin() { isActive = true }
+    static func end() { isActive = false }
+}
+
+enum ShelfDropPolicy {
+    static func accepts(featureEnabled: Bool, outgoingShelfDrag: Bool) -> Bool {
+        featureEnabled && !outgoingShelfDrag
+    }
+}
+
+enum ShelfDragCompletionPolicy {
+    static func shouldClear(settingEnabled: Bool, operationSucceeded: Bool) -> Bool {
+        settingEnabled && operationSucceeded
+    }
+}
 
 @MainActor
 private final class ShelfThumbnailCache {
     static let shared = ShelfThumbnailCache()
 
+    private struct PendingRequest {
+        let id: UUID
+        let task: Task<NSImage?, Never>
+    }
+
     private let cache = NSCache<NSURL, NSImage>()
-    private var requests: [URL: Task<NSImage?, Never>] = [:]
+    private var requests: [URL: PendingRequest] = [:]
 
     private init() {
         cache.countLimit = 80
@@ -21,14 +66,15 @@ private final class ShelfThumbnailCache {
     /// file would render the trashed file's stale preview.
     func invalidate(_ url: URL) {
         cache.removeObject(forKey: url as NSURL)
-        requests[url]?.cancel()
+        requests[url]?.task.cancel()
         requests[url] = nil
     }
 
     func image(for url: URL) async -> NSImage? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
-        if let request = requests[url] { return await request.value }
+        if let request = requests[url] { return await request.task.value }
 
+        let id = UUID()
         let request = Task { @MainActor in
             let request = QLThumbnailGenerator.Request(
                 fileAt: url,
@@ -39,8 +85,11 @@ private final class ShelfThumbnailCache {
             return try? await QLThumbnailGenerator.shared
                 .generateBestRepresentation(for: request).nsImage
         }
-        requests[url] = request
+        requests[url] = PendingRequest(id: id, task: request)
         let image = await request.value
+        // invalidate() or a new request for the same recycled path won the
+        // race. The old thumbnail must not clear/cache over that generation.
+        guard requests[url]?.id == id, !request.isCancelled else { return nil }
         requests[url] = nil
         if let image {
             cache.setObject(image, forKey: url as NSURL, cost: 104 * 104 * 4)
@@ -97,10 +146,9 @@ private final class ShelfQuickLookController: NSObject, @preconcurrency QLPrevie
 struct ShelfView: View {
     let viewModel: NotchViewModel
     let shelf = ShelfStore.shared
-    @State private var selection: Set<URL> = []
 
     private var actionItems: [URL] {
-        selection.isEmpty ? shelf.items : shelf.items.filter(selection.contains)
+        shelf.selection.isEmpty ? shelf.items : shelf.selectedItems
     }
 
     var body: some View {
@@ -113,16 +161,23 @@ struct ShelfView: View {
                         ForEach(shelf.items, id: \.self) { url in
                             ShelfItemView(
                                 url: url,
-                                selected: selection.contains(url),
-                                onSelect: { toggleSelection(url) },
+                                selected: shelf.selection.contains(url),
+                                onSelect: { shelf.toggleSelection(url) },
                                 onPreview: { preview(url) },
                                 onOpen: { NSWorkspace.shared.open(url) },
                                 onReveal: {
                                     NSWorkspace.shared.activateFileViewerSelecting([url])
                                 },
                                 onAirDrop: { shelf.airDrop([url]) },
+                                dragURLs: ShelfDragSelection.urls(
+                                    dragged: url,
+                                    selection: shelf.selection,
+                                    available: shelf.items
+                                ),
+                                onDragBegan: {
+                                    shelf.selectForDrag(url)
+                                },
                                 onRemove: {
-                                    selection.remove(url)
                                     shelf.remove(url)
                                 }
                             )
@@ -131,7 +186,7 @@ struct ShelfView: View {
                     .padding(.horizontal, 4)
                 }
                 HStack {
-                    if !selection.isEmpty {
+                    if !shelf.selection.isEmpty {
                         Button {
                             if let first = actionItems.first { preview(first) }
                         } label: {
@@ -145,7 +200,8 @@ struct ShelfView: View {
                         shelf.airDrop(actionItems)
                     } label: {
                         Label(
-                            selection.isEmpty ? "AirDrop" : "AirDrop \(selection.count)",
+                            shelf.selection.isEmpty
+                                ? "AirDrop" : "AirDrop \(shelf.selection.count)",
                             systemImage: "airplane.circle.fill"
                         )
                             .font(.system(size: 11, weight: .medium))
@@ -184,7 +240,6 @@ struct ShelfView: View {
             }
         }
         .onChange(of: shelf.items) { old, items in
-            selection.formIntersection(items)
             for removed in Set(old).subtracting(items) {
                 ShelfThumbnailCache.shared.invalidate(removed)
             }
@@ -192,16 +247,8 @@ struct ShelfView: View {
         }
     }
 
-    private func toggleSelection(_ url: URL) {
-        if selection.contains(url) {
-            selection.remove(url)
-        } else {
-            selection.insert(url)
-        }
-    }
-
     private func preview(_ initial: URL) {
-        let urls = selection.contains(initial) ? actionItems : shelf.items
+        let urls = shelf.selection.contains(initial) ? actionItems : shelf.items
         ShelfQuickLookController.shared.show(urls: urls, initial: initial)
     }
 
@@ -227,6 +274,8 @@ struct ShelfItemView: View {
     let onOpen: () -> Void
     let onReveal: () -> Void
     let onAirDrop: () -> Void
+    let dragURLs: [URL]
+    let onDragBegan: () -> Void
     let onRemove: () -> Void
 
     @State private var thumbnail: NSImage?
@@ -258,21 +307,28 @@ struct ShelfItemView: View {
                         lineWidth: selected ? 2 : 1
                     )
             }
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .topLeading) {
                 if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white, Color.accentColor)
-                        .offset(x: 4, y: -4)
-                } else if hovering {
-                    Button(action: onRemove) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white, .black.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .offset(x: 4, y: -4)
+                        .padding(3)
+                        .allowsHitTesting(false)
                 }
+            }
+            // SwiftUI's onDrag creates exactly one NSItemProvider for the tile,
+            // even when several tray items are selected. Back this tile with a
+            // native drag source so the session publishes one pasteboard item
+            // per selected URL — required by Finder and browser upload targets.
+            .overlay {
+                ShelfFileDragSource(
+                    urls: dragURLs,
+                    previewURL: url,
+                    onSingleClick: onSelect,
+                    onDoubleClick: onOpen,
+                    onDragBegan: onDragBegan,
+                    onHoverChanged: { hovering = $0 }
+                )
             }
 
             Text(url.lastPathComponent)
@@ -280,12 +336,29 @@ struct ShelfItemView: View {
                 .foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1)
                 .frame(width: 56)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2, perform: onOpen)
+                .onTapGesture(count: 1, perform: onSelect)
         }
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2, perform: onOpen)
-        .onTapGesture(count: 1, perform: onSelect)
-        .onDrag {
-            NSItemProvider(object: url as NSURL)
+        .overlay(alignment: .topTrailing) {
+            if hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.82), in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove from File Tray")
+                .accessibilityLabel(String(
+                    format: L10n.string("Remove %@"),
+                    url.lastPathComponent
+                ))
+                .padding(.top, 1)
+                .padding(.trailing, 2)
+            }
         }
         .contextMenu {
             Button("Quick Look", systemImage: "eye", action: onPreview)
@@ -296,10 +369,182 @@ struct ShelfItemView: View {
             Button("Remove", systemImage: "trash", role: .destructive, action: onRemove)
         }
         .accessibilityLabel(url.lastPathComponent)
-        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityValue(
+            selected ? L10n.string("Selected") : L10n.string("Not selected")
+        )
         .accessibilityAction(named: "Quick Look", onPreview)
         .task(id: url) {
             thumbnail = await ShelfThumbnailCache.shared.image(for: url)
+        }
+    }
+}
+
+/// NSViewRepresentable bridge for a real multi-item AppKit drag session.
+/// NSURL is an NSPasteboardWriting file URL, so every selected file becomes a
+/// distinct pasteboard item rather than one opaque aggregate provider.
+private struct ShelfFileDragSource: NSViewRepresentable {
+    let urls: [URL]
+    let previewURL: URL
+    let onSingleClick: () -> Void
+    let onDoubleClick: () -> Void
+    let onDragBegan: () -> Void
+    let onHoverChanged: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ShelfFileDragSourceView {
+        ShelfFileDragSourceView()
+    }
+
+    func updateNSView(_ view: ShelfFileDragSourceView, context: Context) {
+        view.urls = urls
+        view.previewURL = previewURL
+        view.onSingleClick = onSingleClick
+        view.onDoubleClick = onDoubleClick
+        view.onDragBegan = onDragBegan
+        view.onHoverChanged = onHoverChanged
+    }
+}
+
+@MainActor
+private final class ShelfFileDragSourceView: NSView, NSDraggingSource {
+    var urls: [URL] = []
+    var previewURL: URL?
+    var onSingleClick: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
+    var onDragBegan: (() -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var mouseDownPoint: CGPoint?
+    private var dragging = false
+    private var activeDragURLs: [URL] = []
+    private var trackingAreaRef: NSTrackingArea?
+    private weak var activePanel: NotchPanel?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setAccessibilityElement(false)
+    }
+
+    /// Own only the primary-button gesture. Let SwiftUI underneath continue to
+    /// receive right-click context menus and scroll-wheel events while the
+    /// pointer happens to be over a thumbnail.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        switch NSApp.currentEvent?.type {
+        case .leftMouseDown, .leftMouseDragged, .leftMouseUp, nil:
+            return self
+        default:
+            return nil
+        }
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaRef { removeTrackingArea(trackingAreaRef) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        dragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !dragging, let origin = mouseDownPoint else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - origin.x, point.y - origin.y) >= 3 else { return }
+
+        let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existing.isEmpty else { return }
+        dragging = true
+        activeDragURLs = existing
+        onDragBegan?()
+        ShelfOutgoingDragState.begin()
+
+        let draggingItems = existing.map { url -> NSDraggingItem in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let icon = (NSWorkspace.shared.icon(forFile: url.path).copy() as? NSImage)
+                ?? NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = CGSize(width: 48, height: 48)
+            item.setDraggingFrame(
+                CGRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48),
+                contents: icon
+            )
+            return item
+        }
+        let sourcePanel = window as? NotchPanel
+        activePanel = sourcePanel
+        let session = beginDraggingSession(
+            with: draggingItems,
+            event: event,
+            source: self
+        )
+        // The fixed panel is 700×448 even though most of it is transparent. If
+        // it remains an active destination, it sits above Finder/browser drop
+        // targets and receives its own URLs back. Let the WindowServer route
+        // the native drag through the panel until this session ends.
+        sourcePanel?.setOutgoingDragActive(true)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+        session.draggingFormation = existing.count > 1 ? .pile : .none
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            mouseDownPoint = nil
+            dragging = false
+        }
+        guard !dragging else { return }
+        if event.clickCount >= 2 {
+            onDoubleClick?()
+        } else {
+            onSingleClick?()
+        }
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        .copy
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        let completedURLs = activeDragURLs
+        let shouldClear = ShelfDragCompletionPolicy.shouldClear(
+            settingEnabled: SettingsStore.shared.shelfClearAfterDrag,
+            operationSucceeded: operation != []
+        )
+        ShelfOutgoingDragState.end()
+        activePanel?.setOutgoingDragActive(false)
+        activePanel = nil
+        activeDragURLs = []
+        mouseDownPoint = nil
+        dragging = false
+        if shouldClear {
+            ShelfStore.shared.dismissAfterSuccessfulDrag(completedURLs)
         }
     }
 }

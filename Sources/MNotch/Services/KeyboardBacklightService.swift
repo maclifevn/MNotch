@@ -13,16 +13,43 @@ import AppKit
 @MainActor
 @Observable
 final class KeyboardBacklightService {
+    private struct HardwareAccess: @unchecked Sendable {
+        let proxy: KeyboardBrightnessClientLike
+        let keyboardID: UInt64
+    }
+
+    private actor HardwareGate {
+        func read(_ access: HardwareAccess) -> Double? {
+            guard let value = access.proxy.brightness?(forKeyboard: access.keyboardID)
+            else { return nil }
+            return Double(value)
+        }
+
+        func step(_ access: HardwareAccess, up: Bool) -> Double? {
+            guard let current = access.proxy.brightness?(forKeyboard: access.keyboardID)
+            else { return nil }
+            let target = min(max(current + (up ? 1.0 / 16 : -1.0 / 16), 0), 1)
+            guard access.proxy.setBrightness?(target, forKeyboard: access.keyboardID) == true
+            else { return Double(current) }
+            return Double(target)
+        }
+    }
+
     @ObservationIgnored private var client: AnyObject?
     @ObservationIgnored private var keyboardID: UInt64 = 1
     @ObservationIgnored private var frameworkHandle: UnsafeMutableRawPointer?
+    @ObservationIgnored private let hardware = HardwareGate()
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     private(set) var level: Double = 0.5
 
     var available: Bool { client != nil }
 
     func start() {
-        guard frameworkHandle == nil else { return }
+        if frameworkHandle != nil {
+            requestRefresh()
+            return
+        }
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness",
             RTLD_LAZY
@@ -49,37 +76,39 @@ final class KeyboardBacklightService {
             keyboardID = first.uint64Value
         }
         client = instance
-        refresh()
-        mnotchLog.notice("keyboard backlight available, id=\(self.keyboardID) level=\(self.level)")
+        requestRefresh()
+        mnotchLog.notice("keyboard backlight available, id=\(self.keyboardID)")
     }
 
     func stop() {
-        client = nil
-        if let frameworkHandle {
-            dlclose(frameworkHandle)
-            self.frameworkHandle = nil
-        }
+        refreshTask?.cancel()
+        refreshTask = nil
+        // The private client can still be completing an XPC call on the gate.
+        // Keep both it and CoreBrightness loaded for process lifetime; tearing
+        // either down during a feature toggle risks executing unloaded code.
     }
 
     private var proxy: KeyboardBrightnessClientLike? {
         client.map { unsafeBitCast($0, to: KeyboardBrightnessClientLike.self) }
     }
 
-    func refresh() {
-        guard let value = proxy?.brightness?(forKeyboard: keyboardID) else { return }
-        level = Double(value)
-    }
-
-    func setLevel(_ newValue: Double) {
-        let clamped = Float(min(max(newValue, 0), 1))
-        guard proxy?.setBrightness?(clamped, forKeyboard: keyboardID) == true else { return }
-        level = Double(clamped)
+    private func requestRefresh() {
+        guard refreshTask == nil, let proxy else { return }
+        let access = HardwareAccess(proxy: proxy, keyboardID: keyboardID)
+        refreshTask = Task(priority: .utility) { [weak self, hardware] in
+            let value = await hardware.read(access)
+            guard !Task.isCancelled, let self else { return }
+            self.refreshTask = nil
+            if let value { self.level = value }
+        }
     }
 
     /// Keyboard-key step; returns the new value.
-    func step(up: Bool) -> Double {
-        refresh()
-        setLevel(level + (up ? 1.0 / 16 : -1.0 / 16))
+    func step(up: Bool) async -> Double {
+        guard let proxy else { return level }
+        let access = HardwareAccess(proxy: proxy, keyboardID: keyboardID)
+        let result = await hardware.step(access, up: up)
+        if let result { level = result }
         return level
     }
 }
