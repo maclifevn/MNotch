@@ -166,9 +166,9 @@ final class NotchViewModel {
     /// Fake-notch panels have no physical occlusion, so this stays 0 there.
     private var tabStripClearWidth: CGFloat {
         guard geometry.isPhysical else { return 0 }
-        // A fifth tab (Pomodoro) widens the strip past the 320pt clearance.
-        let extra: CGFloat = SettingsStore.shared.pomodoroEnabled ? 60 : 0
-        return geometry.notchWidth + 320 + extra
+        // The strip is split 3/3 around the cutout, so each wing only needs to
+        // fit half the buttons (3 × 30pt + spacing + padding ≈ 126pt).
+        return geometry.notchWidth + 280
     }
     static let expandedSeedHeights: [NotchTab: CGFloat] = [
         .media: 205,

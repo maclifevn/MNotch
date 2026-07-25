@@ -23,7 +23,8 @@ struct CalendarStripView: View {
                 }
             }
         }
-        .padding(.top, viewModel.geometry.notchHeight - 6)
+        // Below the tab-button band, which now flanks BOTH top corners.
+        .padding(.top, viewModel.geometry.notchHeight + 8)
         .padding(.horizontal, 26)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .topLeading)

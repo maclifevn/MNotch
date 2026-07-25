@@ -161,8 +161,11 @@ struct NotchBodyView: View {
             .transition(Anim.contentSwap)
         case .expanded(let tab):
             expanded(tab)
+                .overlay(alignment: .topLeading) {
+                    TabStrip(viewModel: viewModel, current: tab, side: .leading)
+                }
                 .overlay(alignment: .topTrailing) {
-                    TabStrip(viewModel: viewModel, current: tab)
+                    TabStrip(viewModel: viewModel, current: tab, side: .trailing)
                 }
                 .transition(Anim.contentSwap)
         }
@@ -238,60 +241,90 @@ struct NotchBodyView: View {
     }
 }
 
-/// Tiny tab/settings icons in the expanded panel's top-right wing.
+/// Tab/settings icons flanking the notch in the expanded panel: the enabled
+/// tabs split into a left and right group (gear always right-most) so neither
+/// wing crowds, with comfortably large hit targets.
 struct TabStrip: View {
+    enum Side { case leading, trailing }
+
     let viewModel: NotchViewModel
     let current: NotchTab
+    let side: Side
     private let settings = SettingsStore.shared
 
-    var body: some View {
-        HStack(spacing: 2) {
-            if viewModel.isTabEnabled(.media) {
-                tabButton(.media, symbol: "music.note", label: "Now Playing")
-            }
-            if settings.shelfEnabled {
-                tabButton(.shelf, symbol: "tray.fill", label: "File Tray")
-            }
-            if settings.calendarEnabled {
-                tabButton(.calendar, symbol: "calendar", label: "Calendar")
-            }
-            if settings.pomodoroEnabled {
-                tabButton(.pomodoro, symbol: "timer", label: "Pomodoro")
-            }
-            if settings.agentEnabled {
-                tabButton(.agent, symbol: "terminal.fill", label: "Agents")
-            }
-            Button {
-                SettingsWindowController.shared.show()
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .frame(width: 26, height: 26)
-            }
-            .buttonStyle(.plain)
-            .help("MNotch Settings")
-            .accessibilityLabel("MNotch Settings")
-        }
-        .padding(.top, 7)
-        .padding(.trailing, 12)
+    static let buttonSize: CGFloat = 30
+    private static let symbolSize: CGFloat = 12
+
+    private struct Entry: Identifiable {
+        let tab: NotchTab?          // nil = the Settings gear
+        let symbol: String
+        let label: String
+        var id: String { label }
     }
 
-    private func tabButton(_ tab: NotchTab, symbol: String, label: String) -> some View {
+    private var allEntries: [Entry] {
+        var entries: [Entry] = []
+        if viewModel.isTabEnabled(.media) {
+            entries.append(Entry(tab: .media, symbol: "music.note", label: "Now Playing"))
+        }
+        if settings.shelfEnabled {
+            entries.append(Entry(tab: .shelf, symbol: "tray.fill", label: "File Tray"))
+        }
+        if settings.calendarEnabled {
+            entries.append(Entry(tab: .calendar, symbol: "calendar", label: "Calendar"))
+        }
+        if settings.pomodoroEnabled {
+            entries.append(Entry(tab: .pomodoro, symbol: "timer", label: "Pomodoro"))
+        }
+        if settings.agentEnabled {
+            entries.append(Entry(tab: .agent, symbol: "terminal.fill", label: "Agents"))
+        }
+        entries.append(Entry(tab: nil, symbol: "gearshape.fill", label: "MNotch Settings"))
+        return entries
+    }
+
+    /// First half left of the notch, the rest (incl. gear) right — right-heavy
+    /// on odd counts so Settings never migrates leftward.
+    private var visibleEntries: [Entry] {
+        let all = allEntries
+        let leftCount = all.count / 2
+        switch side {
+        case .leading: return Array(all.prefix(leftCount))
+        case .trailing: return Array(all.dropFirst(leftCount))
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(visibleEntries) { entry in
+                button(entry)
+            }
+        }
+        .padding(.top, 5)
+        .padding(.leading, side == .leading ? 14 : 0)
+        .padding(.trailing, side == .trailing ? 14 : 0)
+    }
+
+    private func button(_ entry: Entry) -> some View {
         Button {
-            viewModel.selectTab(tab)
+            if let tab = entry.tab {
+                viewModel.selectTab(tab)
+            } else {
+                SettingsWindowController.shared.show()
+            }
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(current == tab ? .white : .white.opacity(0.35))
-                .frame(width: 26, height: 26)
+            Image(systemName: entry.symbol)
+                .font(.system(size: Self.symbolSize, weight: .semibold))
+                .foregroundStyle(current == entry.tab ? .white : .white.opacity(0.4))
+                .frame(width: Self.buttonSize, height: Self.buttonSize)
                 .background(
-                    Circle().fill(.white.opacity(current == tab ? 0.14 : 0))
+                    Circle().fill(.white.opacity(current == entry.tab ? 0.14 : 0))
                 )
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(L10n.string(label))
-        .accessibilityLabel(L10n.string(label))
-        .accessibilityAddTraits(current == tab ? .isSelected : [])
+        .help(L10n.string(entry.label))
+        .accessibilityLabel(L10n.string(entry.label))
+        .accessibilityAddTraits(current == entry.tab ? .isSelected : [])
     }
 }

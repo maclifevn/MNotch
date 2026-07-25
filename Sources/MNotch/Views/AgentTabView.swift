@@ -32,7 +32,7 @@ struct AgentTabView: View {
                 AgentSessionList(agents: agents)
             }
         }
-        .padding(.top, viewModel.geometry.notchHeight - 2)
+        .padding(.top, viewModel.geometry.notchHeight + 6)
         .padding(.horizontal, 16)
         .padding(.bottom, 13)
     }

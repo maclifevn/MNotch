@@ -38,7 +38,8 @@ struct MediaExpandedView: View {
             seekRow
             controlsRow
         }
-        .padding(.top, viewModel.geometry.notchHeight - 12)
+        // Below the tab-button band, which now flanks BOTH top corners.
+        .padding(.top, viewModel.geometry.notchHeight - 2)
         .padding(.horizontal, 24)
         .padding(.bottom, 14)
     }
