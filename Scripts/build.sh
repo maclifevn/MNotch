@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 APP="$ROOT/build/MNotch.app"
-VERSION="${VERSION:-1.1}"
+VERSION="${VERSION:-1.2}"
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
 # Stable signing identity keeps TCC grants (Accessibility, Calendar, Bluetooth)
