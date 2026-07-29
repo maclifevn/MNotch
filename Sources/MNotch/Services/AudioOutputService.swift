@@ -53,11 +53,17 @@ final class AudioOutputService {
     func start() {
         guard !started else { return }
         started = true
+        // Never call back into the HAL synchronously from inside one of its own
+        // property-listener callbacks: add/remove listener re-enters locks the
+        // HAL holds while dispatching, which can deadlock the main thread (the
+        // device-change path below rewires listeners). Hopping to the next
+        // main-actor turn lets the HAL finish dispatching first; the extra
+        // runloop turn is imperceptible for a HUD.
         volumeListener = { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            Task { @MainActor [weak self] in self?.refresh() }
         }
         defaultDeviceListener = { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.followDefaultDevice() }
+            Task { @MainActor [weak self] in self?.followDefaultDevice() }
         }
         followDefaultDevice()
         AudioObjectAddPropertyListenerBlock(

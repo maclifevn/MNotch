@@ -60,6 +60,14 @@ final class CodexQuotaClient {
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            guard !data.isEmpty else {
+                // EOF (the child closed stdout). Left armed, the dispatch read
+                // source re-fires without end and each spin enqueues another
+                // main-actor job — a main-thread livelock. Disarm on EOF and
+                // let terminationHandler do the real teardown.
+                handle.readabilityHandler = nil
+                return
+            }
             Task { @MainActor [weak self] in
                 self?.receive(data)
             }
@@ -73,6 +81,11 @@ final class CodexQuotaClient {
 
         do {
             try process.run()
+            // Non-blocking stdin: a codex process that stops draining its input
+            // would otherwise fill the pipe buffer and park the main thread in
+            // write(2) forever (see send()). Only our write end is affected —
+            // the child inherited a separate description for the read end.
+            _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETFL, O_NONBLOCK)
             self.process = process
             inputPipe = input
             outputPipe = output
@@ -142,16 +155,46 @@ final class CodexQuotaClient {
         send(["method": "account/rateLimits/read", "id": id])
     }
 
+    /// Write one JSON-RPC line to the child's stdin. The write end is
+    /// non-blocking and every request is far below PIPE_BUF, so the write is
+    /// atomic: it either goes out whole or reports EAGAIN. A codex process that
+    /// has stopped reading therefore costs a dropped request and a recycled
+    /// child instead of a permanently frozen main thread.
     private func send(_ object: [String: Any]) {
         guard let handle = inputPipe?.fileHandleForWriting,
               var data = try? JSONSerialization.data(withJSONObject: object)
         else { return }
         data.append(0x0A)
-        do {
-            try handle.write(contentsOf: data)
-        } catch {
+
+        let descriptor = handle.fileDescriptor
+        let written = data.withUnsafeBytes { buffer -> Int in
+            guard let base = buffer.baseAddress else { return 0 }
+            return write(descriptor, base, buffer.count)
+        }
+        guard written != data.count else { return }
+
+        if written < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+            mnotchLog.error("Codex app-server stopped reading stdin; recycling it")
+            onUnavailable?("Codex quota unavailable")
+        } else {
             onUnavailable?("Codex connection closed")
         }
+        // Either way the request stream is broken; drop the child so the next
+        // refresh starts a clean one.
+        recycle()
+    }
+
+    /// Tear down a broken child without marking the client stopped, so the next
+    /// refresh launches a replacement.
+    private func recycle() {
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        process?.terminationHandler = nil
+        if process?.isRunning == true { process?.terminate() }
+        process = nil
+        inputPipe = nil
+        outputPipe = nil
+        initialized = false
+        outputBuffer.removeAll(keepingCapacity: false)
     }
 
     private func didTerminate(process terminatedProcess: Process, status: Int32) {
