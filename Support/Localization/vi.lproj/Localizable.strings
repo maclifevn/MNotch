@@ -285,3 +285,9 @@
 "Today only" = "Chỉ hôm nay";
 "Next week" = "Tuần tới";
 "Next month" = "Tháng tới";
+
+/* Quit affordances */
+"Close Window" = "Đóng cửa sổ";
+"Quit" = "Thoát";
+"Also ⌘Q, or the menu bar icon." = "Hoặc nhấn ⌘Q, hoặc dùng icon trên thanh menu.";
+"Settings stays reachable from the gear tab in the notch, and you can always quit with ⌘Q or the button below." = "Vẫn mở được Cài đặt từ nút bánh răng trên notch, và luôn có thể thoát bằng ⌘Q hoặc nút bên dưới.";

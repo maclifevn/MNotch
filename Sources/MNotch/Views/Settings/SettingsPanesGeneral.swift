@@ -65,7 +65,7 @@ struct GeneralPane: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Hide menu bar icon", isOn: $settings.hideMenuBarIcon)
-                    Text("Settings stays reachable from the gear tab in the notch, and Quit is below.")
+                    Text("Settings stays reachable from the gear tab in the notch, and you can always quit with ⌘Q or the button below.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

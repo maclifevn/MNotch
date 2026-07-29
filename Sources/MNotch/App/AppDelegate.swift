@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         mnotchLog.notice("MNotch launched")
+        installMainMenu()
         AppServices.shared.startAll()
         notchController = NotchWindowController()
         notchController?.showAll()
@@ -41,6 +42,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+    }
+
+    /// An accessory (LSUIElement) app never displays a menu bar, but AppKit
+    /// still routes key equivalents through `NSApp.mainMenu` while one of our
+    /// windows is key. Without a main menu ⌘Q and ⌘W do nothing in Settings or
+    /// Welcome, and users resort to Activity Monitor to quit MNotch.
+    private func installMainMenu() {
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            withTitle: L10n.string("Close Window"),
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: L10n.string("Quit MNotch"),
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        let main = NSMenu()
+        main.addItem(appItem)
+        NSApp.mainMenu = main
     }
 
     @objc private func screensChanged() {

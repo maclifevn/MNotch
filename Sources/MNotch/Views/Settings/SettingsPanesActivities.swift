@@ -464,6 +464,21 @@ struct AboutPane: View {
                 .padding(.vertical, 6)
             }
 
+            // MNotch has no Dock icon, so quitting isn't obvious. Spell out
+            // every exit here — this is the pane people open looking for them.
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Quit MNotch").font(.callout)
+                        Text("Also ⌘Q, or the menu bar icon.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Button("Quit") { NSApp.terminate(nil) }
+                }
+            }
+
             Section("Ủng hộ") {
                 HStack(alignment: .top, spacing: 14) {
                     if let qr = Self.bundledImage("donate-qr") {
