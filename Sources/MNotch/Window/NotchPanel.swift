@@ -8,6 +8,10 @@ final class NotchPanel: NSPanel {
     static let notchLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
     private var interactionSuppressed = false
     private var outgoingDragActive = false
+    private var outgoingDragDeadline: Date?
+    private var outsideDragStartedAt: Date?
+    private static let outsideDragGrace: TimeInterval = 2
+    private static let outgoingDragFailsafe: TimeInterval = 30
 
     init(screen: NSScreen, viewModel: NotchViewModel) {
         let size = NotchViewModel.panelSize
@@ -57,6 +61,7 @@ final class NotchPanel: NSPanel {
         interactionSuppressed = suppressed
         if suppressed {
             ignoresMouseEvents = true
+            outsideDragStartedAt = nil
             (contentView as? NotchHostingView)?.setPointerInsideFromWindow(false)
         }
     }
@@ -65,6 +70,16 @@ final class NotchPanel: NSPanel {
         at screenPoint: NSPoint,
         mouseButtonPressed: Bool
     ) {
+        // AppKit normally sends draggingSession(...endedAt:...), but a source
+        // app/window disappearing mid-drag can skip it. Never leave this
+        // always-on-top panel permanently mouse-transparent.
+        if outgoingDragActive,
+           let deadline = outgoingDragDeadline,
+           Date() >= deadline {
+            outgoingDragActive = false
+            outgoingDragDeadline = nil
+        }
+
         guard !interactionSuppressed,
               !outgoingDragActive,
               let hosting = contentView as? NotchHostingView
@@ -73,11 +88,26 @@ final class NotchPanel: NSPanel {
             return
         }
 
-        // Once a slider/file drag starts in the notch, retain the event stream
-        // until mouse-up even if the pointer briefly leaves the visual shape.
-        if mouseButtonPressed, !ignoresMouseEvents { return }
-
         let inside = hosting.containsInteractivePoint(screenPoint)
+
+        // Once a slider drag starts in the notch, retain the event stream while
+        // the pointer briefly leaves the shape. If a mouse utility/driver loses
+        // mouse-up and pressedMouseButtons remains stuck, release after a short
+        // outside-only grace period so the notch can recover by itself.
+        if mouseButtonPressed, !ignoresMouseEvents {
+            if inside {
+                outsideDragStartedAt = nil
+                return
+            }
+            let began = outsideDragStartedAt ?? Date()
+            outsideDragStartedAt = began
+            if Date().timeIntervalSince(began) < Self.outsideDragGrace {
+                return
+            }
+        } else {
+            outsideDragStartedAt = nil
+        }
+
         hosting.setPointerInsideFromWindow(inside)
         if ignoresMouseEvents == inside {
             ignoresMouseEvents = !inside
@@ -91,8 +121,10 @@ final class NotchPanel: NSPanel {
         guard outgoingDragActive != active else { return }
         outgoingDragActive = active
         if active {
+            outgoingDragDeadline = Date().addingTimeInterval(Self.outgoingDragFailsafe)
             ignoresMouseEvents = true
         } else {
+            outgoingDragDeadline = nil
             updatePointerInteraction(
                 at: NSEvent.mouseLocation,
                 mouseButtonPressed: NSEvent.pressedMouseButtons != 0

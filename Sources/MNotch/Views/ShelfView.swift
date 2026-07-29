@@ -26,10 +26,26 @@ enum ShelfDragSelection {
 /// otherwise tell the shelf that the URLs originated from itself.
 @MainActor
 enum ShelfOutgoingDragState {
-    private(set) static var isActive = false
+    private static var active = false
+    private static var deadline: Date?
 
-    static func begin() { isActive = true }
-    static func end() { isActive = false }
+    static var isActive: Bool {
+        if let deadline, Date() >= deadline {
+            active = false
+            self.deadline = nil
+        }
+        return active
+    }
+
+    static func begin() {
+        active = true
+        deadline = Date().addingTimeInterval(30)
+    }
+
+    static func end() {
+        active = false
+        deadline = nil
+    }
 }
 
 enum ShelfDropPolicy {

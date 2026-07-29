@@ -216,11 +216,21 @@ final class CalendarService {
     @ObservationIgnored private var worker: CalendarWorker?
     @ObservationIgnored private var startToken: UUID?
     @ObservationIgnored private var startTask: Task<Void, Never>?
+    @ObservationIgnored private var reloadDelayTask: Task<Void, Never>?
     @ObservationIgnored private var reloadTask: Task<Void, Never>?
+    @ObservationIgnored private var activeReloadID: UUID?
+    @ObservationIgnored private var pendingReload: ReloadRequest?
     @ObservationIgnored private var peekTimers: [Timer] = []
     @ObservationIgnored private var chimeTimer: Timer?
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var storeChangeObserver: NSObjectProtocol?
+
+    private struct ReloadRequest {
+        let token: UUID?
+        let disabledCalendarIDs: [String]
+        let includeMonthDays: Bool
+        let upcomingDays: Int
+    }
 
     func ensureStarted() {
         guard !requested else { return }
@@ -263,8 +273,12 @@ final class CalendarService {
         storeChangeObserver = nil
         startTask?.cancel()
         startTask = nil
+        reloadDelayTask?.cancel()
+        reloadDelayTask = nil
         reloadTask?.cancel()
         reloadTask = nil
+        activeReloadID = nil
+        pendingReload = nil
         startToken = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -322,38 +336,79 @@ final class CalendarService {
     }
 
     private func scheduleReload(after delay: Duration) {
-        guard let worker, authorized else { return }
-        reloadTask?.cancel()
-        let token = startToken
-        let disabled = SettingsStore.shared.calendarDisabledCalendars
-        let includeMonthDays = SettingsStore.shared.calendarMonthView
+        guard worker != nil, authorized else { return }
         let upcomingDays = switch SettingsStore.shared.calendarUpcomingScope {
         case "off": 0
         case "month": 31
         default: 7
         }
-        reloadTask = Task { [weak self] in
-            if delay != .zero {
+        let request = ReloadRequest(
+            token: startToken,
+            disabledCalendarIDs: SettingsStore.shared.calendarDisabledCalendars,
+            includeMonthDays: SettingsStore.shared.calendarMonthView,
+            upcomingDays: upcomingDays
+        )
+
+        // Debounce notification/setting bursts before they reach EventKit.
+        // Once a synchronous EventKit query has begun it cannot be cancelled;
+        // enqueueReload therefore keeps only the latest follow-up request.
+        reloadDelayTask?.cancel()
+        reloadDelayTask = nil
+        if delay == .zero {
+            enqueueReload(request)
+        } else {
+            reloadDelayTask = Task { [weak self] in
                 try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self else { return }
+                self.reloadDelayTask = nil
+                self.enqueueReload(request)
             }
-            guard !Task.isCancelled else { return }
+        }
+    }
+
+    private func enqueueReload(_ request: ReloadRequest) {
+        guard let worker, authorized, request.token == startToken else { return }
+        guard reloadTask == nil else {
+            pendingReload = request
+            return
+        }
+
+        let reloadID = UUID()
+        activeReloadID = reloadID
+        reloadTask = Task { [weak self] in
             let snapshot = await worker.load(
-                disabledCalendarIDs: disabled,
-                includeMonthDays: includeMonthDays,
-                upcomingDays: upcomingDays
+                disabledCalendarIDs: request.disabledCalendarIDs,
+                includeMonthDays: request.includeMonthDays,
+                upcomingDays: request.upcomingDays
             )
-            guard !Task.isCancelled,
-                  let self,
-                  self.startToken == token,
-                  self.worker != nil
-            else { return }
-            self.reloadTask = nil
-            self.today = snapshot.today
-            self.upcoming = snapshot.upcoming
-            self.calendars = snapshot.calendars
-            self.monthEventDays = snapshot.monthEventDays
-            self.schedulePeeks()
-            self.scheduleChime()
+            guard let self else { return }
+            self.completeReload(snapshot, request: request, reloadID: reloadID)
+        }
+    }
+
+    private func completeReload(
+        _ snapshot: CalendarWorker.Snapshot,
+        request: ReloadRequest,
+        reloadID: UUID
+    ) {
+        // stop()/restart invalidates the ID so a slow old EKEventStore cannot
+        // complete into the new lifecycle.
+        guard activeReloadID == reloadID else { return }
+        reloadTask = nil
+        activeReloadID = nil
+
+        if request.token == startToken, worker != nil, authorized {
+            today = snapshot.today
+            upcoming = snapshot.upcoming
+            calendars = snapshot.calendars
+            monthEventDays = snapshot.monthEventDays
+            schedulePeeks()
+            scheduleChime()
+        }
+
+        if let latest = pendingReload {
+            pendingReload = nil
+            enqueueReload(latest)
         }
     }
 
