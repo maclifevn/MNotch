@@ -160,15 +160,12 @@ final class NotchViewModel {
     /// natural content instead of leaving a fixed black slab underneath.
     static let expandedWidth: CGFloat = 420
 
-    /// The top-right tab strip lives in the notch band. On a physical notch a
-    /// narrow panel would tuck its left-most tab (Now Playing) behind the
-    /// cutout, so widen just enough that all tabs clear the notch's right edge.
-    /// Fake-notch panels have no physical occlusion, so this stays 0 there.
-    private var tabStripClearWidth: CGFloat {
-        guard geometry.isPhysical else { return 0 }
-        // The strip is split 3/3 around the cutout, so each wing only needs to
-        // fit half the buttons (3 × 30pt + spacing + padding ≈ 126pt).
-        return geometry.notchWidth + 280
+    /// The tab strip always reserves the notch band, including on a simulated
+    /// notch. Its six controls need another 280pt for buttons, spacing and safe
+    /// side insets; without that minimum, an external display's 420pt panel
+    /// clips the outer buttons against the flared corners.
+    static func expandedPanelWidth(for geometry: NotchGeometry) -> CGFloat {
+        max(expandedWidth, geometry.notchWidth + 280)
     }
     static let expandedSeedHeights: [NotchTab: CGFloat] = [
         .media: 205,
@@ -295,7 +292,7 @@ final class NotchViewModel {
         case .expanded(let tab):
             guard tab == .agent else {
                 return CGSize(
-                    width: max(Self.expandedWidth, tabStripClearWidth),
+                    width: Self.expandedPanelWidth(for: geometry),
                     height: expandedContentHeights[tab]
                         ?? Self.expandedSeedHeights[tab]
                         ?? 205

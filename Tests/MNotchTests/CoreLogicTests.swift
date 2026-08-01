@@ -189,6 +189,20 @@ final class CoreLogicTests: XCTestCase {
         ))
     }
 
+    @MainActor
+    func testSimulatedNotchExpansionLeavesRoomForTheFullTabStrip() {
+        let geometry = NotchGeometry(
+            notchWidth: NotchGeometry.fallbackWidth,
+            notchHeight: NotchGeometry.fallbackHeight,
+            isPhysical: false
+        )
+
+        XCTAssertEqual(
+            NotchViewModel.expandedPanelWidth(for: geometry),
+            NotchGeometry.fallbackWidth + 280
+        )
+    }
+
     func testPrivateLockSpaceIsOnlyUsedForTheEnabledFeatureWhileLocked() {
         XCTAssertFalse(LockPresentationPolicy.shouldElevateNotch(
             isLocked: true,
