@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private let statusItem = StatusItemController()
+    private let updates = AppUpdateController.shared
     private var permissionNoticeTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -18,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 #endif
         statusItem.install()
+        // Start only after the app's services and user-facing entry points are
+        // ready. Release builds then follow Sparkle's daily schedule.
+        updates.start()
 
         let returningUser = SettingsStore.shared.hasSeenWelcome
         // First launch: greet the user and walk them through the one permission

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4
+
+- **Signed automatic updates** — Sparkle 2.9.4 checks daily, supports manual
+  checks from the menu bar and Settings, and can download updates for install
+  on quit. Both the appcast and notarized ZIP are protected by Ed25519
+  signatures, with phased rollout and tamper tests in the release workflow.
+
 ## 1.2
 
 - **New: Pomodoro focus timer** 🍅 — a fifth tab in the notch with a progress

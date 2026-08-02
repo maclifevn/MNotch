@@ -26,6 +26,24 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/maclifevn/MNotch/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>xxFKkPvrT6swaHB22CwLzj5whrRBEkZ6oiUis2k09zI=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>

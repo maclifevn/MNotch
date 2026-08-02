@@ -37,6 +37,7 @@ MNotch is an AppKit and SwiftUI menu-bar utility inspired by the fluid interacti
 - **Agent Monitor** — review Claude Code and Codex permission requests, jump back to a session, and view live or cached quota windows.
 - **Lock-screen widgets** — optional media, calendar, battery, connectivity, Focus, and system-control surfaces.
 - **Multi-display support** — target all displays, the main display, the built-in display, or one specific screen. Displays without a hardware cutout use a simulated notch.
+- **Signed automatic updates** — daily checks, optional download-on-quit, and manual checks from the menu bar or Settings, protected by Sparkle Ed25519 signatures and Apple notarization.
 - **Customizable behavior** — per-feature toggles, gestures, hover/click expansion, idle activities, visual styles, timing, sounds, and launch at login.
 
 ## Requirements
@@ -108,6 +109,7 @@ swift build                  # Debug SwiftPM build
 swift test                   # Core logic test suite
 Scripts/build.sh             # Assemble build/MNotch.app
 Scripts/build-adapter.sh     # Rebuild the MediaRemote framework
+Scripts/build-update-feed.sh # Sign and verify the Sparkle appcast
 ```
 
 ## Architecture
@@ -137,11 +139,18 @@ The “hide from screen capture” setting only affects compatible legacy captur
 The release scripts require a valid Developer ID Application certificate and a `notarytool` Keychain profile named `MNotch-notary` (both names can be overridden with environment variables).
 
 ```sh
-Scripts/notarize.sh    # Build, sign, notarize, staple, and create MNotch.zip
-Scripts/create-dmg.sh  # Create, sign, notarize, and staple MNotch.dmg
+VERSION=X.Y.Z Scripts/notarize.sh  # Build, sign, notarize, staple, and create MNotch.zip
+Scripts/create-dmg.sh              # Create, sign, notarize, and staple MNotch.dmg
+Scripts/build-update-feed.sh \
+  X.Y.Z \
+  build/distribution/MNotch.zip \
+  ReleaseNotes/X.Y.Z.md \
+  build/distribution/update-feed   # Sign and tamper-test the Sparkle feed
 ```
 
 Final artifacts are written to `build/distribution/`.
+See [`RELEASING.md`](RELEASING.md) for the signing-key backup, bootstrap,
+GitHub Release, phased-rollout, and rollback checklist.
 
 ## Contributing
 
@@ -156,6 +165,6 @@ For bugs involving permissions or agents, remove account names, file contents, t
 
 ## Third-party software and trademarks
 
-MNotch vendors [`mediaremote-adapter`](https://github.com/ungive/mediaremote-adapter), distributed under the BSD 3-Clause License in [`Vendor/mediaremote-adapter/LICENSE`](Vendor/mediaremote-adapter/LICENSE).
+MNotch vendors [`mediaremote-adapter`](https://github.com/ungive/mediaremote-adapter), distributed under the BSD 3-Clause License in [`Vendor/mediaremote-adapter/LICENSE`](Vendor/mediaremote-adapter/LICENSE), and uses [Sparkle 2](https://github.com/sparkle-project/Sparkle), distributed under its permissive license and bundled with the release app.
 
 MNotch is an independent project and is not affiliated with Apple, Alcove, Anthropic, or OpenAI. Apple, macOS, MacBook, and related marks are trademarks of Apple Inc. Other product names belong to their respective owners.

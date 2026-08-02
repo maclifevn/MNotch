@@ -21,6 +21,8 @@
 "Approved" = "Đã duyệt";
 "Artwork badge" = "Nhãn ảnh bìa";
 "Auto-open notch on permission request" = "Tự mở notch khi có yêu cầu quyền";
+"Automatically check for updates" = "Tự động kiểm tra bản cập nhật";
+"Automatically download updates and install them when MNotch quits" = "Tự động tải bản cập nhật và cài đặt khi MNotch thoát";
 "Battery" = "Pin";
 "Before event starts" = "Trước khi sự kiện bắt đầu";
 "Behaviour" = "Hành vi";
@@ -31,7 +33,9 @@
 "Calendar access needed" = "Cần quyền truy cập Lịch";
 "Calendar, Bluetooth, and AI-agent hooks are requested only when you first use those features." = "Quyền Lịch, Bluetooth và hook AI Agent chỉ được yêu cầu khi bạn dùng các tính năng đó lần đầu.";
 "Calendars" = "Các lịch";
+"Cancel" = "Hủy";
 "Charging" = "Đang sạc";
+"Check for Updates…" = "Kiểm tra bản cập nhật…";
 "Checking…" = "Đang kiểm tra…";
 "Claude Code" = "Claude Code";
 "Claude usage" = "Mức sử dụng Claude";
@@ -99,6 +103,7 @@
 "Instant" = "Tức thì";
 "Keep awake" = "Giữ máy thức";
 "Language" = "Ngôn ngữ";
+"Last checked: %@" = "Kiểm tra lần cuối: %@";
 "Launch at login" = "Mở khi đăng nhập";
 "Licenses" = "Giấy phép";
 "Live Activities" = "Hoạt động trực tiếp";
@@ -112,13 +117,16 @@
 "Low battery threshold" = "Ngưỡng pin yếu";
 "MNotch Settings" = "Cài đặt MNotch";
 "MNotch needs access to your calendars." = "MNotch cần quyền truy cập lịch của bạn.";
+"MNotch must be in /Applications before it can check for updates." = "MNotch phải nằm trong /Applications trước khi có thể kiểm tra bản cập nhật.";
 "MNotch — Accessibility not granted" = "MNotch — Chưa cấp quyền Trợ năng";
 "MNotch — Accessibility required" = "MNotch — Cần quyền Trợ năng";
 "Main display" = "Màn hình chính";
 "Monitor AI coding agents, approve permission requests, and jump to their terminal — right from the notch." = "Theo dõi AI Agent lập trình, duyệt yêu cầu quyền và chuyển tới Terminal của chúng ngay từ notch.";
 "Monochrome" = "Đơn sắc";
 "Most Recent" = "Gần đây nhất";
+"Move MNotch to Applications" = "Di chuyển MNotch vào Applications";
 "Natural movement" = "Chuyển động tự nhiên";
+"Never checked for updates" = "Chưa từng kiểm tra bản cập nhật";
 "Needs Full Disk Access to read Focus state." = "Cần quyền Truy cập toàn bộ ổ đĩa để đọc trạng thái Tập trung.";
 "Needs input" = "Cần phản hồi";
 "No active agents" = "Không có agent hoạt động";
@@ -172,6 +180,7 @@
 "Remove from File Tray" = "Xóa khỏi Khay file";
 "Repeat" = "Lặp lại";
 "Replace waveform during focus" = "Thay waveform khi đang Tập trung";
+"Reveal MNotch" = "Hiện MNotch trong Finder";
 "Required for MNotch to handle volume, brightness, and keyboard-backlight keys without also showing Apple's OSD. Other features keep working without it." = "Cần để MNotch xử lý phím âm lượng, độ sáng và đèn bàn phím mà không hiện thêm OSD của Apple. Các tính năng khác vẫn hoạt động khi thiếu quyền này.";
 "Restart MNotch" = "Khởi động lại MNotch";
 "Restart MNotch to apply the new language." = "Khởi động lại MNotch để áp dụng ngôn ngữ mới.";
@@ -192,6 +201,7 @@
 "Sound" = "Âm thanh";
 "Sound on agent events" = "Âm thanh khi agent có sự kiện";
 "Source" = "Nguồn";
+"Software Updates" = "Cập nhật phần mềm";
 "Status pop duration" = "Thời lượng hiện trạng thái";
 "Swipe to cycle activity" = "Vuốt để chuyển hoạt động";
 "Swipe to dismiss activity" = "Vuốt để ẩn hoạt động";
@@ -200,6 +210,7 @@
 "System Language" = "Theo ngôn ngữ hệ thống";
 "System default" = "Mặc định hệ thống";
 "Time before event" = "Thời gian trước sự kiện";
+"To install updates safely, move MNotch to /Applications and open it again." = "Để cài đặt bản cập nhật an toàn, hãy di chuyển MNotch vào /Applications rồi mở lại ứng dụng.";
 "Tuning" = "Tinh chỉnh";
 "Unavailable" = "Không khả dụng";
 "Uninstall Codex Hooks" = "Gỡ hook Codex";

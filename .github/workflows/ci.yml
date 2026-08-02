@@ -27,5 +27,7 @@ jobs:
           Scripts/build.sh
           plutil -lint build/MNotch.app/Contents/Info.plist
           codesign --verify --strict build/MNotch.app/Contents/Frameworks/MediaRemoteAdapter.framework
+          codesign --verify --deep --strict build/MNotch.app/Contents/Frameworks/Sparkle.framework
           codesign --verify --strict build/MNotch.app
+          test -f build/MNotch.app/Contents/Resources/Sparkle-LICENSE.txt
           test ! -e build/MNotch.app/Contents/Resources/MediaRemoteAdapterTestClient

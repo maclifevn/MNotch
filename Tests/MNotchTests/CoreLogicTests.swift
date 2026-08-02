@@ -189,6 +189,54 @@ final class CoreLogicTests: XCTestCase {
         ))
     }
 
+    func testUpdaterIsDisabledForTestsAndRequiresDebugOptIn() {
+        XCTAssertFalse(AppUpdateRuntimePolicy(
+            isRunningTests: true,
+            isDebugBuild: false,
+            environment: [:]
+        ).updatesAreEnabled)
+        XCTAssertFalse(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: true,
+            environment: [:]
+        ).updatesAreEnabled)
+        XCTAssertTrue(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: true,
+            environment: ["MNOTCH_ENABLE_UPDATES": "1"]
+        ).updatesAreEnabled)
+        XCTAssertTrue(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: false,
+            environment: [:]
+        ).updatesAreEnabled)
+    }
+
+    func testUpdaterOnlyAcceptsWritableApplicationsInstallations() {
+        XCTAssertTrue(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch.app"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Volumes/MNotch/MNotch.app"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(
+                fileURLWithPath: "/private/var/folders/AppTranslocation/MNotch.app"
+            ),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch.app"),
+            applicationsDirectoryIsWritable: false
+        ))
+    }
+
     @MainActor
     func testSimulatedNotchExpansionLeavesRoomForTheFullTabStrip() {
         let geometry = NotchGeometry(

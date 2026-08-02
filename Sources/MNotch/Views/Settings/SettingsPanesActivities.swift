@@ -443,6 +443,10 @@ struct LockScreenPane: View {
 }
 
 struct AboutPane: View {
+    private let updates = AppUpdateController.shared
+    @State private var automaticChecks = false
+    @State private var automaticDownloads = false
+
     var body: some View {
         Form {
             Section {
@@ -462,6 +466,38 @@ struct AboutPane: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
+            }
+
+            Section("Software Updates") {
+                Toggle("Automatically check for updates", isOn: $automaticChecks)
+                    .disabled(!updates.canCheckForUpdates)
+                    .onChange(of: automaticChecks) { _, enabled in
+                        updates.automaticallyChecksForUpdates = enabled
+                        if !enabled {
+                            automaticDownloads = false
+                            updates.automaticallyDownloadsUpdates = false
+                        }
+                    }
+                Toggle(
+                    "Automatically download updates and install them when MNotch quits",
+                    isOn: $automaticDownloads
+                )
+                .disabled(!updates.canCheckForUpdates || !automaticChecks)
+                .onChange(of: automaticDownloads) { _, enabled in
+                    updates.automaticallyDownloadsUpdates = enabled
+                }
+                HStack {
+                    Button("Check for Updates…") {
+                        updates.checkForUpdates()
+                    }
+                    .disabled(!updates.canCheckForUpdates)
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: 5)) { _ in
+                        Text(lastCheckDescription)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
 
             // MNotch has no Dock icon, so quitting isn't obvious. Spell out
@@ -515,10 +551,10 @@ struct AboutPane: View {
             }
 
             Section {
-                Text("mediaremote-adapter · BSD-3-Clause · Jonas van den Berg")
+                Text("mediaremote-adapter · BSD-3-Clause\nSparkle 2.9.4 · MIT")
                     .font(.caption2).foregroundStyle(.tertiary)
                 DisclosureGroup("Licenses") {
-                    Text(Self.mediaRemoteAdapterLicense)
+                    Text(Self.thirdPartyLicenses)
                         .font(.system(size: 9.5).monospaced())
                         .textSelection(.enabled)
                         .foregroundStyle(.secondary)
@@ -526,6 +562,20 @@ struct AboutPane: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            automaticChecks = updates.automaticallyChecksForUpdates
+            automaticDownloads = updates.automaticallyDownloadsUpdates
+        }
+    }
+
+    private var lastCheckDescription: String {
+        guard let date = updates.lastUpdateCheckDate else {
+            return L10n.string("Never checked for updates")
+        }
+        return String(
+            format: L10n.string("Last checked: %@"),
+            date.formatted(date: .abbreviated, time: .shortened)
+        )
     }
 
     private static var versionString: String {
@@ -542,6 +592,21 @@ struct AboutPane: View {
         guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return nil }
         return Image(nsImage: image)
+    }
+
+    private static var thirdPartyLicenses: String {
+        let sparkleLicense: String
+        if let url = Bundle.main.url(
+            forResource: "Sparkle-LICENSE",
+            withExtension: "txt"
+        ), let contents = try? String(contentsOf: url, encoding: .utf8) {
+            sparkleLicense = contents
+        } else {
+            sparkleLicense = "Sparkle license: https://github.com/sparkle-project/Sparkle/blob/2.9.4/LICENSE"
+        }
+        return mediaRemoteAdapterLicense
+            + "\n\n====================\nSparkle 2.9.4\n====================\n\n"
+            + sparkleLicense
     }
 
     /// Reproduced per the BSD 3-Clause requirement that binary distributions

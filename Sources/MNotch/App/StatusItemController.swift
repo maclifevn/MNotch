@@ -8,6 +8,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var accessibilityItem: NSMenuItem?
     private var accessibilitySeparator: NSMenuItem?
+    private var checkForUpdatesItem: NSMenuItem?
 
     private struct AccessibilityState: Equatable {
         let granted: Bool
@@ -48,6 +49,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         welcome.target = self
         welcome.image = Self.menuIcon("hand.wave")
         menu.addItem(welcome)
+        let checkForUpdates = NSMenuItem(
+            title: L10n.string("Check for Updates…"),
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = self
+        checkForUpdates.image = Self.menuIcon("arrow.trianglehead.2.clockwise.rotate.90")
+        menu.addItem(checkForUpdates)
+        checkForUpdatesItem = checkForUpdates
         menu.addItem(.separator())
         let quit = NSMenuItem(
             title: L10n.string("Quit MNotch"),
@@ -100,6 +110,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         AppServices.shared.accessibility.requestAccess()
     }
 
+    @objc private func checkForUpdates() {
+        AppUpdateController.shared.checkForUpdates()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -108,6 +122,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Covers grants/revocations made externally even if MNotch never
         // received an activation transition before the menu was opened.
         AppServices.shared.accessibility.refresh()
+        checkForUpdatesItem?.isEnabled = AppUpdateController.shared.canCheckForUpdates
     }
 
     /// Alcove-style framed glyph: a continuous rounded shell, a compact notch
