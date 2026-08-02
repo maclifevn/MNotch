@@ -1,6 +1,6 @@
 # MNotch
 
-Dynamic Island cho MacBook — clone Alcove, 100% native Swift/SwiftUI, build không cần Xcode.
+Dynamic Island cho Mac
 
 ## Build & chạy
 
