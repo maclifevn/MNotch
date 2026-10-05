@@ -29,6 +29,12 @@ MNotch is an AppKit and SwiftUI menu-bar utility inspired by the fluid interacti
 
 ## Highlights
 
+The current stability candidate temporarily disables direct private macOS APIs
+for display brightness, keyboard backlight and lock-screen overlays until the
+hardware/OS compatibility matrix is verified. macOS keeps handling those keys;
+volume and the other features remain available. Settings explains this state.
+See [AUDIT.md](AUDIT.md) for evidence and remaining release checks.
+
 - **Now Playing** — artwork, animated waveform, seek controls, previous/play/next, output-device status, and configurable quick actions across supported media apps.
 - **System HUDs** — replace or complement the standard volume, display-brightness, and keyboard-backlight overlays with compact notch animations.
 - **Contextual notifications** — battery, charging, low-power mode, Bluetooth devices, Focus, and upcoming calendar events.
@@ -81,6 +87,10 @@ MNotch is designed to keep its work on your Mac:
 - The File Tray stores its working copies under `~/Library/Application Support/MNotch/Shelf`. When “clear after drag” is enabled, a hidden backing copy can remain for up to 24 hours so receiving apps can finish an import or upload safely.
 - Agent hooks communicate with MNotch over a token-protected listener bound to `127.0.0.1`. Hook installation is explicit and reversible in Settings.
 - Codex quota is requested through the local Codex App Server. Claude usage is requested from the locally installed Claude CLI. MNotch does not read agent transcripts or macOS Keychain credentials.
+- **Settings → About → Export Diagnostics** saves a local JSON report containing
+  app/OS versions, service states and bounded numeric error/timing metadata. It
+  excludes tokens, account details, file contents, paths and conversations.
+  Nothing is uploaded automatically. See [AUDIT.md](AUDIT.md) for crash/hang reports.
 
 ## Build from source
 
@@ -126,7 +136,7 @@ MNotch keeps the window shell stable and animates only its SwiftUI content. Long
 | [`Sources/MNotch/App/FeatureCoordinator.swift`](Sources/MNotch/App/FeatureCoordinator.swift) | Central demand calculation and service start/stop/reconfiguration |
 | [`Tests/MNotchTests`](Tests/MNotchTests) | Core policy, parser, lifecycle, state, and regression tests |
 
-CI runs on macOS 15 and validates the relay scripts, debug build, test suite, release assembly, bundle metadata, and code signatures for every push and pull request.
+CI runs on macOS 15 and 26, validating relay/release scripts, debug/release tests, real Sparkle signing fixtures, release assembly, metadata and signatures. Separate jobs run Address Sanitizer and Thread Sanitizer.
 
 ## Compatibility notes
 
@@ -139,16 +149,14 @@ The “hide from screen capture” setting only affects compatible legacy captur
 The release scripts require a valid Developer ID Application certificate and a `notarytool` Keychain profile named `MNotch-notary` (both names can be overridden with environment variables).
 
 ```sh
-VERSION=X.Y.Z Scripts/notarize.sh  # Build, sign, notarize, staple, and create MNotch.zip
-Scripts/create-dmg.sh              # Create, sign, notarize, and staple MNotch.dmg
-Scripts/build-update-feed.sh \
-  X.Y.Z \
-  build/distribution/MNotch.zip \
-  ReleaseNotes/X.Y.Z.md \
-  build/distribution/update-feed   # Sign and tamper-test the Sparkle feed
+make release VERSION=X.Y.Z  # Build/sign/notarize ZIP + DMG, sign/verify feed
+make publish VERSION=X.Y.Z  # Upload draft assets, then publish completed release
 ```
 
-Final artifacts are written to `build/distribution/`.
+Commit/tag the tested source and add `ReleaseNotes/X.Y.Z.md` first. Prepared
+artifacts and SHA-256 manifest are saved under `build/releases/X.Y.Z-BUILD/`.
+Production signing uses the existing Keychain key, as in MFinder. Sparkle waits
+for File Tray work before installing; cancelling the wait resumes normal use.
 See [`RELEASING.md`](RELEASING.md) for the signing-key backup, bootstrap,
 GitHub Release, phased-rollout, and rollback checklist.
 

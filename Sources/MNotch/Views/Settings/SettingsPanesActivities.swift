@@ -350,6 +350,10 @@ struct LockScreenPane: View {
                 Toggle(isOn: $settings.lockEnabled) {
                     Label("Lock Screen", systemImage: "lock.fill")
                 }
+                if !PrivateAPICompatibility.permits(.lockScreen) {
+                    Text(L10n.string(PrivateAPICompatibility.unavailableReason))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 SliderRow(
                     title: "Keep awake",
                     value: $settings.lockKeepAwake,
@@ -468,6 +472,12 @@ struct AboutPane: View {
                 .padding(.vertical, 6)
             }
 
+            Section("Diagnostics") {
+                Button("Export Diagnostics…") { AppDiagnostics.export() }
+                Text("Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Software Updates") {
                 Toggle("Automatically check for updates", isOn: $automaticChecks)
                     .disabled(!updates.canCheckForUpdates)
@@ -551,7 +561,7 @@ struct AboutPane: View {
             }
 
             Section {
-                Text("mediaremote-adapter · BSD-3-Clause\nSparkle 2.9.4 · MIT")
+                Text(verbatim: "mediaremote-adapter · BSD-3-Clause\nSparkle \(AppUpdateController.sparkleVersion) · MIT")
                     .font(.caption2).foregroundStyle(.tertiary)
                 DisclosureGroup("Licenses") {
                     Text(Self.thirdPartyLicenses)
@@ -602,10 +612,10 @@ struct AboutPane: View {
         ), let contents = try? String(contentsOf: url, encoding: .utf8) {
             sparkleLicense = contents
         } else {
-            sparkleLicense = "Sparkle license: https://github.com/sparkle-project/Sparkle/blob/2.9.4/LICENSE"
+            sparkleLicense = "Sparkle license: https://github.com/sparkle-project/Sparkle/blob/\(AppUpdateController.sparkleVersion)/LICENSE"
         }
         return mediaRemoteAdapterLicense
-            + "\n\n====================\nSparkle 2.9.4\n====================\n\n"
+            + "\n\n====================\nSparkle \(AppUpdateController.sparkleVersion)\n====================\n\n"
             + sparkleLicense
     }
 

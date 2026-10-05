@@ -430,7 +430,7 @@ final class NotchViewModel {
         let duration = isVolume ? settings.soundHUDDuration : settings.displayHUDDuration
 
         mnotchLog.notice("showHUD \(String(describing: kind), privacy: .public) value=\(value)")
-        hudValue = value
+        hudValue = SafeNumeric.unit(value)
         hudMuted = muted
         hudDismissTask?.cancel()
         if status != .hud(kind) {

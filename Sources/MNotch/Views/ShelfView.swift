@@ -27,6 +27,7 @@ enum ShelfDragSelection {
 @MainActor
 enum ShelfOutgoingDragState {
     private static var active = false
+    private(set) static var hasLiveSession = false
     private static var deadline: Date?
 
     static var isActive: Bool {
@@ -38,11 +39,13 @@ enum ShelfOutgoingDragState {
     }
 
     static func begin() {
+        hasLiveSession = true
         active = true
         deadline = Date().addingTimeInterval(30)
     }
 
     static func end() {
+        hasLiveSession = false
         active = false
         deadline = nil
     }
@@ -485,6 +488,7 @@ private final class ShelfFileDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !ShelfStore.shared.isPreparingForUpdate else { return }
         guard !dragging, let origin = mouseDownPoint else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - origin.x, point.y - origin.y) >= 3 else { return }

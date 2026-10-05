@@ -70,6 +70,10 @@ final class BrightnessService {
     }
 
     func start() {
+        guard PrivateAPICompatibility.permits(.displayBrightness) else {
+            AppDiagnostics.record(.brightness, .unsupportedOS)
+            return
+        }
         guard frameworkHandle == nil else { return }
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
@@ -102,8 +106,8 @@ final class BrightnessService {
 
     private nonisolated static func read(using getFn: GetFn) -> Double? {
         var value: Float = 0
-        guard getFn(CGMainDisplayID(), &value) == 0 else { return nil }
-        return Double(value)
+        guard getFn(CGMainDisplayID(), &value) == 0, value.isFinite else { return nil }
+        return SafeNumeric.unit(Double(value))
     }
 
     private func requestRefresh(notifyChanges: Bool) {

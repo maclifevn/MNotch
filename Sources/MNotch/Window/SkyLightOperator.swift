@@ -29,6 +29,13 @@ final class SkyLightOperator {
     let available: Bool
 
     private init() {
+        guard PrivateAPICompatibility.permits(.lockScreen) else {
+            connection = 0
+            space = 0
+            addWindows = nil
+            available = false
+            return
+        }
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight",
             RTLD_NOW

@@ -32,7 +32,7 @@ struct FeatureFlags: Equatable, Sendable {
         FeatureFlags(
             mediaEnabled: settings.mediaEnabled,
             soundHUDEnabled: settings.soundHUDEnabled,
-            displayHUDEnabled: settings.displayHUDEnabled,
+            displayHUDEnabled: settings.displayHUDEnabled && (PrivateAPICompatibility.permits(.displayBrightness) || PrivateAPICompatibility.permits(.keyboardBacklight)),
             batteryEnabled: settings.batteryEnabled,
             connectivityEnabled: settings.connectivityEnabled,
             calendarEnabled: settings.calendarEnabled,
@@ -44,7 +44,7 @@ struct FeatureFlags: Equatable, Sendable {
             mediaHideWhileSourceActive: settings.mediaHideWhileSourceActive,
             focusEnabled: settings.focusEnabled,
             agentEnabled: settings.agentEnabled,
-            lockEnabled: settings.lockEnabled,
+            lockEnabled: settings.lockEnabled && PrivateAPICompatibility.permits(.lockScreen),
             lockNowPlaying: settings.lockNowPlaying,
             lockShowVolume: settings.lockShowVolume,
             lockWidgetBattery: settings.lockWidgetBattery,

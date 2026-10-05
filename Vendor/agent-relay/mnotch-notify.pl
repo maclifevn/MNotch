@@ -1,49 +1,55 @@
 #!/usr/bin/perl
-# MNotch generic agent notifier.
-#
-# For agents without a blocking permission hook (Gemini CLI, etc.). Point
-# their notify command at this script. It forwards a lightweight status event
-# to MNotch so the session shows up in the notch — no remote approval, just
-# awareness + jump.
-#
-# Usage (from a tool's notify hook):
-#   /usr/bin/perl /path/to/mnotch-notify.pl [agent_kind] [title]
-# It also reads any JSON on stdin and passes through session_id/cwd if present.
-
+# Nonblocking status notifier; never parses JSON with regex or edits agent state.
 use strict;
 use warnings;
 use IO::Socket::INET;
-
+use JSON::PP qw(decode_json encode_json);
+$SIG{PIPE} = 'IGNORE';
+$SIG{ALRM} = sub { exit 0 };
+alarm 2;
 my $agent = $ARGV[0] // 'agent';
 my $title = $ARGV[1] // 'needs attention';
-
 my $stdin = '';
-if (!-t STDIN) { local $/; $stdin = <STDIN> // ''; }
-my ($session) = $stdin =~ /"session_id"\s*:\s*"([^"]+)"/;
-my ($cwd)     = $stdin =~ /"cwd"\s*:\s*"([^"]+)"/;
-$session //= "$agent-$$";
-$cwd     //= ($ENV{PWD} // '');
-
-my $home = $ENV{HOME} // '';
-my $support = "$home/Library/Application Support/MNotch";
+if (!-t STDIN) {
+    while (1) {
+        my $chunk;
+        my $n = sysread(STDIN, $chunk, 65536);
+        exit 0 unless defined $n;
+        last if $n == 0;
+        $stdin .= $chunk;
+        exit 0 if length($stdin) > 900000;
+    }
+}
+alarm 5;
+my $payload = eval { decode_json($stdin) };
+$payload = {} unless ref($payload) eq 'HASH';
+my $session = $payload->{session_id};
+my $cwd = $payload->{cwd};
+$session = "$agent-$$" if !defined($session) || ref($session);
+$cwd = $ENV{PWD} // '' if !defined($cwd) || ref($cwd);
+my $support = $ENV{MNOTCH_SUPPORT_DIRECTORY}
+    // (($ENV{HOME} // '') . '/Library/Application Support/MNotch');
 my $token = slurp("$support/agent-token");
-my $port  = slurp("$support/agent-port");
+my $port = slurp("$support/agent-port");
 exit 0 unless defined $token && defined $port;
 $token =~ s/\s+//g; $port =~ s/\s+//g;
-exit 0 unless $token ne '' && $port =~ /^\d+$/;
-
+exit 0 unless length($token) > 0 && $port =~ /^\d+$/ && $port > 0 && $port <= 65535;
 my $sock = IO::Socket::INET->new(
     PeerHost => '127.0.0.1', PeerPort => $port, Proto => 'tcp', Timeout => 2
 ) or exit 0;
 $sock->autoflush(1);
-
-my $ev = sprintf(
-    '{"event":"status","session_id":"%s","cwd":"%s","agent_kind":"%s","title":"%s","term_program":"%s"}',
-    esc($session), esc($cwd), esc($agent), esc($title), esc($ENV{TERM_PROGRAM} // '')
-);
-print $sock qq({"token":"$token","event":$ev}\n);
+my $envelope = encode_json({ token => $token, event => {
+    event => 'status', session_id => $session, cwd => $cwd, agent_kind => $agent,
+    title => $title, term_program => $ENV{TERM_PROGRAM} // ''
+}}) . "\n";
+print $sock $envelope if length($envelope) <= 1000000;
 close $sock;
 exit 0;
-
-sub slurp { my ($p) = @_; open my $f, '<', $p or return undef; local $/; my $c = <$f>; close $f; $c }
-sub esc { my ($s) = @_; $s =~ s/\\/\\\\/g; $s =~ s/"/\\"/g; $s }
+sub slurp {
+    my ($path) = @_;
+    open my $file, '<', $path or return undef;
+    my $content;
+    read($file, $content, 4096);
+    close $file;
+    return $content;
+}

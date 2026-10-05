@@ -29,7 +29,7 @@ final class AccessibilityPermissionService {
         AccessibilityRequirement.isRequired(
             granted: isGranted,
             soundHUDEnabled: SettingsStore.shared.soundHUDEnabled,
-            displayHUDEnabled: SettingsStore.shared.displayHUDEnabled
+            displayHUDEnabled: SettingsStore.shared.displayHUDEnabled && (PrivateAPICompatibility.permits(.displayBrightness) || PrivateAPICompatibility.permits(.keyboardBacklight))
         )
     }
 
@@ -86,7 +86,7 @@ final class AccessibilityPermissionService {
         timer = nil
         guard shouldPoll else { return }
 
-        let timer = Timer(timeInterval: 2, repeats: true) { _ in
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
         timer.tolerance = 0.5

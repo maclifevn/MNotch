@@ -11,48 +11,49 @@ RELEASE_NOTES="${3:?missing release notes}"
 OUTPUT_DIR="${4:?missing output directory}"
 CRITICAL="${5:-false}"
 
-SPARKLE_ROOT="$ROOT/.build/artifacts/sparkle/Sparkle"
-GENERATE_APPCAST="$SPARKLE_ROOT/bin/generate_appcast"
-SIGN_UPDATE="$SPARKLE_ROOT/bin/sign_update"
-ACCOUNT="${MNOTCH_SPARKLE_ACCOUNT:-com.mnotch.app}"
-PRIVATE_KEY="${SPARKLE_PRIVATE_KEY_FILE:-}"
+SPARKLE_BIN="${MNOTCH_SPARKLE_BIN:-$ROOT/.build/artifacts/sparkle/Sparkle/bin}"
+GENERATE_APPCAST="$SPARKLE_BIN/generate_appcast"
+SIGN_UPDATE="$SPARKLE_BIN/sign_update"
 RELEASE_REPOSITORY="${MNOTCH_RELEASE_REPOSITORY:-maclifevn/MNotch}"
 CURRENT_FEED="${MNOTCH_CURRENT_FEED_URL:-https://github.com/maclifevn/MNotch/releases/latest/download/appcast.xml}"
 BOOTSTRAP="${MNOTCH_BOOTSTRAP_UPDATE_FEED:-false}"
+CURRENT_FEED_FILE="${MNOTCH_CURRENT_FEED_FILE:-}"
 
 [[ -x "$GENERATE_APPCAST" ]] || { echo "error: generate_appcast not found" >&2; exit 1; }
 [[ -x "$SIGN_UPDATE" ]] || { echo "error: sign_update not found" >&2; exit 1; }
 [[ -f "$ZIP" ]] || { echo "error: update ZIP not found" >&2; exit 1; }
 [[ -f "$RELEASE_NOTES" ]] || { echo "error: release notes not found" >&2; exit 1; }
-if [[ -n "$PRIVATE_KEY" && ! -f "$PRIVATE_KEY" ]]; then
-    echo "error: SPARKLE_PRIVATE_KEY_FILE does not exist" >&2
-    exit 1
-fi
 if [[ "$BOOTSTRAP" != "true" && "$BOOTSTRAP" != "false" ]]; then
     echo "error: MNOTCH_BOOTSTRAP_UPDATE_FEED must be true or false" >&2
     exit 1
 fi
-
-KEY_ARGS=()
-if [[ -n "$PRIVATE_KEY" ]]; then
-    KEY_ARGS+=(--ed-key-file "$PRIVATE_KEY")
-else
-    KEY_ARGS+=(--account "$ACCOUNT")
-fi
+[[ "$CRITICAL" == "true" || "$CRITICAL" == "false" ]] || {
+    echo "error: critical must be true or false" >&2; exit 1;
+}
+source Scripts/sparkle-signing.sh
+python3 Scripts/update-metadata.py "$ZIP" "$VERSION" --signing-public-key "$SIGNING_PUBLIC_KEY" >/dev/null
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mnotch-appcast.XXXXXX")"
 ARCHIVES="$WORK_DIR/archives"
-mkdir -p "$ARCHIVES" "$OUTPUT_DIR"
+mkdir -p "$ARCHIVES"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 # Preserve prior entries only after authenticating the signed production feed.
 # Missing history is allowed only for an explicitly marked first release; this
 # prevents a typo or network failure from silently replacing a live feed.
 HTTP_STATUS=""
-if HTTP_STATUS="$(/usr/bin/curl --fail --silent --show-error --location \
+if [[ -n "$CURRENT_FEED_FILE" ]]; then
+    if [[ -f "$CURRENT_FEED_FILE" ]]; then
+        ditto "$CURRENT_FEED_FILE" "$ARCHIVES/appcast.xml"
+    elif [[ "$BOOTSTRAP" != "true" ]]; then
+        echo "error: current feed file is missing; bootstrap must be explicit" >&2; exit 1
+    fi
+elif HTTP_STATUS="$(/usr/bin/curl --fail --silent --show-error --location \
+    --connect-timeout 10 --max-time 60 --max-filesize 2097152 \
+    --proto '=https' --proto-redir '=https' \
     --write-out '%{http_code}' --output "$ARCHIVES/appcast.xml" \
     "$CURRENT_FEED")"; then
-    "$SIGN_UPDATE" "${KEY_ARGS[@]}" --verify "$ARCHIVES/appcast.xml"
+    : # Authenticate below before parsing or re-signing any history.
 else
     CURL_STATUS=$?
     rm -f "$ARCHIVES/appcast.xml"
@@ -64,6 +65,10 @@ else
         echo "       use MNOTCH_BOOTSTRAP_UPDATE_FEED=true only for the first release" >&2
         exit "$CURL_STATUS"
     fi
+fi
+if [[ -f "$ARCHIVES/appcast.xml" ]]; then
+    "$SIGN_UPDATE" "${KEY_ARGS[@]}" --verify "$ARCHIVES/appcast.xml"
+    python3 Scripts/update-metadata.py "$ZIP" "$VERSION" --current-feed "$ARCHIVES/appcast.xml" >/dev/null
 fi
 
 ARCHIVE_NAME="MNotch-${VERSION}.zip"
@@ -88,16 +93,16 @@ else
 fi
 
 "$GENERATE_APPCAST" "${ARGS[@]}" "$ARCHIVES"
+MNOTCH_SPARKLE_BIN="$SPARKLE_BIN" Scripts/verify-update-feed.sh \
+        "$ARCHIVES/appcast.xml" \
+        "$ARCHIVES/$ARCHIVE_NAME" \
+        "$SIGN_UPDATE" \
+        "$VERSION"
+
+# Expose only a fully verified output, never a half-signed feed on failure.
+mkdir -p "$OUTPUT_DIR"
 ditto "$ARCHIVES/appcast.xml" "$OUTPUT_DIR/appcast.xml"
 ditto "$ARCHIVES/$ARCHIVE_NAME" "$OUTPUT_DIR/$ARCHIVE_NAME"
 ditto "$ARCHIVES/$NOTES_NAME" "$OUTPUT_DIR/$NOTES_NAME"
-
-SPARKLE_PRIVATE_KEY_FILE="$PRIVATE_KEY" \
-MNOTCH_SPARKLE_ACCOUNT="$ACCOUNT" \
-    Scripts/verify-update-feed.sh \
-        "$OUTPUT_DIR/appcast.xml" \
-        "$OUTPUT_DIR/$ARCHIVE_NAME" \
-        "$SIGN_UPDATE" \
-        "$VERSION"
 
 echo "Signed Sparkle feed ready at $OUTPUT_DIR/appcast.xml"

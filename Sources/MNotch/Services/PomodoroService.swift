@@ -158,7 +158,7 @@ final class PomodoroService {
 
     private func startTimer() {
         guard timer == nil else { return }
-        let timer = Timer(timeInterval: 1, repeats: true) { _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleTick() }
         }
         timer.tolerance = 0.1

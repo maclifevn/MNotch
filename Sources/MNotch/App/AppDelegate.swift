@@ -6,9 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = StatusItemController()
     private let updates = AppUpdateController.shared
     private var permissionNoticeTask: Task<Void, Never>?
+    private let healthProbe = AppHealthProbe()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        mnotchLog.notice("MNotch launched")
+        AppDiagnostics.record(.application, .started)
         installMainMenu()
         AppServices.shared.startAll()
         notchController = NotchWindowController()
@@ -19,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 #endif
         statusItem.install()
+        healthProbe.start()
         // Start only after the app's services and user-facing entry points are
         // ready. Release builds then follow Sparkle's daily schedule.
         updates.start()
@@ -76,7 +78,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchController?.repositionAll()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updates.applicationShouldTerminate()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        SubprocessLifecycle.shared.beginShutdown()
+        AppDiagnostics.record(.application, .stopped)
+        healthProbe.stop()
+        notchController?.stop()
         permissionNoticeTask?.cancel()
         AppServices.shared.stopAll()
     }

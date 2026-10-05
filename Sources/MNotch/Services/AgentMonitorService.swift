@@ -52,6 +52,7 @@ struct PendingRequest: Equatable {
 @MainActor
 @Observable
 final class AgentMonitorService {
+    var serverIsListening: Bool { server.port != 0 }
     private(set) var sessions: [AgentSession] = []
 
     /// A permission request needs the notch (auto-expand + approve/reject).
@@ -155,6 +156,11 @@ final class AgentMonitorService {
             }
 
         case "Stop", "SubagentStop":
+            if let id = session.request?.id {
+                server.drop(id)
+                session.request = nil
+                onRequestResolved?()
+            }
             session.status = .done
             if let msg = event.lastMessage { session.lastMessage = msg }
             upsert(session)
@@ -186,6 +192,10 @@ final class AgentMonitorService {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
         } else {
+            if sessions.count >= 100, let oldest = sessions.min(by: { $0.lastActivity < $1.lastActivity }) {
+                if let id = oldest.request?.id { server.drop(id) }
+                sessions.removeAll { $0.id == oldest.id }
+            }
             sessions.append(session)
         }
     }
@@ -283,7 +293,7 @@ final class AgentMonitorService {
             config.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
         } else {
-            mnotchLog.error("Agent jump: no resolvable app for program=\(term.program ?? "nil", privacy: .public)")
+            mnotchLog.error("Agent jump: no resolvable app for program=\(term.program ?? "nil", privacy: .private)")
         }
 
         // Precise tmux pane switch (works regardless of the outer terminal).
@@ -318,25 +328,14 @@ final class AgentMonitorService {
     }
 
     private func runShell(_ launch: String, _ args: [String]) {
-        Task.detached(priority: .userInitiated) {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: launch)
-            proc.arguments = args
-            proc.standardOutput = FileHandle.nullDevice
-            proc.standardError = FileHandle.nullDevice
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-            } catch {
-                mnotchLog.error("Agent jump command failed: \(error)")
-            }
+        Task {
+            _ = await SubprocessRunner.run(.init(executable: launch, arguments: args))
         }
     }
 
     private func runAppleScript(_ source: String) {
-        Task.detached {
-            var error: NSDictionary?
-            NSAppleScript(source: source)?.executeAndReturnError(&error)
+        Task {
+            _ = await SubprocessRunner.run(.init(executable: "/usr/bin/osascript", arguments: ["-e", source]))
         }
     }
 

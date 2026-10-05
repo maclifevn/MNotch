@@ -203,7 +203,7 @@ struct MediaExpandedView: View {
     }
 
     static func timeString(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds.rounded())
+        let total = Int(MediaRemoteService.safeMediaSeconds(seconds).rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

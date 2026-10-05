@@ -1,28 +1,5 @@
 import Foundation
 
-/// Collects a pipe's bytes on a background queue so both of a process's pipes
-/// can be drained concurrently without a full-buffer deadlock.
-private final class PipeDataBox: @unchecked Sendable { var data = Data() }
-
-/// A tiny synchronized buffer used by `FileHandle.readabilityHandler`.  Reading
-/// subprocess output this way matters for login shells: a broken shell startup
-/// file can keep a descendant (and therefore the pipe) alive after zsh exits.
-/// `readDataToEndOfFile()` would then wait forever even though we timed zsh out.
-private final class LockedPipeDataBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-
-    func append(_ chunk: Data) {
-        lock.lock(); defer { lock.unlock() }
-        data.append(chunk)
-    }
-
-    func snapshot() -> Data {
-        lock.lock(); defer { lock.unlock() }
-        return data
-    }
-}
-
 /// Reads Claude subscription usage by asking the local `claude` CLI itself
 /// (`claude -p /usage`). The CLI owns its own OAuth login, so MNotch never
 /// touches the Keychain, never triggers an access prompt, and never risks
@@ -48,9 +25,7 @@ final class ClaudeUsageClient {
     private var throttledUntil: Date?
     private var backoff: TimeInterval = 180
 
-    // The currently running CLI process, so stop() can actually terminate it.
-    private nonisolated(unsafe) static var runningProcess: Process?
-    private nonisolated static let processLock = NSLock()
+    private var cancellation: SubprocessCancellation?
 
     func start() {
         isActive = true
@@ -66,11 +41,14 @@ final class ClaudeUsageClient {
             return
         }
         if !force, let until = throttledUntil, until > Date() { return }
+        let cancellation = SubprocessCancellation()
+        self.cancellation = cancellation
         task = Task { [weak self] in
-            let outcome = await Self.fetch()
+            let outcome = await Self.fetch(cancellation: cancellation)
             guard let self else { return }
             let cancelled = Task.isCancelled
             self.task = nil
+            self.cancellation = nil
             if !cancelled {
                 switch outcome {
                 case .windows(let windows):
@@ -97,12 +75,7 @@ final class ClaudeUsageClient {
         // Terminate the running process and let the task nil itself once the
         // (now-terminated) fetch returns — never nil `task` here, or a restart
         // could launch a second concurrent `claude` while this one is alive.
-        Self.terminate()
-    }
-
-    private nonisolated static func terminate() {
-        processLock.lock(); defer { processLock.unlock() }
-        if runningProcess?.isRunning == true { runningProcess?.terminate() }
+        cancellation?.cancel()
     }
 
     private enum Outcome: Sendable {
@@ -110,15 +83,19 @@ final class ClaudeUsageClient {
         case unavailable(String)
     }
 
-    private nonisolated static func fetch() async -> Outcome {
-        await Task.detached(priority: .utility) { fetchSync() }.value
+    private nonisolated static func fetch(cancellation: SubprocessCancellation) async -> Outcome {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: fetchSync(cancellation: cancellation))
+            }
+        }
     }
 
-    private nonisolated static func fetchSync() -> Outcome {
-        guard let resolution = resolveClaude() else {
+    private nonisolated static func fetchSync(cancellation: SubprocessCancellation) -> Outcome {
+        guard !cancellation.isCancelled, let resolution = resolveClaude(cancellation: cancellation) else {
             return .unavailable("Install claude CLI for usage")
         }
-        let output = runUsage(claude: resolution.claude, path: resolution.path)
+        let output = runUsage(claude: resolution.claude, path: resolution.path, cancellation: cancellation)
         if output.localizedCaseInsensitiveContains("command not found") {
             return .unavailable("Install claude CLI for usage")
         }
@@ -135,43 +112,22 @@ final class ClaudeUsageClient {
 
     /// Run `claude -p /usage` under the user's login PATH and return combined
     /// stdout+stderr. Bounded by a hard timeout so a hung CLI can't wedge polling.
-    private nonisolated static func runUsage(claude: String, path: String) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: claude)
-        process.arguments = ["-p", "/usage"]
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = path
-        env["DISABLE_AUTOUPDATER"] = "1"
-        env["DISABLE_NON_ESSENTIAL_MODEL_CALLS"] = "1"
-        env["CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION"] = "1"
-        process.environment = env
-        process.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
-        let outPipe = Pipe(), errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        process.standardInput = FileHandle.nullDevice
-
-        do { try process.run() } catch { return "" }
-        processLock.lock(); runningProcess = process; processLock.unlock()
-        defer { processLock.lock(); runningProcess = nil; processLock.unlock() }
-
-        let killer = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30, execute: killer)
-
-        // Drain stderr concurrently so a child that fills one pipe's buffer
-        // while the other stays open can't deadlock the read.
-        let errBox = PipeDataBox()
-        let errDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            errBox.data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            errDone.signal()
-        }
-        let out = outPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        errDone.wait()
-        killer.cancel()
-
-        return String(decoding: out, as: UTF8.self) + "\n" + String(decoding: errBox.data, as: UTF8.self)
+    private nonisolated static func runUsage(
+        claude: String, path: String, cancellation: SubprocessCancellation
+    ) -> String {
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = path
+        environment["DISABLE_AUTOUPDATER"] = "1"
+        environment["DISABLE_NON_ESSENTIAL_MODEL_CALLS"] = "1"
+        environment["CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION"] = "1"
+        let result = SubprocessRunner.runSync(.init(
+            executable: claude, arguments: ["-p", "/usage"],
+            environment: environment, workingDirectory: NSTemporaryDirectory(),
+            timeout: 30, outputLimit: 2 * 1_024 * 1_024, component: .claude
+        ), cancellation: cancellation)
+        guard case .exited = result.completion else { return "" }
+        return String(decoding: result.stdout, as: UTF8.self) + "\n"
+            + String(decoding: result.stderr, as: UTF8.self)
     }
 
     private nonisolated static func isAuthError(_ text: String) -> Bool {
@@ -352,23 +308,23 @@ final class ClaudeUsageClient {
     /// Find `claude` using the login PATH, inherited PATH and deterministic
     /// package-manager locations. Cached once found. The shell is deliberately
     /// non-interactive: interactive plug-ins can wait for input indefinitely.
-    private nonisolated static func resolveClaude() -> Resolution? {
+    private nonisolated static func resolveClaude(cancellation: SubprocessCancellation = SubprocessCancellation()) -> Resolution? {
         resolutionLock.lock(); defer { resolutionLock.unlock() }
         if let cached = cachedResolution,
            FileManager.default.isExecutableFile(atPath: cached.claude) {
             return cached
         }
         cachedResolution = nil
-        let path = loginPath()
+        let path = loginPath(cancellation: cancellation)
         guard let claude = locate("claude", onPath: path) else { return nil }
         let resolution = Resolution(claude: claude, path: path)
         cachedResolution = resolution
         return resolution
     }
 
-    private nonisolated static func loginPath() -> String {
+    private nonisolated static func loginPath(cancellation: SubprocessCancellation) -> String {
         let mark = "__MNOTCH_PATH__"
-        let out = runZsh(["-lc", "printf '%s%s%s' '\(mark)' \"$PATH\" '\(mark)'"])
+        let out = runZsh(["-lc", "printf '%s%s%s' '\(mark)' \"$PATH\" '\(mark)'"], cancellation: cancellation)
         var shellPath: String?
         if let start = out.range(of: mark),
            let end = out.range(of: mark, range: start.upperBound..<out.endIndex) {
@@ -382,43 +338,15 @@ final class ClaudeUsageClient {
         ].compactMap { $0 })
     }
 
-    private nonisolated static func runZsh(_ args: [String]) -> String {
-        let process = Process()
-        let pipe = Pipe()
-        let output = LockedPipeDataBox()
-        let finished = DispatchSemaphore(value: 0)
-        let reader = pipe.fileHandleForReading
-
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        process.terminationHandler = { _ in finished.signal() }
-        reader.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            if !chunk.isEmpty { output.append(chunk) }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            reader.readabilityHandler = nil
-            return ""
-        }
-
-        // Shell profiles are user-controlled. A prompt, network plug-in, or
-        // stale mount must never occupy a worker forever or wedge quota refresh.
-        if finished.wait(timeout: .now() + 5) == .timedOut {
-            process.terminate()
-            if finished.wait(timeout: .now() + 0.5) == .timedOut {
-                kill(process.processIdentifier, SIGKILL)
-                _ = finished.wait(timeout: .now() + 0.5)
-            }
-        }
-        reader.readabilityHandler = nil
-        try? reader.close()
-        return String(decoding: output.snapshot(), as: UTF8.self)
+    private nonisolated static func runZsh(
+        _ args: [String], cancellation: SubprocessCancellation
+    ) -> String {
+        let result = SubprocessRunner.runSync(.init(
+            executable: "/bin/zsh", arguments: args, timeout: 5,
+            outputLimit: 256 * 1_024
+        ), cancellation: cancellation)
+        guard result.succeeded else { return "" }
+        return String(decoding: result.stdout, as: UTF8.self)
     }
 
     private nonisolated static func locate(_ name: String, onPath path: String) -> String? {

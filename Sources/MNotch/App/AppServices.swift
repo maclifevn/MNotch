@@ -63,6 +63,8 @@ final class AppServices {
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
     /// Set by NotchWindowController; fans pops out to every panel.
     var showPop: ((PopKind) -> Void)?
+    /// Reconciles windows after the display server has finished waking.
+    var displayDidWake: (() -> Void)?
 
     private var startedAt = Date.distantPast
     private var lastObservedVolume: Double?
@@ -252,6 +254,7 @@ final class AppServices {
         removeWorkspaceLifecycleObservers()
         featureCoordinator.stop()
         accessibility.stop()
+        pomodoro.reset()
     }
 
     func setAgentMonitoringEnabled(_ enabled: Bool) {
@@ -272,18 +275,35 @@ final class AppServices {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.setSuspension(reason, active: active) }
+                // The notification is already delivered serially on the main
+                // queue. An unstructured Task here could let wake overtake
+                // sleep (or vice versa) during a noisy clamshell transition.
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.setSuspension(reason, active: active)
+                    if !active {
+                        self.lockScreen.reconcileSystemState()
+                        self.displayDidWake?()
+                    }
+                }
             })
         }
         observe(NSWorkspace.screensDidSleepNotification, .displaySleep, active: true)
         observe(NSWorkspace.screensDidWakeNotification, .displaySleep, active: false)
+        // Clamshell sleep is a system sleep on some Macs but only a display
+        // sleep on others. macOS may omit/delay screensDidWake while still
+        // delivering didWake, so use it as an idempotent recovery signal for
+        // the same suspension reason.
+        observe(NSWorkspace.didWakeNotification, .displaySleep, active: false)
 
         applicationObservers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.featureCoordinator.applicationDidBecomeActive() }
+            MainActor.assumeIsolated {
+                self?.featureCoordinator.applicationDidBecomeActive()
+            }
         })
     }
 
@@ -294,6 +314,7 @@ final class AppServices {
         applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
         applicationObservers.removeAll()
         suspensionReasons.removeAll()
+        displayDidWake = nil
     }
 
     private func setSuspension(_ reason: SuspensionReason, active: Bool) {

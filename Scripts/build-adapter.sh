@@ -7,9 +7,10 @@ cd "$(dirname "$0")/.."
 V="$PWD/Vendor/mediaremote-adapter"
 OUT="$V/build"
 FW="$OUT/MediaRemoteAdapter.framework"
+DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 
 rm -rf "$OUT"
-mkdir -p "$FW/Versions/A/Resources"
+mkdir -p "$FW/Versions/A/Resources" "$OUT/objects"
 
 ADAPTER_SOURCES=(
     "$V"/src/adapter/*.m
@@ -17,11 +18,21 @@ ADAPTER_SOURCES=(
     "$V"/src/utility/*.m
 )
 
-clang -dynamiclib -fobjc-arc -fvisibility=default -O2 -arch arm64 \
-    -I"$V/include" -I"$V/src" \
+# dsymutil needs the compilation objects to exist. A compile-and-link command
+# with multiple .m inputs deletes its temporary objects before dsymutil runs.
+ADAPTER_OBJECTS=()
+for source in "${ADAPTER_SOURCES[@]}"; do
+    object="$OUT/objects/$(basename "${source%.m}").o"
+    clang -c -fobjc-arc -fvisibility=default -O2 -g -arch arm64 \
+        -mmacosx-version-min="$DEPLOYMENT_TARGET" -I"$V/include" -I"$V/src" \
+        "$source" -o "$object"
+    ADAPTER_OBJECTS+=("$object")
+done
+
+clang -dynamiclib -fobjc-arc -O2 -g -arch arm64 -mmacosx-version-min="$DEPLOYMENT_TARGET" \
     -framework Foundation -framework AppKit -framework UniformTypeIdentifiers \
     -install_name "@rpath/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter" \
-    "${ADAPTER_SOURCES[@]}" \
+    "${ADAPTER_OBJECTS[@]}" \
     -o "$FW/Versions/A/MediaRemoteAdapter"
 
 cat > "$FW/Versions/A/Resources/Info.plist" <<'PLIST'
@@ -49,13 +60,14 @@ ln -s A "$FW/Versions/Current"
 ln -s Versions/Current/MediaRemoteAdapter "$FW/MediaRemoteAdapter"
 ln -s Versions/Current/Resources "$FW/Resources"
 
-clang -fobjc-arc -O2 -arch arm64 \
+clang -fobjc-arc -O2 -g -arch arm64 -mmacosx-version-min="$DEPLOYMENT_TARGET" \
     -I"$V/src/test" \
     -framework Foundation -framework MediaPlayer \
     "$V"/src/test/*.m \
     -o "$OUT/MediaRemoteAdapterTestClient"
 
-codesign --force --deep --sign - "$FW"
+xcrun dsymutil "$FW/Versions/A/MediaRemoteAdapter" -o "$OUT/MediaRemoteAdapter.framework.dSYM"
+codesign --force --sign - "$FW"
 codesign --force --sign - "$OUT/MediaRemoteAdapterTestClient"
 
 echo "Built $FW"

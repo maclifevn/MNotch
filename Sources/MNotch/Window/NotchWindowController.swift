@@ -7,6 +7,7 @@ final class NotchWindowController {
     private var panels: [NotchPanel] = []
     private var viewModels: [NotchViewModel] = []
     private var rebuildTask: Task<Void, Never>?
+    private var wakeRecoveryTask: Task<Void, Never>?
     private var pointerTimer: Timer?
     /// SkyLight removes windows from their desktop spaces. Only a full rebuild
     /// can safely restore them, and only after we actually attempted elevation.
@@ -25,6 +26,18 @@ final class NotchWindowController {
         pointerTimer = timer
     }
 
+    func stop() {
+        pointerTimer?.invalidate()
+        pointerTimer = nil
+        rebuildTask?.cancel()
+        rebuildTask = nil
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = nil
+        panels.forEach { $0.close() }
+        panels.removeAll()
+        viewModels.removeAll()
+    }
+
     var debugPanels: [NotchPanel] { panels }
     var debugViewModels: [NotchViewModel] { viewModels }
 
@@ -36,11 +49,25 @@ final class NotchWindowController {
         scheduleRebuild()
     }
 
+    /// Display topology, WindowServer spaces and CoreAudio recover at slightly
+    /// different times after clamshell wake. Rebuild once immediately through
+    /// the normal screen-parameter notification, then once after the wake burst
+    /// settles so no stale/hidden panel survives from the sleeping display.
+    func recoverAfterDisplayWake() {
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled, let self else { return }
+            self.wakeRecoveryTask = nil
+            self.rebuild()
+        }
+    }
+
     private func rebuild() {
         rebuildTask?.cancel()
         rebuildTask = nil
         for panel in panels {
-            panel.orderOut(nil)
+            panel.close()
         }
         panels = []
         viewModels = []
@@ -48,7 +75,7 @@ final class NotchWindowController {
         let settings = SettingsStore.shared
         let elevateForLock = LockPresentationPolicy.shouldElevateNotch(
             isLocked: AppServices.shared.lockScreen.isLocked,
-            featureEnabled: settings.lockEnabled
+            featureEnabled: settings.lockEnabled && PrivateAPICompatibility.permits(.lockScreen)
         )
         let hidden = AppServices.shared.occlusion.shouldHide
 
@@ -113,6 +140,9 @@ final class NotchWindowController {
         }
         AppServices.shared.dismissAccessibilityNotice = { [weak self] in
             self?.viewModels.forEach { $0.dismissAccessibilityNotice() }
+        }
+        AppServices.shared.displayDidWake = { [weak self] in
+            self?.recoverAfterDisplayWake()
         }
         // While locked, move the notch panels into the SkyLight lock-screen
         // space so HUDs/pops stay visible over the shield (Alcove behavior).

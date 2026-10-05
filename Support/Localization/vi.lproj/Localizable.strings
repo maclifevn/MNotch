@@ -302,3 +302,19 @@
 "Quit" = "Thoát";
 "Also ⌘Q, or the menu bar icon." = "Hoặc nhấn ⌘Q, hoặc dùng icon trên thanh menu.";
 "Settings stays reachable from the gear tab in the notch, and you can always quit with ⌘Q or the button below." = "Vẫn mở được Cài đặt từ nút bánh răng trên notch, và luôn có thể thoát bằng ⌘Q hoặc nút bên dưới.";
+
+"Diagnostics" = "Chẩn đoán";
+
+"Export Diagnostics…" = "Xuất chẩn đoán…";
+
+"Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included." = "Lưu phiên bản, trạng thái dịch vụ và thông tin lỗi trên máy. Không bao gồm nội dung file, hội thoại, thông tin tài khoản hay token.";
+
+"Couldn't save diagnostics. Choose another location and try again." = "Không lưu được chẩn đoán. Hãy chọn vị trí khác và thử lại.";
+
+"Private macOS integration is disabled until this macOS version completes compatibility verification." = "Tích hợp API riêng của macOS được tắt cho đến khi phiên bản macOS này hoàn tất kiểm tra tương thích.";
+
+"File is outside the File Tray." = "File nằm ngoài khay tệp.";
+"Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged." = "Cấu hình hook hiện tại bị lỗi hoặc quá lớn. Hãy sửa trước khi cài hook; MNotch đã giữ nguyên tệp này.";
+"Preparing Update" = "Chuẩn bị cập nhật";
+"Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Đang chờ Khay tệp hoàn tất sao chép hoặc kéo tệp. Thao tác tệp mới tạm dừng cho đến khi bắt đầu cập nhật.";
+"Cancel Update" = "Hủy cập nhật";

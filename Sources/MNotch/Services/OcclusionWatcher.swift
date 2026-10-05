@@ -35,7 +35,7 @@ final class OcclusionWatcher {
             }
         }
 
-        let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.evaluate() }
         }
         timer.tolerance = 0.3
@@ -53,7 +53,6 @@ final class OcclusionWatcher {
         }
         activationObserver = nil
         evaluationTask?.cancel()
-        evaluationTask = nil
         evaluationRequested = false
         frontmostBundleID = nil
         frontmostPID = nil
@@ -65,6 +64,7 @@ final class OcclusionWatcher {
     }
 
     private func evaluate() {
+        guard timer != nil else { return }
         guard evaluationTask == nil else {
             evaluationRequested = true
             return
@@ -111,8 +111,13 @@ final class OcclusionWatcher {
                 return hideMissionControl && Self.missionControlActive(in: windows)
             }.value
 
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
             self.evaluationTask = nil
+            guard !Task.isCancelled else {
+                if self.timer != nil { self.evaluate() }
+                return
+            }
+            guard self.timer != nil else { return }
             self.apply(shouldHide)
             if self.evaluationRequested {
                 self.evaluationRequested = false

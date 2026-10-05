@@ -2,8 +2,6 @@ import AppKit
 import os
 import SwiftUI
 
-let mnotchLog = Logger(subsystem: "com.mnotch.app", category: "media")
-
 struct MediaPlayback: Equatable {
     var title = ""
     var artist = ""
@@ -69,7 +67,10 @@ final class MediaRemoteService {
     private(set) var accentColor: Color = .white
 
     var hasActiveMedia: Bool { !playback.title.isEmpty }
+    var isPolling: Bool { pollTask != nil }
 
+    private var commandTask: Task<Void, Never>?
+    private var pendingCommands: [SubprocessRunner.Request] = []
     private var pollTask: Task<Void, Never>?
     private var confirmationTask: Task<Void, Never>?
     private var artworkTask: Task<Void, Never>?
@@ -108,7 +109,7 @@ final class MediaRemoteService {
     /// Field types vary by media source (e.g. identifiers are strings for
     /// Music but numbers for browsers), so every field decodes leniently —
     /// one odd field must never sink the whole payload.
-    private struct GetPayload: Decodable {
+    struct GetPayload: Decodable {
         var title: String?
         var artist: String?
         var album: String?
@@ -144,7 +145,7 @@ final class MediaRemoteService {
             func num(_ key: String) -> Double? {
                 let k = AnyKey(stringValue: key)
                 if let d = try? c.decode(Double.self, forKey: k), d.isFinite { return d }
-                if let s = try? c.decode(String.self, forKey: k) { return Double(s) }
+                if let s = try? c.decode(String.self, forKey: k) { return SafeNumeric.number(s) }
                 return nil
             }
             func bool(_ key: String) -> Bool? {
@@ -165,8 +166,8 @@ final class MediaRemoteService {
             parentApplicationBundleIdentifier = str("parentApplicationBundleIdentifier")
             bundleIdentifier = str("bundleIdentifier")
             contentItemIdentifier = str("contentItemIdentifier")
-            shuffleMode = num("shuffleMode").map(Int.init)
-            repeatMode = num("repeatMode").map(Int.init)
+            shuffleMode = SafeNumeric.integer(num("shuffleMode"))
+            repeatMode = SafeNumeric.integer(num("repeatMode"))
             mediaType = str("mediaType")
         }
     }
@@ -198,6 +199,9 @@ final class MediaRemoteService {
 
     func stop() {
         runGeneration &+= 1
+        commandTask?.cancel()
+        commandTask = nil
+        pendingCommands.removeAll()
         pollTask?.cancel()
         pollTask = nil
         confirmationTask?.cancel()
@@ -280,7 +284,7 @@ final class MediaRemoteService {
             let identity = playback.trackIdentity
             artworkTask = Task { [weak self] in
                 await self?.fetchArtwork(for: identity)
-                guard let self, self.artworkIdentity == identity else { return }
+                guard let self, self.runGeneration == generation, self.artworkIdentity == identity else { return }
                 self.artworkTask = nil
             }
         }
@@ -294,10 +298,10 @@ final class MediaRemoteService {
         new.title = p.title ?? ""
         new.artist = p.artist ?? ""
         new.album = p.album ?? ""
-        new.duration = p.duration ?? 0
+        new.duration = Self.safeMediaSeconds(p.duration)
         new.bundleIdentifier = p.parentApplicationBundleIdentifier ?? p.bundleIdentifier ?? ""
         new.trackIdentity = p.contentItemIdentifier ?? (new.title + "|" + new.artist)
-        new.elapsedTime = p.elapsedTimeNow ?? p.elapsedTime ?? 0
+        new.elapsedTime = Self.safeMediaSeconds(p.elapsedTimeNow ?? p.elapsedTime)
         new.timestamp = now
         new.shuffleMode = p.shuffleMode
         new.repeatMode = p.repeatMode
@@ -329,7 +333,7 @@ final class MediaRemoteService {
             }
         }
         new.isPlaying = resolvedPlaying
-        new.playbackRate = p.playbackRate ?? (resolvedPlaying ? 1 : 0)
+        new.playbackRate = p.playbackRate.flatMap { (-16...16).contains($0) ? $0 : nil } ?? (resolvedPlaying ? 1 : 0)
 
         if new.isPlaying {
             lastPlayingAt = now
@@ -445,7 +449,8 @@ final class MediaRemoteService {
                 guard let data = Data(base64Encoded: artworkString.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 )) else { return nil as (Data, DominantColor.Components)? }
-                return (data, DominantColor.accent(from: data))
+                guard let thumbnail = ArtworkDecoder.thumbnailData(data) else { return nil }
+                return (thumbnail, DominantColor.accent(from: thumbnail))
             }.value
             guard !Task.isCancelled,
                   playback.trackIdentity == identity,
@@ -576,12 +581,11 @@ final class MediaRemoteService {
                 return
             }
             if let scriptName {
-                var error: NSDictionary?
-                NSAppleScript(source: "tell application \"\(scriptName)\" to play")?
-                    .executeAndReturnError(&error)
-                if let error {
-                    mnotchLog.error("Preferred player script failed: \(error, privacy: .public)")
-                }
+                _ = await SubprocessRunner.run(.init(
+                    executable: "/usr/bin/osascript",
+                    arguments: ["-e", #"tell application "\#(scriptName)" to play"#],
+                    component: .media
+                ))
             } else if let paths {
                 // MediaRemote's send command has no target bundle ID. Never
                 // broadcast on a timer: wait until the selected player itself
@@ -617,18 +621,21 @@ final class MediaRemoteService {
         observedBundleID == preferredBundleID && observedPlaying != true
     }
 
-    private nonisolated static func playWhenPreferredTargetIsReady(
+    nonisolated static func playWhenPreferredTargetIsReady(
         preferredBundleID: String,
-        paths: (script: String, framework: String)
+        paths: (script: String, framework: String),
+        registrationTimeout: TimeInterval = 8
     ) async {
-        // Three seconds is long enough for a normal app launch/registration but
-        // short enough that a broken player cannot leave the UI in a start state
-        // indefinitely. Each adapter call also owns its existing hard watchdog.
+        // Registration has one total deadline. Twelve individually timed-out
+        // helpers must not hold a preferred start for 96 seconds.
+        guard registrationTimeout.isFinite, registrationTimeout > 0 else { return }
+        let deadline = ProcessInfo.processInfo.systemUptime + min(8, registrationTimeout)
         for attempt in 0..<12 {
-            guard !Task.isCancelled else { return }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard !Task.isCancelled, remaining > 0 else { return }
             let line = await captureFirstLine([
                 paths.script, paths.framework, "get", "--now", "--no-artwork",
-            ])
+            ], timeout: min(8, remaining))
             guard !Task.isCancelled else { return }
 
             if let line, line != "null",
@@ -642,7 +649,10 @@ final class MediaRemoteService {
                         observedBundleID: observed,
                         observedPlaying: payload.playing
                     ) {
-                        runAdapterSync([paths.script, paths.framework, "send", "0"])
+                        _ = await SubprocessRunner.run(.init(
+                            executable: "/usr/bin/perl",
+                            arguments: [paths.script, paths.framework, "send", "0"], component: .media
+                        ))
                     }
                     return
                 }
@@ -655,11 +665,13 @@ final class MediaRemoteService {
     }
 
     func seek(to seconds: TimeInterval) {
+        guard seconds.isFinite, seconds >= 0,
+              let microseconds = SafeNumeric.integer(seconds * 1_000_000) else { return }
         var p = playback
         p.elapsedTime = seconds
         p.timestamp = Date()
         playback = p
-        runAdapter(["seek", String(Int(seconds * 1_000_000))])
+        runAdapter(["seek", String(microseconds)])
         pollSoon()
     }
 
@@ -688,17 +700,13 @@ final class MediaRemoteService {
     /// Favorite the current track (Apple Music only, via AppleScript).
     func favoriteCurrentTrack() {
         guard playback.bundleIdentifier == "com.apple.Music" else { return }
-        Task.detached(priority: .userInitiated) {
-            let script = NSAppleScript(source: """
+        enqueueCommand(.init(executable: "/usr/bin/osascript", arguments: ["-e", """
             tell application "Music"
                 try
                     set favorited of current track to not (favorited of current track)
                 end try
             end tell
-            """)
-            var error: NSDictionary?
-            script?.executeAndReturnError(&error)
-        }
+            """], component: .media))
     }
 
     func toggleShuffle() {
@@ -744,81 +752,51 @@ final class MediaRemoteService {
         playback = p
     }
 
+    nonisolated static func safeMediaSeconds(_ value: Double?) -> Double {
+        // A finite but enormous duration still traps display-time Int conversion.
+        // One year supports long streams while bounding all display arithmetic.
+        guard let value, value.isFinite, (0...31_536_000).contains(value) else { return 0 }
+        return value
+    }
+
     private func runAdapter(_ arguments: [String]) {
         guard let paths = Self.adapterPaths else { return }
-        let processArguments = [paths.script, paths.framework] + arguments
-        Task.detached(priority: .userInitiated) {
-            Self.runAdapterSync(processArguments)
+        let request = SubprocessRunner.Request(executable: "/usr/bin/perl",
+            arguments: [paths.script, paths.framework] + arguments, component: .media)
+        if arguments.first == "seek", let index = pendingCommands.lastIndex(where: { $0.arguments.dropFirst(2).first == "seek" }) {
+            pendingCommands[index] = request
+            return
+        }
+        enqueueCommand(request)
+    }
+
+    private func enqueueCommand(_ request: SubprocessRunner.Request) {
+        guard pendingCommands.count < 16 else {
+            AppDiagnostics.record(.media, .outputLimit)
+            return
+        }
+        pendingCommands.append(request)
+        guard commandTask == nil else { return }
+        let generation = runGeneration
+        commandTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.runGeneration == generation else { return }
+                guard !self.pendingCommands.isEmpty else { self.commandTask = nil; return }
+                let next = self.pendingCommands.removeFirst()
+                _ = await SubprocessRunner.run(next)
+            }
         }
     }
 
-    private nonisolated static func runAdapterSync(_ arguments: [String]) {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        proc.arguments = arguments
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            // Reap the command and cap its lifetime. Fire-and-forget Process
-            // objects can accumulate when mediaremoted is unhealthy.
-            let deadline = Date().addingTimeInterval(8)
-            while proc.isRunning, Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-            if proc.isRunning { proc.terminate() }
-            proc.waitUntilExit()
-        } catch {
-            mnotchLog.error("Media command failed: \(error)")
-        }
-    }
-
-    // MARK: - Process helper
-
-    private nonisolated static func captureFirstLine(_ arguments: [String]) async -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        proc.arguments = arguments
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-        } catch {
-            return nil
-        }
-        defer {
-            // Covers cancellation/read errors as well as the normal path.
-            if proc.isRunning { proc.terminate() }
-        }
-        if Task.isCancelled {
-            if proc.isRunning { proc.terminate() }
-            return nil
-        }
-        // Watchdog: a wedged adapter (stuck mediaremoted) would otherwise
-        // block this await forever and freeze the entire poll loop on stale
-        // now-playing state. Terminating closes the pipe → the read returns.
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            proc.terminate()
-        }
-        defer { watchdog.cancel() }
-        var first: String?
-        do {
-            for try await line in pipe.fileHandleForReading.bytes.lines {
-                first = line
-                break
-            }
-        } catch {
-            return nil
-        }
-        // We need one JSON line only. Close and reap the helper promptly so a
-        // malformed adapter cannot leave Perl children or open pipes behind.
-        try? pipe.fileHandleForReading.close()
-        if proc.isRunning { proc.terminate() }
-        proc.waitUntilExit()
-        guard !Task.isCancelled else { return nil }
-        return first
+    // The artwork response is larger; metadata-only responses use a 1 MiB cap.
+    private nonisolated static func captureFirstLine(_ arguments: [String], timeout: TimeInterval = 8) async -> String? {
+        let limit = arguments.contains("--no-artwork") ? 1_024 * 1_024 : 16 * 1_024 * 1_024
+        let result = await SubprocessRunner.run(.init(
+            executable: "/usr/bin/perl", arguments: arguments,
+            timeout: timeout, outputLimit: limit, component: .media
+        ))
+        guard result.succeeded, !Task.isCancelled else { return nil }
+        return String(decoding: result.stdout, as: UTF8.self)
+            .split(separator: "\n", maxSplits: 1).first.map(String.init)
     }
 }

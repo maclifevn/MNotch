@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.5 — Stability and macOS 27 compatibility
+
+- Complete the MFinder-style Sparkle release flow with local release/publish
+  commands, signed history/version/build validation and artifact manifests.
+- Wait for File Tray copies, cleanup and active drags before update installation;
+  allow cancelling the wait and retrying the downloaded update.
+- Validate media, quota and numeric preferences before conversions and geometry.
+- Bound subprocess deadlines/output and reap processes ignoring termination;
+  handle closed Codex pipes without SIGPIPE and coalesce callback bursts.
+- Prevent late Calendar/agent/Bluetooth results from restoring stopped resources;
+  bound agent connections and session history.
+- Preserve sleep/wake notification ordering, reconcile missed unlock state and
+  rebuild stale notch panels after clamshell wake.
+- Protect hook configuration from malformed input and failed script deployment;
+  use bounded JSON relay parsing and preserve native approval fallbacks.
+- Restrict File Tray cleanup to its own files and roll back failed copy batches.
+- Gate unverified direct private macOS integrations with a Settings explanation.
+- Add local diagnostics export, isolated soak instrumentation, regression tests,
+  sanitizer CI, deployment-target verification and matching dSYM preservation.
+- Update Sparkle to 2.10.0 with upstream security and macOS 27 reliability fixes.
+
 ## 1.4
 
 - **Signed automatic updates** — Sparkle 2.9.4 checks daily, supports manual

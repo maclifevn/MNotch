@@ -1,1 +1,17 @@
 /* English is the development language. Source strings are used as values. */
+
+"Diagnostics" = "Diagnostics";
+
+"Export Diagnostics…" = "Export Diagnostics…";
+
+"Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included." = "Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included.";
+
+"Couldn't save diagnostics. Choose another location and try again." = "Couldn't save diagnostics. Choose another location and try again.";
+
+"Private macOS integration is disabled until this macOS version completes compatibility verification." = "Private macOS integration is disabled until this macOS version completes compatibility verification.";
+
+"File is outside the File Tray." = "File is outside the File Tray.";
+"Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged." = "Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged.";
+"Preparing Update" = "Preparing Update";
+"Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts.";
+"Cancel Update" = "Cancel Update";

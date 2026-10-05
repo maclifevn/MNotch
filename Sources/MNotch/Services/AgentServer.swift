@@ -174,11 +174,24 @@ final class AgentServer {
 
     private var pending: [Int: PendingConnection] = [:]
     private var nextID = 1
+    private var generation: UInt64 = 0
+    private struct AcceptedConnection {
+        let connection: NWConnection
+        let readTimeout: Task<Void, Never>
+    }
+    private var connections: [ObjectIdentifier: AcceptedConnection] = [:]
+    private let directoryOverride: URL?
+    static let maximumConnections = 32
+    nonisolated static let maximumPayloadBytes = 1_000_000
+    var activeConnectionCount: Int { connections.count }
+
+    init(directory: URL? = nil) { directoryOverride = directory }
+    private var directory: URL { directoryOverride ?? Self.supportDirectory }
+    private var tokenURL: URL { directory.appending(path: "agent-token") }
+    private var portURL: URL { directory.appending(path: "agent-port") }
 
     static var supportDirectory: URL {
-        let base = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appending(path: "MNotch")
+        let base = AppPaths.supportDirectory
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o700], ofItemAtPath: base.path
@@ -191,8 +204,12 @@ final class AgentServer {
 
     func start() {
         guard listener == nil else { return }
-        try? FileManager.default.removeItem(at: Self.portFile)
-        token = Self.loadOrCreateToken()
+        generation &+= 1
+        let generation = self.generation
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try? FileManager.default.removeItem(at: portURL)
+        token = loadOrCreateToken()
 
         do {
             let params = NWParameters.tcp
@@ -200,11 +217,25 @@ final class AgentServer {
             let listener = try NWListener(using: params)
             listener.stateUpdateHandler = { [weak self] state in
                 if case .ready = state {
-                    Task { @MainActor in self?.listenerBecameReady() }
+                    Task { @MainActor in
+                        guard let self, self.generation == generation else { return }
+                        self.listenerBecameReady()
+                    }
+                } else if case .failed = state {
+                    Task { @MainActor in
+                        guard let self, self.generation == generation else { return }
+                        self.stop()
+                    }
                 }
             }
             listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in self?.accept(connection) }
+                Task { @MainActor in
+                    guard let self, self.generation == generation, self.listener != nil else {
+                        connection.cancel()
+                        return
+                    }
+                    self.accept(connection)
+                }
             }
             listener.start(queue: networkQueue)
             self.listener = listener
@@ -214,28 +245,48 @@ final class AgentServer {
     }
 
     func stop() {
+        generation &+= 1
         listener?.cancel()
         listener = nil
         port = 0
-        try? FileManager.default.removeItem(at: Self.portFile)
+        try? FileManager.default.removeItem(at: portURL)
         for entry in pending.values {
             entry.timeout.cancel()
             entry.connection.cancel()
         }
         pending.removeAll()
+        let accepted = connections.values
+        connections.removeAll()
+        for entry in accepted {
+            entry.readTimeout.cancel()
+            entry.connection.cancel()
+        }
     }
 
     private func listenerBecameReady() {
         guard let p = listener?.port?.rawValue else { return }
         port = p
-        try? String(p).write(to: Self.portFile, atomically: true, encoding: .utf8)
+        try? String(p).write(to: portURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: Self.portFile.path
+            [.posixPermissions: 0o600], ofItemAtPath: portURL.path
         )
         mnotchLog.notice("AgentServer ready on 127.0.0.1:\(p)")
     }
 
     private func accept(_ connection: NWConnection) {
+        guard listener != nil, connections.count < Self.maximumConnections else {
+            connection.cancel()
+            return
+        }
+        let readTimeout = Task { [weak self, weak connection] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled, let connection else { return }
+            self?.removePending(for: connection)
+            connection.cancel()
+        }
+        connections[ObjectIdentifier(connection)] = AcceptedConnection(
+            connection: connection, readTimeout: readTimeout
+        )
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let connection else { return }
             switch state {
@@ -258,11 +309,16 @@ final class AgentServer {
     /// accumulate bytes and process as soon as the buffer decodes as a full
     /// envelope. Caps the buffer to avoid unbounded growth on garbage input.
     private func receiveLine(on connection: NWConnection, buffer: Data) {
+        guard connections[ObjectIdentifier(connection)] != nil else { connection.cancel(); return }
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) {
             [weak self] data, _, isComplete, error in
             var buffer = buffer
             if let data { buffer.append(data) }
 
+            guard buffer.count <= Self.maximumPayloadBytes else {
+                connection.cancel()
+                return
+            }
             if let envelope = try? JSONDecoder().decode(Envelope.self, from: buffer) {
                 Task { @MainActor in self?.handle(envelope, on: connection) }
                 return
@@ -277,25 +333,27 @@ final class AgentServer {
         }
     }
 
-    private struct Envelope: Decodable {
+    private struct Envelope: Decodable, Sendable {
         let token: String
         let event: AgentEvent
     }
 
     private func handle(_ envelope: Envelope, on connection: NWConnection) {
+        guard let accepted = connections[ObjectIdentifier(connection)] else { connection.cancel(); return }
+        accepted.readTimeout.cancel()
         guard envelope.token == token else {
             mnotchLog.error("AgentServer token mismatch")
             connection.cancel()
             return
         }
-        mnotchLog.notice("AgentServer event=\(envelope.event.event, privacy: .public) perm=\(envelope.event.isPermissionRequest)")
+        mnotchLog.notice("AgentServer event=\(envelope.event.event, privacy: .private) perm=\(envelope.event.isPermissionRequest)")
         dispatch(envelope.event, on: connection)
     }
 
     private func dispatch(_ event: AgentEvent, on connection: NWConnection) {
         if event.isPermissionRequest {
             let id = nextID
-            nextID += 1
+            nextID = nextID == Int.max ? 1 : nextID + 1
             let timeout = Task { [weak self, weak connection] in
                 try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled, let connection else { return }
@@ -373,6 +431,7 @@ final class AgentServer {
     }
 
     private func removePending(for connection: NWConnection) {
+        connections.removeValue(forKey: ObjectIdentifier(connection))?.readTimeout.cancel()
         let ids = pending.compactMap { id, entry in
             entry.connection === connection ? id : nil
         }
@@ -382,20 +441,23 @@ final class AgentServer {
         }
     }
 
-    private static func loadOrCreateToken() -> String {
-        if let existing = try? String(contentsOf: tokenFile, encoding: .utf8) {
+    private func loadOrCreateToken() -> String {
+        if let reader = try? FileHandle(forReadingFrom: tokenURL) {
+            defer { try? reader.close() }
+            let bytes = (try? reader.read(upToCount: 129)) ?? Data()
+            let existing = String(data: bytes, encoding: .utf8) ?? ""
             let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
+            if !trimmed.isEmpty, bytes.count <= 128 {
                 try? FileManager.default.setAttributes(
-                    [.posixPermissions: 0o600], ofItemAtPath: tokenFile.path
+                    [.posixPermissions: 0o600], ofItemAtPath: tokenURL.path
                 )
                 return trimmed
             }
         }
         let fresh = UUID().uuidString + UUID().uuidString
-        try? fresh.write(to: tokenFile, atomically: true, encoding: .utf8)
+        try? fresh.write(to: tokenURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: tokenFile.path
+            [.posixPermissions: 0o600], ofItemAtPath: tokenURL.path
         )
         return fresh
     }

@@ -45,7 +45,7 @@ final class QuotaService {
         codexClient.start()
         claudeClient.start()
         refresh()
-        let timer = Timer(timeInterval: 180, repeats: true) { _ in
+        let timer = Timer(timeInterval: 180, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
         timer.tolerance = 30

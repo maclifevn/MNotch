@@ -27,6 +27,8 @@ private final class AudioHALWorker: @unchecked Sendable {
     private var pendingVolume: Double?
     private var pendingMute: Bool?
     private var writeDrainScheduled = false
+    private var refreshScheduled = false
+    private var deviceRefreshScheduled = false
 
     // 'vmvc' — virtual main volume (same selector AudioHardwareService used).
     private var volumeAddress = AudioObjectPropertyAddress(
@@ -70,14 +72,22 @@ private final class AudioHALWorker: @unchecked Sendable {
             // deliberate: never add/remove/query properties from inside HAL's
             // own notification delivery and coalesce bursts naturally.
             self.volumeListener = { [weak self] _, _ in
-                self?.queue.async { [weak self] in
-                    guard let self, self.started, self.generation == generation else { return }
+                guard let self, !self.refreshScheduled else { return }
+                self.refreshScheduled = true
+                self.queue.async { [weak self] in
+                    guard let self else { return }
+                    self.refreshScheduled = false
+                    guard self.started, self.generation == generation else { return }
                     self.refresh()
                 }
             }
             self.defaultDeviceListener = { [weak self] _, _ in
-                self?.queue.async { [weak self] in
-                    guard let self, self.started, self.generation == generation else { return }
+                guard let self, !self.deviceRefreshScheduled else { return }
+                self.deviceRefreshScheduled = true
+                self.queue.async { [weak self] in
+                    guard let self else { return }
+                    self.deviceRefreshScheduled = false
+                    guard self.started, self.generation == generation else { return }
                     self.followDefaultDevice()
                 }
             }
@@ -102,6 +112,8 @@ private final class AudioHALWorker: @unchecked Sendable {
             self.pendingVolume = nil
             self.pendingMute = nil
             self.writeDrainScheduled = false
+            self.refreshScheduled = false
+            self.deviceRefreshScheduled = false
             AudioObjectRemovePropertyListenerBlock(
                 AudioObjectID(kAudioObjectSystemObject),
                 &self.defaultDeviceAddress,
@@ -126,7 +138,7 @@ private final class AudioHALWorker: @unchecked Sendable {
     func setVolume(_ value: Double) {
         queue.async { [weak self] in
             guard let self, self.started else { return }
-            self.pendingVolume = min(max(value, 0), 1)
+            self.pendingVolume = SafeNumeric.unit(value, fallback: self.volume)
             self.scheduleWriteDrain()
         }
     }
@@ -288,6 +300,7 @@ private final class AudioHALWorker: @unchecked Sendable {
 @MainActor
 @Observable
 final class AudioOutputService {
+    var isRunning: Bool { started }
     private(set) var volume: Double = 0.5
     private(set) var muted = false
     private(set) var outputName = ""
@@ -297,14 +310,20 @@ final class AudioOutputService {
     @ObservationIgnored var onVolumeChanged: ((Double, Bool) -> Void)?
     @ObservationIgnored private var started = false
     @ObservationIgnored private let hal = AudioHALWorker()
+    @ObservationIgnored private var runGeneration: UInt64 = 0
 
     func start() {
         guard !started else { return }
         started = true
+        runGeneration &+= 1
+        let generation = runGeneration
+        let mailbox = LatestValueMailbox<AudioHALWorker.Snapshot>()
         hal.start { [weak self] snapshot in
+            guard mailbox.submit(snapshot) else { return }
             Task { @MainActor [weak self] in
-                guard let self, self.started else { return }
-                self.apply(snapshot)
+                let latest = mailbox.take()
+                guard let self, self.started, self.runGeneration == generation, let latest else { return }
+                self.apply(latest)
             }
         }
     }
@@ -312,6 +331,7 @@ final class AudioOutputService {
     func stop() {
         guard started else { return }
         started = false
+        runGeneration &+= 1
         hal.stop()
     }
 
@@ -322,7 +342,8 @@ final class AudioOutputService {
 
     func setVolume(_ newVolume: Double) {
         guard started else { return }
-        let clamped = min(max(newVolume, 0), 1)
+        guard newVolume.isFinite else { return }
+        let clamped = SafeNumeric.unit(newVolume)
         volume = clamped
         if muted, clamped > 0 { muted = false }
         hal.setVolume(clamped)
@@ -336,7 +357,7 @@ final class AudioOutputService {
 
     private func apply(_ snapshot: AudioHALWorker.Snapshot) {
         let changed = volume != snapshot.volume || muted != snapshot.muted
-        volume = snapshot.volume
+        volume = SafeNumeric.unit(snapshot.volume, fallback: volume)
         muted = snapshot.muted
         outputName = snapshot.outputName
         outputSymbol = snapshot.outputSymbol

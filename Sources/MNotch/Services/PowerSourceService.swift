@@ -49,7 +49,8 @@ final class PowerSourceService {
         let source = IOPSNotificationCreateRunLoopSource(
             callback,
             Unmanaged.passUnretained(self).toOpaque()
-        ).takeRetainedValue()
+        )?.takeRetainedValue()
+        guard let source else { return }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
         runLoopSource = source
     }
@@ -76,7 +77,7 @@ final class PowerSourceService {
                 .takeUnretainedValue() as? [String: Any]
             else { continue }
             if let capacity = desc[kIOPSCurrentCapacityKey] as? Int {
-                percentage = capacity
+                percentage = min(max(capacity, 0), 100)
             }
             isCharging = desc[kIOPSIsChargingKey] as? Bool ?? false
             if let state = desc[kIOPSPowerSourceStateKey] as? String {

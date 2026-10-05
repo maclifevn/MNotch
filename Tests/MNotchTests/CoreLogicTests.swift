@@ -411,7 +411,8 @@ final class CoreLogicTests: XCTestCase {
 
         let migrated = ClaudeHookInstaller.restoringRetiredQuotaBridge(
             in: root,
-            backupData: backup
+            backupData: backup,
+            legacyCommand: "/usr/bin/perl '/tmp/mnotch-claude-statusline.pl'"
         )
 
         XCTAssertTrue(migrated.restored)
@@ -773,7 +774,8 @@ final class CoreLogicTests: XCTestCase {
             })
         }
 
-        let removed = CodexHookInstaller.uninstalling(from: installed)
+        let removed = CodexHookInstaller.uninstalling(from: installed,
+            command: "/usr/bin/perl '/tmp/mnotch-relay.pl' codex")
         XCTAssertEqual(removed["custom"] as? String, "keep")
         let remainingHooks = try XCTUnwrap(removed["hooks"] as? [String: Any])
         let permissionGroups = try XCTUnwrap(

@@ -18,6 +18,11 @@ struct HUDSettingsPane: View {
                 Toggle(isOn: $enabled) {
                     Label(LocalizedStringKey(title), systemImage: symbol)
                 }
+                if symbol == "sun.max.fill",
+                   !PrivateAPICompatibility.permits(.displayBrightness) {
+                    Text(L10n.string(PrivateAPICompatibility.unavailableReason))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Group {
                     SliderRow(
                         title: "Duration",

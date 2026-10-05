@@ -10,7 +10,7 @@ struct AppUpdateRuntimePolicy: Equatable, Sendable {
     let environment: [String: String]
 
     var updatesAreEnabled: Bool {
-        guard !isRunningTests else { return false }
+        guard !isRunningTests, environment["MNOTCH_DIAGNOSTIC_RUN"] != "1" else { return false }
         return !isDebugBuild || environment["MNOTCH_ENABLE_UPDATES"] == "1"
     }
 
@@ -59,6 +59,17 @@ final class AppUpdateController: NSObject {
         userDriverDelegate: nil
     )
     private var hasStarted = false
+    private lazy var installationCoordinator = UpdateInstallationCoordinator.live()
+    private var preparationTask: Task<Void, Never>?
+    private var postponedInstallHandler: (() -> Void)?
+    private var automaticInstallOnQuitHandler: (() -> Void)?
+    private var waitingWindow: UpdateWaitWindowController?
+
+    static var sparkleVersion: String {
+        Bundle(for: SPUUpdater.self).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.10.0"
+    }
+
+    var isPreparingForInstallation: Bool { preparationTask != nil }
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -76,8 +87,8 @@ final class AppUpdateController: NSObject {
 
     var canCheckForUpdates: Bool {
         runtimePolicy.updatesAreEnabled
-            && hasStarted
-            && standardController.updater.canCheckForUpdates
+            && (postponedInstallHandler != nil || automaticInstallOnQuitHandler != nil
+                || (hasStarted && standardController.updater.canCheckForUpdates))
     }
 
     var automaticallyChecksForUpdates: Bool {
@@ -97,6 +108,7 @@ final class AppUpdateController: NSObject {
     func start() {
         guard runtimePolicy.updatesAreEnabled, !hasStarted else { return }
         hasStarted = true
+        AppDiagnostics.record(.updates, .started)
         standardController.startUpdater()
     }
 
@@ -106,7 +118,57 @@ final class AppUpdateController: NSObject {
             presentMoveToApplicationsAlert()
             return
         }
-        standardController.checkForUpdates(nil)
+        if postponedInstallHandler != nil || automaticInstallOnQuitHandler != nil {
+            preparePendingInstallation()
+        } else {
+            standardController.checkForUpdates(nil)
+        }
+    }
+
+    func applicationShouldTerminate() -> NSApplication.TerminateReply {
+        if installationCoordinator.state == .prepared { return .terminateNow }
+        if preparationTask != nil { return .terminateCancel }
+        guard automaticInstallOnQuitHandler != nil || postponedInstallHandler != nil else { return .terminateNow }
+        preparePendingInstallation()
+        return .terminateCancel
+    }
+
+    private func preparePendingInstallation() {
+        guard preparationTask == nil,
+              let handler = postponedInstallHandler ?? automaticInstallOnQuitHandler else { return }
+        if installationCoordinator.hasActiveWork {
+            AppDiagnostics.record(.updates, .waitingForWork)
+            let waiting = UpdateWaitWindowController { [weak self] in self?.cancelPreparation() }
+            waitingWindow = waiting
+            waiting.showWindow(nil)
+            NSApp.activate()
+        }
+        preparationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await installationCoordinator.prepare(), !Task.isCancelled else {
+                waitingWindow?.close()
+                waitingWindow = nil
+                preparationTask = nil
+                return
+            }
+            waitingWindow?.close()
+            waitingWindow = nil
+            preparationTask = nil
+            postponedInstallHandler = nil
+            automaticInstallOnQuitHandler = nil
+            AppDiagnostics.record(.updates, .readyToInstall)
+            handler()
+        }
+    }
+
+    private func cancelPreparation() {
+        if preparationTask != nil { AppDiagnostics.record(.updates, .cancelled) }
+        preparationTask?.cancel()
+        // Keep this task until its old continuation finishes so another check
+        // cannot have its task/window overwritten by the cancelled run.
+        installationCoordinator.cancel()
+        waitingWindow?.close()
+        waitingWindow = nil
     }
 
     private var isInstalledInApplications: Bool {
@@ -156,5 +218,25 @@ extension AppUpdateController: SPUUpdaterDelegate {
     /// bundle. Nil falls back to SUFeedURL in Info.plist.
     func feedURLString(for updater: SPUUpdater) -> String? {
         environment["MNOTCH_UPDATE_FEED_URL"]
+    }
+
+    func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+                 untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        postponedInstallHandler = installHandler
+        preparePendingInstallation()
+        return true
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
+        automaticInstallOnQuitHandler = immediateInstallHandler
+        return true
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        AppDiagnostics.record(.updates, .connectionFailed, status: Int32(clamping: (error as NSError).code))
+        postponedInstallHandler = nil
+        automaticInstallOnQuitHandler = nil
+        cancelPreparation()
     }
 }
