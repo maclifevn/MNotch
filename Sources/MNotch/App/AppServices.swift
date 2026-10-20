@@ -336,13 +336,13 @@ final class AppServices {
         let fine = modifiers.contains(.shift) && modifiers.contains(.option)
         switch key {
         case .soundUp, .soundDown:
-            guard settings.soundHUDEnabled else { return false }
+            guard settings.soundHUDEnabled, audio.canSetVolume else { return false }
             if keyDown {
                 enqueueSystemKeyAction(key, fine: fine)
             }
             return true
         case .mute:
-            guard settings.soundHUDEnabled else { return false }
+            guard settings.soundHUDEnabled, audio.canSetMute else { return false }
             if keyDown {
                 enqueueSystemKeyAction(key, fine: fine)
             }
@@ -391,7 +391,7 @@ final class AppServices {
         let settings = SettingsStore.shared
         switch key {
         case .soundUp, .soundDown:
-            guard settings.soundHUDEnabled else { return }
+            guard settings.soundHUDEnabled, audio.canSetVolume else { return }
             let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
             let newVolume = min(max(audio.volume + step, 0), 1)
             audio.setVolume(newVolume)
@@ -399,7 +399,7 @@ final class AppServices {
                 showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
             }
         case .mute:
-            guard settings.soundHUDEnabled else { return }
+            guard settings.soundHUDEnabled, audio.canSetMute else { return }
             audio.setMuted(!audio.muted)
             if allowedNow(.sound) {
                 showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)

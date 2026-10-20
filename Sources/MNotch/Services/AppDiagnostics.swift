@@ -7,12 +7,13 @@ let mnotchLog = Logger(subsystem: "com.mnotch.app", category: "application")
 
 enum DiagnosticComponent: String, Codable, Sendable {
     case application, subprocess, media, claude, codex, agentServer, calendar
-    case brightness, keyboardBacklight, lockScreen, updates
+    case brightness, keyboardBacklight, lockScreen, updates, audio, keyInput
 }
 
 enum DiagnosticCode: String, Codable, Sendable {
     case started, stopped, exited, timedOut, cancelled, outputLimit, launchFailed
     case connectionFailed, unsupportedOS, waitingForWork, readyToInstall
+    case readFailed, writeFailed, listenerFailed, routeChanged, serviceRestarted, tapDisabled
 }
 
 struct DiagnosticEvent: Codable, Sendable {
@@ -21,6 +22,8 @@ struct DiagnosticEvent: Codable, Sendable {
     let code: DiagnosticCode
     let status: Int32?
     let elapsed: TimeInterval?
+
+    var isRoutineSuccess: Bool { code == .exited && status == 0 }
 }
 
 /// Deliberately accepts enums and numeric metadata only. Raw error messages,
@@ -35,7 +38,17 @@ final class DiagnosticBuffer: @unchecked Sendable {
 
     func append(_ event: DiagnosticEvent) {
         lock.lock(); defer { lock.unlock() }
-        if events.count == capacity { events.removeFirst() }
+        if events.count == capacity {
+            // Successful media polls are frequent. Keep audio/HAL and other
+            // failures useful even if the report is exported much later.
+            if let index = events.firstIndex(where: \.isRoutineSuccess) {
+                events.remove(at: index)
+            } else if event.isRoutineSuccess {
+                return
+            } else {
+                events.removeFirst()
+            }
+        }
         events.append(event)
     }
 
@@ -103,6 +116,9 @@ enum AppDiagnostics {
                 "keyboardBacklightAvailable": services.backlight.available,
                 "mediaPolling": services.media.isPolling,
                 "audioRunning": services.audio.isRunning,
+                "audioResponsive": services.audio.isResponsive,
+                "audioVolumeAvailable": services.audio.canSetVolume,
+                "audioMuteAvailable": services.audio.canSetMute,
                 "agentListening": services.agents.serverIsListening,
                 "focusAvailable": services.focus.available,
                 "bluetoothRunning": services.bluetooth.isRunning,

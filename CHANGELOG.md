@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1 — Volume control recovery
+
+- Let macOS handle volume keys when audio controls are unavailable, writes fail,
+  or the audio driver stops responding; recover output tracking after missed
+  device changes and audio service resets.
+- Include audio failures and control availability in diagnostics, and retain
+  errors when successful media polls fill the diagnostic buffer.
+
 ## 1.5 — Stability and macOS 27 compatibility
 
 - Complete the MFinder-style Sparkle release flow with local release/publish

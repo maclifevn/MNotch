@@ -76,6 +76,7 @@ final class KeyInterceptor {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             mnotchLog.error("failed to create event tap despite accessibility grant")
+            AppDiagnostics.record(.keyInput, .connectionFailed)
             return
         }
 
@@ -156,6 +157,7 @@ final class KeyInterceptor {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.stop()
+            AppDiagnostics.record(.keyInput, .tapDisabled, status: reason == .timeout ? 1 : 2)
             self.onInterruption?(reason)
         }
     }
