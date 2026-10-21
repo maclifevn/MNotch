@@ -107,7 +107,7 @@ final class BrightnessTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         hardware.update { $0.blockRead = release }
         var service: BrightnessService? = BrightnessService(hardware: hardware, permitted: true)
-        weak let owner = service
+        weak var owner = service
         service?.start()
         await eventually { hardware.snapshot.reads == 1 }
         service?.stop()
