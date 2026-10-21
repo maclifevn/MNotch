@@ -408,7 +408,12 @@ final class CoreLogicTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(model.status, .hud(.volume))
         XCTAssertEqual(panel.alphaValue, 1)
-        try await Task.sleep(for: .milliseconds(350))
+        // A sleep resumption does not guarantee that the main-actor dismissal
+        // task has run first, particularly on instrumented CI runners.
+        let expiryTimeout = ContinuousClock.now.advanced(by: .seconds(3))
+        while model.status != .closed, ContinuousClock.now < expiryTimeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertEqual(model.status, .closed)
         XCTAssertEqual(panel.alphaValue, 0)
         XCTAssertTrue(panel.ignoresMouseEvents)

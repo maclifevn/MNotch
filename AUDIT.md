@@ -493,3 +493,8 @@ Candidate: `1.4.1-audit10 (101)`. Bằng chứng build, chữ ký, backup và c�
 - Ảnh, trạng thái native và kết quả pixel ở `build/hud-release-2026-10-21/`.
   Phép thử này nghiệm thu HUD trên host hiện tại; các giới hạn compatibility
   và ma trận phần cứng ở trên vẫn được giữ nguyên.
+- CI ban đầu phát hiện hai vấn đề trong fixture: assertion expiry giả định
+  thứ tự resume của các task, và Task trả NSImage không Sendable trên SDK cũ.
+  Fixture expiry giữ kiểm tra gia hạn rồi chờ trạng thái đóng với timeout 3s;
+  fixture thumbnail giữ ảnh trong reference MainActor thay vì truyền NSImage
+  qua Task.value. Không thay đổi code vẽ/HUD hoặc thêm Sendable không an toàn.

@@ -4,6 +4,14 @@ import XCTest
 
 @MainActor
 final class ThumbnailLifecycleTests: XCTestCase {
+    // Task results must be Sendable on older SDKs. The image stays isolated
+    // to the main actor, as it does in the production cache.
+    @MainActor
+    private final class ImageResult {
+        let image: NSImage?
+        init(_ image: NSImage?) { self.image = image }
+    }
+
     @MainActor
     private final class Provider {
         var completions: [ShelfThumbnailCache.Completion] = []
@@ -26,17 +34,17 @@ final class ThumbnailLifecycleTests: XCTestCase {
         let source = Provider()
         let cache = ShelfThumbnailCache(provider: { url, complete in source.start(url, completion: complete) })
         let url = URL(fileURLWithPath: "/fixture/shared.png")
-        let first = Task { await cache.image(for: url) }
-        let second = Task { await cache.image(for: url) }
+        let first = Task { ImageResult(await cache.image(for: url)) }
+        let second = Task { ImageResult(await cache.image(for: url)) }
         try await waitUntil { cache.pendingWaiterCount == 2 }
         XCTAssertEqual(source.completions.count, 1)
         first.cancel()
-        let cancelledImage = await first.value
+        let cancelledImage = (await first.value).image
         XCTAssertNil(cancelledImage)
         XCTAssertEqual(source.cancellations, 0)
         let image = NSImage(size: NSSize(width: 20, height: 20))
         source.completions[0](image)
-        let result = await second.value
+        let result = (await second.value).image
         XCTAssertTrue(result === image)
         let cached = await cache.image(for: url)
         XCTAssertTrue(cached === image)
@@ -48,21 +56,21 @@ final class ThumbnailLifecycleTests: XCTestCase {
         let source = Provider()
         let cache = ShelfThumbnailCache(provider: { url, complete in source.start(url, completion: complete) })
         let url = URL(fileURLWithPath: "/fixture/recycled.png")
-        let first = Task { await cache.image(for: url) }
+        let first = Task { ImageResult(await cache.image(for: url)) }
         try await waitUntil { source.completions.count == 1 }
         first.cancel()
-        let cancelled = await first.value
+        let cancelled = (await first.value).image
         XCTAssertNil(cancelled)
         try await waitUntil { cache.pendingRequestCount == 0 }
         XCTAssertEqual(source.cancellations, 1)
-        let second = Task { await cache.image(for: url) }
+        let second = Task { ImageResult(await cache.image(for: url)) }
         try await waitUntil { source.completions.count == 2 }
         let old = NSImage(size: NSSize(width: 1, height: 1))
         source.completions[0](old)
         XCTAssertEqual(cache.pendingRequestCount, 1)
         let fresh = NSImage(size: NSSize(width: 2, height: 2))
         source.completions[1](fresh)
-        let result = await second.value
+        let result = (await second.value).image
         XCTAssertTrue(result === fresh)
     }
 
@@ -70,17 +78,17 @@ final class ThumbnailLifecycleTests: XCTestCase {
         let source = Provider()
         let cache = ShelfThumbnailCache(provider: { url, complete in source.start(url, completion: complete) })
         let url = URL(fileURLWithPath: "/fixture/file.png")
-        let first = Task { await cache.image(for: url) }
+        let first = Task { ImageResult(await cache.image(for: url)) }
         try await waitUntil { source.completions.count == 1 }
         cache.invalidate(url)
-        let cancelled = await first.value
+        let cancelled = (await first.value).image
         XCTAssertNil(cancelled)
-        let next = Task { await cache.image(for: url) }
+        let next = Task { ImageResult(await cache.image(for: url)) }
         try await waitUntil { source.completions.count == 2 }
         source.completions[0](NSImage(size: NSSize(width: 1, height: 1)))
         XCTAssertEqual(cache.pendingRequestCount, 1)
         source.completions[1](nil)
-        let result = await next.value
+        let result = (await next.value).image
         XCTAssertNil(result)
     }
 
@@ -100,7 +108,7 @@ final class ThumbnailLifecycleTests: XCTestCase {
         let cache = ShelfThumbnailCache(concurrencyLimit: 3, requestLimit: 100,
                                         provider: { url, complete in source.start(url, completion: complete) })
         let tasks = (0..<100).map { index in
-            Task { await cache.image(for: URL(fileURLWithPath: "/fixture/\(index).png")) }
+            Task { ImageResult(await cache.image(for: URL(fileURLWithPath: "/fixture/\(index).png"))) }
         }
         try await waitUntil { cache.pendingRequestCount == 100 }
         XCTAssertEqual(cache.activeRequestCount, 3)
@@ -110,7 +118,7 @@ final class ThumbnailLifecycleTests: XCTestCase {
         XCTAssertEqual(cache.pendingRequestCount, 100)
         for task in tasks { task.cancel() }
         for task in tasks {
-            let result = await task.value
+            let result = (await task.value).image
             XCTAssertNil(result)
         }
         try await waitUntil { cache.pendingRequestCount == 0 }
