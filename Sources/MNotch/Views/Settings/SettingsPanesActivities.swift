@@ -317,12 +317,37 @@ struct PomodoroPane: View {
 
 struct FileTrayPane: View {
     @Bindable var settings = SettingsStore.shared
+    @Bindable private var dropBridge = NotchDropBridge.shared
 
     var body: some View {
         Form {
             Section {
                 Toggle(isOn: $settings.shelfEnabled) {
                     Label("File Tray", systemImage: "tray.fill")
+                }
+                Picker("Receive files at notch", selection: Binding(
+                    get: { dropBridge.preference }, set: { dropBridge.setPreference($0) }
+                )) {
+                    ForEach(NotchDropPreference.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .accessibilityIdentifier("settings.fileTray.notchReceiver")
+                Text("Automatic prefers MFinder when its Drop Tray is ready on this display. The choice is shared by both apps and applies to the next drag. Existing files stay in their original tray.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if dropBridge.preference == .mnotch {
+                    Text("For exports from apps such as Photos, choose Automatic or MFinder. MNotch accepts existing files on disk.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let selected = dropBridge.preference.selectedApp, !dropBridge.readyApps.contains(selected) {
+                    Text(dropBridge.preference.unavailableMessage)
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if dropBridge.legacyPeer != nil {
+                    Label("Update both apps to coordinate notch file receiving.", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if !dropBridge.isAvailable {
+                    Label("Notch file receiving is temporarily unavailable. Try again after reopening the apps.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 Toggle(
                     "Clear successfully dragged files",

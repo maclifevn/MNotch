@@ -115,6 +115,10 @@ struct ShelfView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if !shelf.items.isEmpty, NotchDropBridge.shared.isDragging {
+                Text("Drop into MNotch")
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
             if shelf.items.isEmpty {
                 emptyState
             } else {
@@ -219,7 +223,7 @@ struct ShelfView: View {
             Image(systemName: "tray.and.arrow.down.fill")
                 .font(.system(size: 22))
                 .foregroundStyle(.white.opacity(0.35))
-            Text("Drop files here")
+            Text("Drop into MNotch")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.45))
         }

@@ -329,3 +329,14 @@
 "Copy track info" = "Sao chép thông tin bài hát";
 "Open terminal" = "Mở terminal";
 "Cannot add a folder that contains the File Tray." = "Không thể thêm thư mục chứa Khay file.";
+
+"Automatic" = "Tự động";
+"Receive files at notch" = "Nhận file qua notch";
+"Automatic prefers MFinder when its Drop Tray is ready on this display. The choice is shared by both apps and applies to the next drag. Existing files stay in their original tray." = "Tự động ưu tiên MFinder khi Drop Tray sẵn sàng trên màn hình này. Lựa chọn dùng chung cho hai app và áp dụng từ lượt kéo tiếp theo. File cũ vẫn ở khay ban đầu.";
+"Notch file receiving is temporarily unavailable. Try again after reopening the apps." = "Tạm thời chưa thể nhận file qua notch. Hãy mở lại hai app rồi thử lại.";
+"Drop into MFinder" = "Thả vào MFinder";
+"Drop into MNotch" = "Thả vào MNotch";
+"Update both apps to coordinate notch file receiving." = "Cập nhật cả hai app để phối hợp nhận file qua notch.";
+"For exports from apps such as Photos, choose Automatic or MFinder. MNotch accepts existing files on disk." = "Với nội dung cần xuất từ ứng dụng như Photos, hãy chọn Tự động hoặc MFinder. MNotch nhận file có sẵn trên ổ đĩa.";
+"MFinder is not ready. Open it and enable notch file receiving." = "MFinder chưa sẵn sàng. Hãy mở app và bật nhận file qua notch.";
+"MNotch is not ready. Open it and enable File Tray on the target display." = "MNotch chưa sẵn sàng. Hãy mở app và bật Khay file trên màn hình đích.";

@@ -14,6 +14,8 @@ final class NotchWindowController {
     private var needsDesktopRebuild = false
 
     init() {
+        NotchDropBridge.shared.onChange = { [weak self] in self?.refreshPointerInteractions() }
+        NotchDropBridge.shared.start(displays: [])
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             // Installed on the main run loop below, so this isolation assertion
             // avoids allocating a Swift Task on every pointer sample.
@@ -27,6 +29,8 @@ final class NotchWindowController {
     }
 
     func stop() {
+        NotchDropBridge.shared.onChange = nil
+        NotchDropBridge.shared.stop()
         pointerTimer?.invalidate()
         pointerTimer = nil
         rebuildTask?.cancel()
@@ -116,6 +120,7 @@ final class NotchWindowController {
             panels.append(panel)
             viewModels.append(viewModel)
         }
+        refreshDropReadiness()
         refreshPointerInteractions()
 
         SettingsStore.shared.onDisplayConfigChanged = { [weak self] in
@@ -168,7 +173,8 @@ final class NotchWindowController {
             for panel in self.panels {
                 panel.setOcclusion(occlusion)
             }
-            if occlusion == .visible { self.refreshPointerInteractions() }
+            self.refreshDropReadiness()
+            self.refreshPointerInteractions()
         }
     }
 
@@ -184,10 +190,19 @@ final class NotchWindowController {
         }
     }
 
+    private func refreshDropReadiness() {
+        let enabled = SettingsStore.shared.shelfEnabled && !ShelfStore.shared.isPreparingForUpdate
+            && AppServices.shared.occlusion.state == .visible && !AppServices.shared.lockScreen.isLocked
+        NotchDropBridge.shared.updateDisplays(enabled ? panels.compactMap { $0.screen?.displayID } : [])
+    }
+
     private func refreshPointerInteractions() {
+        refreshDropReadiness()
         let location = NSEvent.mouseLocation
         let pressed = NSEvent.pressedMouseButtons != 0
+        NotchDropBridge.shared.sampleDrag(mouseButtonPressed: pressed)
         for panel in panels where panel.isVisible {
+            panel.updateDropRouting()
             panel.updatePointerInteraction(
                 at: location,
                 mouseButtonPressed: pressed
