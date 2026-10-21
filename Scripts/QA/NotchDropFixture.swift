@@ -47,29 +47,22 @@ private final class DragSource: NSView, NSDraggingSource, NSFilePromiseProviderD
         wantsLayer = true
         layer?.backgroundColor = (promises ? NSColor.systemPurple : NSColor.systemBlue).cgColor
         layer?.cornerRadius = 14
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
+        let label = NSTextField(labelWithString: promises ? "Drag two FILE PROMISES to the notch" : "Drag two FILE URLs to the notch")
+        label.frame = NSRect(x: 18, y: 42, width: 500, height: 24)
+        label.font = .systemFont(ofSize: 17, weight: .semibold); label.textColor = .white
+        label.isSelectable = false
+        addSubview(label)
         setAccessibilityIdentifier(promises ? "notchQA.promiseSource" : "notchQA.urlSource")
-        setAccessibilityLabel(promises ? "Drag two FILE PROMISES to the notch" : "Drag two FILE URLs to the notch")
+        setAccessibilityLabel(label.stringValue)
     }
     required init?(coder: NSCoder) { nil }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        ((promises ? "Drag two FILE PROMISES to the notch" : "Drag two FILE URLs to the notch") as NSString)
-            .draw(at: NSPoint(x: 18, y: 44), withAttributes: [.font: NSFont.systemFont(ofSize: 17, weight: .semibold), .foregroundColor: NSColor.white])
-    }
-    override func mouseDown(with event: NSEvent) {
-        // App-scoped UI tools can synthesize clicks without a global button
-        // press. Those must not leave an AppKit drag tracking loop behind.
-        guard NSEvent.pressedMouseButtons & 1 != 0 else { return }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseDragged(with event: NSEvent) {
         let screenPoint = window?.convertPoint(toScreen: event.locationInWindow) ?? .zero
         record(["event": "drag-start", "promises": promises, "screenX": screenPoint.x, "screenY": screenPoint.y,
                 "fullscreen": window?.styleMask.contains(.fullScreen) == true,
                 "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none",
-                "onActiveSpace": window?.isOnActiveSpace == true, "peerWindows": peerWindows(),
-                "actualPointerX": NSEvent.mouseLocation.x, "actualPointerY": NSEvent.mouseLocation.y,
-                "pressedButtons": NSEvent.pressedMouseButtons])
+                "onActiveSpace": window?.isOnActiveSpace == true, "peerWindows": peerWindows()])
         let location = convert(event.locationInWindow, from: nil)
         let items: [NSDraggingItem] = names.map { name in
             let writer: any NSPasteboardWriting
@@ -101,9 +94,7 @@ private final class DragSource: NSView, NSDraggingSource, NSFilePromiseProviderD
                 "pasteboardGeneration": session.draggingPasteboard.changeCount, "screenX": screenPoint.x, "screenY": screenPoint.y, "names": names,
                 "fullscreen": window?.styleMask.contains(.fullScreen) == true,
                 "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none",
-                "onActiveSpace": window?.isOnActiveSpace == true, "peerWindows": peerWindows(),
-                "actualPointerX": NSEvent.mouseLocation.x, "actualPointerY": NSEvent.mouseLocation.y,
-                "pressedButtons": NSEvent.pressedMouseButtons])
+                "onActiveSpace": window?.isOnActiveSpace == true, "peerWindows": peerWindows()])
     }
     func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
         filePromiseProvider.userInfo as! String
@@ -151,17 +142,16 @@ private final class FixtureDelegate: NSObject, NSApplicationDelegate {
         item.submenu = NSMenu()
         item.submenu?.addItem(withTitle: "Quit Notch QA", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         NSApp.mainMenu = main
-        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil); NSApp.activate()
     }
     @objc private func activateFixture() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             if let window = self?.window {
                 record(["event": "activated", "windowFrame": NSStringFromRect(window.frame),
                         "screenFrame": NSStringFromRect(window.screen?.frame ?? .zero),
-                        "fullscreen": window.styleMask.contains(.fullScreen), "onActiveSpace": window.isOnActiveSpace,
-                        "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"])
+                        "fullscreen": window.styleMask.contains(.fullScreen), "onActiveSpace": window.isOnActiveSpace])
             }
         }
     }
