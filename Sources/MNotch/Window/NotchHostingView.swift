@@ -143,19 +143,8 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
 
     // MARK: - Shelf drag-and-drop (auto-expands the shelf on hover)
 
-    private func ownsDrop(_ sender: NSDraggingInfo) -> Bool {
-        let bridge = NotchDropBridge.shared
-        bridge.observeDrag(generation: sender.draggingPasteboard.changeCount)
-        return bridge.owns(display: window?.screen?.displayID ?? 0, generation: sender.draggingPasteboard.changeCount)
-    }
-
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { draggingEntered(sender) }
-
-    override func draggingEnded(_ sender: NSDraggingInfo) { NotchDropBridge.shared.endDrag() }
-    override func concludeDragOperation(_ sender: NSDraggingInfo?) { NotchDropBridge.shared.endDrag() }
-
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard ownsDrop(sender), ShelfDropPolicy.accepts(
+        guard ShelfDropPolicy.accepts(
             featureEnabled: SettingsStore.shared.shelfEnabled && !ShelfStore.shared.isPreparingForUpdate,
             outgoingShelfDrag: ShelfOutgoingDragState.isActive
         ) else { return [] }
@@ -164,7 +153,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard ownsDrop(sender), ShelfDropPolicy.accepts(
+        guard ShelfDropPolicy.accepts(
             featureEnabled: SettingsStore.shared.shelfEnabled && !ShelfStore.shared.isPreparingForUpdate,
             outgoingShelfDrag: ShelfOutgoingDragState.isActive
         ) else { return false }
@@ -172,9 +161,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL] ?? []
-        guard !urls.isEmpty, NotchDropBridge.shared.claim(
-            display: window?.screen?.displayID ?? 0, generation: sender.draggingPasteboard.changeCount
-        ) else { return false }
+        guard !urls.isEmpty else { return false }
         ShelfStore.shared.add(urls)
         return true
     }

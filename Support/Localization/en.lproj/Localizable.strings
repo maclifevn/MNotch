@@ -31,15 +31,3 @@
 "Skip to the next phase" = "Skip to the next phase";
 "Reset the session" = "Reset the session";
 "Cannot add a folder that contains the File Tray." = "Cannot add a folder that contains the File Tray.";
-
-"Automatic" = "Automatic";
-"Off" = "Off";
-"Receive files at notch" = "Receive files at notch";
-"Automatic prefers MFinder when its Drop Tray is ready on this display. The choice is shared by both apps and applies to the next drag. Existing files stay in their original tray." = "Automatic prefers MFinder when its Drop Tray is ready on this display. The choice is shared by both apps and applies to the next drag. Existing files stay in their original tray.";
-"Notch file receiving is temporarily unavailable. Try again after reopening the apps." = "Notch file receiving is temporarily unavailable. Try again after reopening the apps.";
-"Drop into MFinder" = "Drop into MFinder";
-"Drop into MNotch" = "Drop into MNotch";
-"Update both apps to coordinate notch file receiving." = "Update both apps to coordinate notch file receiving.";
-"For exports from apps such as Photos, choose Automatic or MFinder. MNotch accepts existing files on disk." = "For exports from apps such as Photos, choose Automatic or MFinder. MNotch accepts existing files on disk.";
-"MFinder is not ready. Open it and enable notch file receiving." = "MFinder is not ready. Open it and enable notch file receiving.";
-"MNotch is not ready. Open it and enable File Tray on the target display." = "MNotch is not ready. Open it and enable File Tray on the target display.";

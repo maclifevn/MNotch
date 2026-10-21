@@ -22,8 +22,6 @@
 	<string>__VERSION__</string>
 	<key>CFBundleVersion</key>
 	<string>__BUILD__</string>
-	<key>MacLifeNotchDropProtocol</key>
-	<integer>1</integer>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>

@@ -10,7 +10,6 @@ final class NotchPanel: NSPanel {
     private var occlusion: NotchOcclusion = .visible
     private var occlusionHidden = false
     private var interactionSuppressed = false
-    private var dropYielding = false
     private var outgoingDragActive = false
     private var outgoingDragDeadline: Date?
     private var outsideDragStartedAt: Date?
@@ -75,10 +74,10 @@ final class NotchPanel: NSPanel {
     }
 
     private func refreshOcclusion(animated: Bool) {
-        let hidden = dropYielding || occlusion.hidesPanel(showingHUD: viewModel.status.isHUD)
+        let hidden = occlusion.hidesPanel(showingHUD: viewModel.status.isHUD)
         // A fullscreen HUD is passive: hovering/clicking it must not reveal
         // the normal notch, while its visible contents remain free to render.
-        setInteractionSuppressed(occlusion != .visible || dropYielding, presentationSuppressed: hidden)
+        setInteractionSuppressed(occlusion != .visible, presentationSuppressed: hidden)
         guard hidden != occlusionHidden else { return }
         occlusionHidden = hidden
         mnotchLog.debug("notch visibility occlusion=\(String(describing: self.occlusion), privacy: .public) hud=\(self.viewModel.status.isHUD) hidden=\(hidden)")
@@ -100,20 +99,6 @@ final class NotchPanel: NSPanel {
             outsideDragStartedAt = nil
             (contentView as? NotchHostingView)?.setPointerInsideFromWindow(false)
         }
-    }
-
-    func updateDropRouting() {
-        let bridge = NotchDropBridge.shared
-        let yielding = bridge.isDragging && (!bridge.isAvailable || !bridge.isLocallyReady(display: screen?.displayID ?? 0) || bridge.owner(display: screen?.displayID ?? 0) != .mnotch)
-        guard yielding != dropYielding else { return }
-        dropYielding = yielding
-        if yielding, viewModel.status == .expanded(.shelf),
-           bridge.owner(display: screen?.displayID ?? 0) == .mfinder || bridge.legacyPeer == .mfinder {
-            // The destination tray takes over after the drop as well; an old
-            // MNotch shelf must not flash back over MFinder's newly opened tray.
-            viewModel.collapse()
-        }
-        refreshOcclusion(animated: false)
     }
 
     func updatePointerInteraction(
@@ -158,10 +143,7 @@ final class NotchPanel: NSPanel {
             outsideDragStartedAt = nil
         }
 
-        // During a file drag, only the native shelf destination may expand.
-        // Once it has expanded, retain normal enter/exit tracking so leaving
-        // the target still cancels hover work and closes the shelf naturally.
-        hosting.setPointerInsideFromWindow(inside && (!NotchDropBridge.shared.isDragging || viewModel.status == .expanded(.shelf)))
+        hosting.setPointerInsideFromWindow(inside)
         if ignoresMouseEvents == inside {
             ignoresMouseEvents = !inside
         }
