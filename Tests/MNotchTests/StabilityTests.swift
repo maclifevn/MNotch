@@ -446,6 +446,41 @@ final class StabilityTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testShelfKeepsExistingDanglingLinkWhenADroppedFilenameCollides() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let shelf = directory.appending(path: "shelf")
+        try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
+        let existing = shelf.appending(path: "file.txt")
+        let missing = directory.appending(path: "not-mounted.txt")
+        try FileManager.default.createSymbolicLink(at: existing, withDestinationURL: missing)
+        let source = directory.appending(path: "file.txt")
+        try Data("new".utf8).write(to: source)
+        let worker = ShelfFileWorker(directory: shelf)
+        let result = try await worker.add([source])
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: existing.path), missing.path)
+        let copied = try XCTUnwrap(result.items.first { $0 != existing })
+        XCTAssertEqual(try Data(contentsOf: copied), Data("new".utf8))
+    }
+
+    func testShelfClearAlsoRemovesDanglingLinks() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let shelf = directory.appending(path: "shelf")
+        try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
+        let link = shelf.appending(path: "missing-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory.appending(path: "missing"))
+        // Disposable fixture files stay out of the user's real Trash.
+        let worker = ShelfFileWorker(directory: shelf, trashItem: {
+            try FileManager.default.removeItem(at: $0)
+        })
+        let result = try await worker.clear([link])
+        XCTAssertTrue(result.snapshot.items.isEmpty)
+        XCTAssertTrue(result.failedNames.isEmpty)
+        XCTAssertThrowsError(try FileManager.default.destinationOfSymbolicLink(atPath: link.path))
+    }
+
     func testUnverifiedPrivateAPIsAreDisabledEvenWhenSymbolsMightExist() {
         for major in [15, 26, 27, 99] {
             let version = OperatingSystemVersion(majorVersion: major, minorVersion: 0, patchVersion: 0)
@@ -681,6 +716,58 @@ final class StabilityTests: XCTestCase {
         XCTAssertThrowsError(try BoundedFileReader.read(file, limit: 1000))
         XCTAssertThrowsError(try BoundedFileReader.read(directory, limit: 1000))
         XCTAssertEqual(try BoundedFileReader.read(file, limit: 1001).count, 1001)
+    }
+
+    func testBoundedReaderRejectsFifoAndDeviceAndFollowsRegularSymlink() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fifo = directory.appending(path: "token-pipe")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        XCTAssertThrowsError(try BoundedFileReader.read(fifo, limit: 128))
+        XCTAssertThrowsError(try BoundedFileReader.read(URL(fileURLWithPath: "/dev/zero"), limit: 128))
+        let file = directory.appending(path: "config")
+        try Data("valid".utf8).write(to: file)
+        let link = directory.appending(path: "config-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+        XCTAssertEqual(try BoundedFileReader.read(link, limit: 128), Data("valid".utf8))
+    }
+
+    @MainActor
+    func testAgentTokenFifoCannotBlockStartup() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let token = directory.appending(path: "agent-token")
+        XCTAssertEqual(mkfifo(token.path, 0o600), 0)
+        let server = AgentServer(directory: directory)
+        server.start()
+        defer { server.stop() }
+        for _ in 0..<200 {
+            if server.port != 0 { break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertNotEqual(server.port, 0)
+        XCTAssertFalse(try BoundedFileReader.read(token, limit: 128).isEmpty)
+    }
+
+    func testShelfRejectsAncestorAndSymlinkBeforeCopyingAnything() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let shelf = directory.appending(path: "support/Shelf")
+        let source = directory.appending(path: "small.txt")
+        try Data("keep".utf8).write(to: source)
+        let link = directory.appending(path: "support-link")
+        try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: shelf.deletingLastPathComponent())
+        let worker = ShelfFileWorker(directory: shelf)
+        for ancestor in [directory, shelf, shelf.deletingLastPathComponent(), link] {
+            do {
+                _ = try await worker.add([source, ancestor])
+                XCTFail("Must reject copying the tray into itself")
+            } catch {}
+            let contents = try await worker.list()
+            XCTAssertTrue(contents.items.isEmpty)
+        }
+        XCTAssertEqual(try Data(contentsOf: source), Data("keep".utf8))
     }
 
     func testShellQuotingRoundTripsMetacharactersWithoutExecution() async {

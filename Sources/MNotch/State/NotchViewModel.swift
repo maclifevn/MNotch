@@ -37,6 +37,11 @@ enum NotchStatus: Equatable {
         if case .expanded = self { return true }
         return false
     }
+
+    var isHUD: Bool {
+        if case .hud = self { return true }
+        return false
+    }
 }
 
 struct NotchIdleInputs: Equatable {
@@ -84,7 +89,23 @@ final class NotchViewModel {
         self.geometry = geometry
     }
 
-    private(set) var status: NotchStatus = .closed
+    private(set) var status: NotchStatus = .closed {
+        didSet {
+            if status != oldValue { onStatusChanged?() }
+        }
+    }
+    @ObservationIgnored var onStatusChanged: (() -> Void)?
+    /// Keep the invisible notch's interactive region alive so hover can reveal it.
+    var isAutoHidden: Bool {
+        SettingsStore.shared.autoHideSimulatedNotch
+            && !geometry.isPhysical
+            && !isHovering
+            && status == .closed
+    }
+
+    /// Window occlusion also pauses decorative rendering without losing UI state.
+    var isPresentationSuppressed = false
+
     var mediaActive = false
     private(set) var lastTab: NotchTab = .media
 
@@ -174,7 +195,6 @@ final class NotchViewModel {
         .pomodoro: 190,
     ]
     static let hudExtraWidth: CGFloat = 160
-    static let hudExtraHeight: CGFloat = 10
     static let popExtraWidth: CGFloat = 190
     static let popExtraHeight: CGFloat = 6
 
@@ -278,9 +298,10 @@ final class NotchViewModel {
             }
             return size
         case .hud:
+            // System HUDs grow into side wings without extending below the notch.
             return CGSize(
                 width: closedSize.width + Self.hudExtraWidth,
-                height: closedSize.height + Self.hudExtraHeight
+                height: geometry.notchHeight
             )
         case .pop(.agentConfirm):
             return agentConfirmSize

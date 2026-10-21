@@ -29,10 +29,11 @@ MNotch is an AppKit and SwiftUI menu-bar utility inspired by the fluid interacti
 
 ## Highlights
 
-The current stability candidate temporarily disables direct private macOS APIs
-for display brightness, keyboard backlight and lock-screen overlays until the
-hardware/OS compatibility matrix is verified. macOS keeps handling those keys;
-volume and the other features remain available. Settings explains this state.
+Display brightness is enabled on the verified Mac17,3 / macOS 27.0.1
+(26A434) combination, with a serial background worker and fail-open key handling.
+Other hardware/OS combinations, keyboard backlight and private lock-screen
+overlays remain gated until their compatibility checks are complete. macOS
+keeps handling unsupported controls. Settings explains this state.
 See [AUDIT.md](AUDIT.md) for evidence and remaining release checks.
 
 - **Now Playing** — artwork, animated waveform, seek controls, previous/play/next, output-device status, and configurable quick actions across supported media apps.
@@ -155,6 +156,8 @@ make publish VERSION=X.Y.Z  # Upload draft assets, then publish completed releas
 
 Commit/tag the tested source and add `ReleaseNotes/X.Y.Z.md` first. Prepared
 artifacts and SHA-256 manifest are saved under `build/releases/X.Y.Z-BUILD/`.
+Preparation reruns debug/release regressions, both sanitizers and script checks
+before notarization. Publication rejects manifests without those checks.
 Production signing uses the existing Keychain key, as in MFinder. Sparkle waits
 for File Tray work before installing; cancelling the wait resumes normal use.
 See [`RELEASING.md`](RELEASING.md) for the signing-key backup, bootstrap,

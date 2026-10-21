@@ -2,6 +2,7 @@
 """Run a copied, isolated release app and collect local numeric health evidence."""
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -61,6 +62,28 @@ def assess_growth(samples):
             "cpu_percent_median": statistics.median(row["cpu_percent"] for row in warmed)}
 
 
+def classify_run(reason, duration, growth):
+    if reason == "host_suspended_or_sampler_paused":
+        return "inconclusive"
+    if reason != "completed":
+        return "failed"
+    # A smoke run can already provide enough post-warmup evidence to reveal
+    # growth. Short duration must never turn that warning into a green result.
+    if growth.get("resource_review_required"):
+        return "resource_review_required"
+    if duration < 8 * 3600:
+        return "smoke_completed"
+    return "idle_soak_completed" if growth.get("evaluated") else "resource_review_required"
+
+
+def clone_signing_command(identity, clone):
+    command = ["/usr/bin/codesign", "--force", "--sign", identity,
+               "--preserve-metadata=entitlements"]
+    if identity.startswith("Developer ID Application:"):
+        command += ["--timestamp", "--options", "runtime"]
+    return command + [str(clone)]
+
+
 def run(args):
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -71,7 +94,8 @@ def run(args):
     info["CFBundleIdentifier"] = "com.mnotch.audit." + uuid.uuid4().hex
     info["CFBundleName"] = "MNotch Audit"
     info_path.write_bytes(plistlib.dumps(info))
-    subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(clone)], check=True, timeout=30)
+    subprocess.run(clone_signing_command(args.sign_identity, clone), check=True, timeout=45)
+    subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(clone)], check=True, timeout=30)
     environment = dict(os.environ, MNOTCH_DIAGNOSTIC_RUN="1",
                        MNOTCH_SUPPORT_DIRECTORY=str(output / "support"),
                        MNOTCH_HEALTH_FILE=str(output / "heartbeat.json"))
@@ -89,6 +113,8 @@ def run(args):
     signal.signal(signal.SIGTERM, stop_requested)
     signal.signal(signal.SIGINT, stop_requested)
     progress = {"status": "running", "pid": app.pid, "requested_seconds": args.duration,
+                "signing_mode": "developer_id_hardened" if args.sign_identity.startswith("Developer ID Application:") else "local_diagnostic",
+                "executable_sha256": hashlib.sha256((clone / "Contents/MacOS" / info["CFBundleExecutable"]).read_bytes()).hexdigest(),
                 "workload": "isolated default features; no permission grants, agent accounts or private APIs",
                 "app_version": info["CFBundleShortVersionString"], "app_build": info["CFBundleVersion"]}
     write_json(output / "progress.json", progress)
@@ -141,14 +167,7 @@ def run(args):
                 os.killpg(app.pid, signal.SIGKILL)
                 app.wait(timeout=5)
     growth = assess_growth(samples)
-    verdict = "inconclusive" if reason == "host_suspended_or_sampler_paused" else "failed"
-    if reason == "completed":
-        if args.duration < 8 * 3600:
-            verdict = "smoke_completed"
-        elif not growth.get("evaluated") or growth.get("resource_review_required"):
-            verdict = "resource_review_required"
-        else:
-            verdict = "idle_soak_completed"
+    verdict = classify_run(reason, args.duration, growth)
     result = dict(progress, status=verdict, reason=reason, exit_code_before_cleanup=exit_code,
                   elapsed_seconds=round(time.monotonic() - started, 3), sample_count=len(samples), growth=growth)
     write_json(output / "result.json", result)
@@ -163,6 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True, help="new directory; never overwritten")
     parser.add_argument("--duration", type=float, default=8 * 3600)
     parser.add_argument("--interval", type=float, default=30)
+    parser.add_argument("--sign-identity", default="-", help="sign only the isolated copy; Developer ID enables hardened runtime")
     args = parser.parse_args()
     if not math.isfinite(args.duration) or not 1 <= args.duration <= 24 * 3600:
         parser.error("duration must be between 1 and 86400 seconds")

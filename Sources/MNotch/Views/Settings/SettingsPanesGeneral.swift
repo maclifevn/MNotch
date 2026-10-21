@@ -36,7 +36,12 @@ struct GeneralPane: View {
 
             Section {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
-                Toggle("Hide in fullscreen", isOn: $settings.hideInFullscreen)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Hide in fullscreen", isOn: $settings.hideInFullscreen)
+                    Text("Volume and brightness HUDs still appear temporarily.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 Toggle("Hide in mission control", isOn: $settings.hideInMissionControl)
                 Toggle("Hide while gaming", isOn: $settings.hideWhileGaming)
                 VStack(alignment: .leading, spacing: 2) {
@@ -52,6 +57,12 @@ struct GeneralPane: View {
                         // fallback is mandatory, so reflect that honestly.
                         .disabled(!hasPhysicalNotch)
                     Text(simulatedNotchExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Auto-hide on displays without a notch", isOn: $settings.autoHideSimulatedNotch)
+                    Text("Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

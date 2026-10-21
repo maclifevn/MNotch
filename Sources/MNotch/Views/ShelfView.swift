@@ -1,6 +1,3 @@
-// QuickLookThumbnailing lacks Sendable annotations on SDKs before macOS 26,
-// where returning a thumbnail across the actor boundary is a hard error.
-@preconcurrency import QuickLookThumbnailing
 @preconcurrency import QuickLookUI
 import AppKit
 import SwiftUI
@@ -60,73 +57,6 @@ enum ShelfDropPolicy {
 enum ShelfDragCompletionPolicy {
     static func shouldClear(settingEnabled: Bool, operationSucceeded: Bool) -> Bool {
         settingEnabled && operationSucceeded
-    }
-}
-
-@MainActor
-private final class ShelfThumbnailCache {
-    static let shared = ShelfThumbnailCache()
-
-    /// Task results must be Sendable, but older AppKit SDKs explicitly make
-    /// NSImage non-Sendable. Keep the image isolated to the main actor while
-    /// allowing the result reference to pass through Task.value safely.
-    @MainActor
-    private final class ThumbnailResult {
-        let image: NSImage?
-
-        init(image: NSImage?) {
-            self.image = image
-        }
-    }
-
-    private struct PendingRequest {
-        let id: UUID
-        let task: Task<ThumbnailResult, Never>
-    }
-
-    private let cache = NSCache<NSURL, NSImage>()
-    private var requests: [URL: PendingRequest] = [:]
-
-    private init() {
-        cache.countLimit = 80
-        cache.totalCostLimit = 80 * 104 * 104 * 4
-    }
-
-    /// Drop a cached thumbnail when its file leaves the shelf. The shelf reuses
-    /// a freed filename for the next same-named drop, so without this a re-added
-    /// file would render the trashed file's stale preview.
-    func invalidate(_ url: URL) {
-        cache.removeObject(forKey: url as NSURL)
-        requests[url]?.task.cancel()
-        requests[url] = nil
-    }
-
-    func image(for url: URL) async -> NSImage? {
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
-        if let request = requests[url] { return await request.task.value.image }
-
-        let id = UUID()
-        let request = Task { @MainActor in
-            let request = QLThumbnailGenerator.Request(
-                fileAt: url,
-                size: CGSize(width: 104, height: 104),
-                scale: 2,
-                representationTypes: .thumbnail
-            )
-            let image = try? await QLThumbnailGenerator.shared
-                .generateBestRepresentation(for: request).nsImage
-            return ThumbnailResult(image: image)
-        }
-        requests[url] = PendingRequest(id: id, task: request)
-        let image = await request.value.image
-        // invalidate() or a new request for the same recycled path won the
-        // race. The old thumbnail must not clear/cache over that generation.
-        guard requests[url]?.id == id, !request.isCancelled else { return nil }
-        requests[url] = nil
-        if let image {
-            cache.setObject(image, forKey: url as NSURL, cost: 104 * 104 * 4)
-        }
-        return image
     }
 }
 

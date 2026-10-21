@@ -124,8 +124,10 @@ struct SoundToggleRow: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("Preview sound"))
+            .help(L10n.string("Preview sound"))
             Spacer()
-            Toggle("", isOn: $isOn).labelsHidden()
+            Toggle(LocalizedStringKey(title), isOn: $isOn).labelsHidden()
         }
     }
 }

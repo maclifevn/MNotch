@@ -31,6 +31,11 @@ manager and never commit it. Normal releases sign directly through Keychain;
 file. Production build/sign/notarize/publish runs locally, as in MFinder.
 CI validates packages and signs fixtures with disposable test keys only.
 
+For a headless release host, create a release-only virtual environment, install
+`Scripts/dmg-requirements.txt`, and set `MNOTCH_DMG_LAYOUT_PYTHON` to its Python
+executable for `make release`. This writes the same DMG background and icon
+positions directly, without Finder automation; the app has no Python dependency.
+
 ## Stable release
 
 Before signing a public release, complete the acceptance matrix in [AUDIT.md](AUDIT.md).
@@ -59,6 +64,12 @@ signing, notarization, Gatekeeper, or update-install acceptance.
    app and DMG, authenticates feed history, signs and tamper-tests the new
    appcast/ZIP, and writes `build/releases/X.Y.Z-N/` atomically with SHA-256
    manifest and matching symbols. Existing release directories are preserved.
+
+   Before any notarization upload, preparation reruns debug and release tests,
+   separate Address/Thread Sanitizer suites, and Python build/release checks.
+   A failed check stops preparation; a source/tag change during validation also
+   stops it. The manifest records these checks. Publication rejects older
+   prepared manifests without this record; prepare them again after review.
 
    For the first Sparkle release only, a production HTTP 404 may be bootstrapped
    explicitly:

@@ -20,15 +20,30 @@ final class PowerSourceService {
     @ObservationIgnored
     var onPowerEvent: ((PowerEvent) -> Void)?
 
+    @ObservationIgnored private let createNotificationSource: (
+        IOPowerSourceCallbackType, UnsafeMutableRawPointer
+    ) -> CFRunLoopSource?
+
+    init(createNotificationSource: @escaping (
+        IOPowerSourceCallbackType, UnsafeMutableRawPointer
+    ) -> CFRunLoopSource? = { callback, context in
+        IOPSNotificationCreateRunLoopSource(callback, context)?.takeRetainedValue()
+    }) {
+        self.createNotificationSource = createNotificationSource
+    }
+
+    @ObservationIgnored private var runGeneration: UUID?
     @ObservationIgnored private var lastOnAC: Bool?
     @ObservationIgnored private var firedLowWarning = false
     @ObservationIgnored private var powerStateObserver: NSObjectProtocol?
     @ObservationIgnored private var runLoopSource: CFRunLoopSource?
 
     func start() {
-        guard runLoopSource == nil else { return }
+        guard runLoopSource == nil, powerStateObserver == nil else { return }
         readSources(fireEvents: false)
 
+        let generation = UUID()
+        runGeneration = generation
         powerStateObserver = NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange,
             object: nil,
@@ -36,7 +51,8 @@ final class PowerSourceService {
         ) { [weak self] _ in
             let on = ProcessInfo.processInfo.isLowPowerModeEnabled
             Task { @MainActor in
-                self?.onPowerEvent?(.lowPowerMode(on: on))
+                guard let self, self.runGeneration == generation else { return }
+                self.onPowerEvent?(.lowPowerMode(on: on))
             }
         }
         let callback: IOPowerSourceCallbackType = { context in
@@ -46,16 +62,17 @@ final class PowerSourceService {
                 service.readSources(fireEvents: true)
             }
         }
-        let source = IOPSNotificationCreateRunLoopSource(
+        let source = createNotificationSource(
             callback,
             Unmanaged.passUnretained(self).toOpaque()
-        )?.takeRetainedValue()
+        )
         guard let source else { return }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
         runLoopSource = source
     }
 
     func stop() {
+        runGeneration = nil
         if let powerStateObserver {
             NotificationCenter.default.removeObserver(powerStateObserver)
         }

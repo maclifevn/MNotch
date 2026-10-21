@@ -95,8 +95,9 @@ final class AppServices {
             }
         }
         accessibility.start()
-        // Observe-mode brightness HUD (mirrors the system OSD until the
-        // event tap has Accessibility and consumes the keys itself).
+        // With a modifying key tap, explicit key actions own the HUD. Ambient
+        // light adjustments must not repeatedly reveal the notch. Without a
+        // tap, mirror external/native-key changes as the observe-only fallback.
         brightness.onChanged = { [weak self] value in
             guard let self,
                   SettingsStore.shared.displayHUDEnabled,
@@ -406,7 +407,7 @@ final class AppServices {
             }
         case .brightnessUp, .brightnessDown:
             guard settings.displayHUDEnabled, brightness.available else { return }
-            let newValue = await brightness.step(up: key == .brightnessUp, fine: fine)
+            let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
             if allowedNow(.display) {
                 showHUD?(.brightness, newValue, false)
             }

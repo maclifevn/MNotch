@@ -56,6 +56,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Welcome, and users resort to Activity Monitor to quit MNotch.
     private func installMainMenu() {
         let appMenu = NSMenu()
+        let settings = NSMenuItem(
+            title: L10n.string("Settings…"),
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: L10n.string("Close Window"),
             action: #selector(NSWindow.performClose(_:)),
@@ -72,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         main.addItem(appItem)
         NSApp.mainMenu = main
+    }
+
+    @objc private func openSettings() {
+        SettingsWindowController.shared.show()
     }
 
     @objc private func screensChanged() {

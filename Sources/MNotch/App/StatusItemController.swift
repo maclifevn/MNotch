@@ -169,8 +169,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Menu-bar icon point size — matches the neighbouring status glyphs.
     private static let iconSize: CGFloat = 16
 
-    /// The MNotch app-icon badge, rendered from Support/MNotch_icon.svg into
-    /// Support/menubar-icon.png at build time and shipped in Resources. Loaded
+    /// The M-and-wave badge, exported from Support/MNotch_icon.svg into
+    /// Support/menubar-icon.png and shipped in Resources. Loaded
     /// once and marked template so macOS tints it for the menu bar.
     private static let baseIcon: NSImage = {
         let image: NSImage

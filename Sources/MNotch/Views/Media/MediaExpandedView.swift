@@ -215,6 +215,15 @@ struct TransportButton: View {
 
     @State private var hovering = false
 
+    private var accessibilityTitle: String {
+        switch symbol {
+        case "backward.fill": L10n.string("Previous track")
+        case "forward.fill": L10n.string("Next track")
+        case "pause.fill": L10n.string("Pause")
+        default: L10n.string("Play")
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
@@ -231,6 +240,8 @@ struct TransportButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityTitle)
+        .help(accessibilityTitle)
         .onHover { hovering = $0 }
         .animation(Anim.hud, value: hovering)
     }
@@ -245,6 +256,15 @@ struct SideButton: View {
 
     @State private var hovering = false
 
+    private var accessibilityTitle: String {
+        switch symbol {
+        case "shuffle": L10n.string("Shuffle")
+        case "repeat", "repeat.1": L10n.string("Repeat")
+        case "link": L10n.string("Copy track info")
+        default: L10n.string("Favorite")
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
@@ -256,6 +276,8 @@ struct SideButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityTitle)
+        .help(accessibilityTitle)
         .onHover { hovering = $0 }
         .animation(Anim.hud, value: hovering)
     }

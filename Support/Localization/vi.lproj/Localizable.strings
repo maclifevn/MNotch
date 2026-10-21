@@ -86,6 +86,7 @@
 "Haptic feedback" = "Phản hồi rung";
 "Hide from screen capture" = "Ẩn khỏi quay màn hình";
 "Hide in fullscreen" = "Ẩn khi toàn màn hình";
+"Volume and brightness HUDs still appear temporarily." = "HUD âm lượng và độ sáng vẫn hiện tạm thời.";
 "Hide in mission control" = "Ẩn trong Mission Control";
 "Hide label" = "Ẩn nhãn";
 "Hide media title extras" = "Ẩn phần phụ trong tên bài";
@@ -318,3 +319,13 @@
 "Preparing Update" = "Chuẩn bị cập nhật";
 "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Đang chờ Khay tệp hoàn tất sao chép hoặc kéo tệp. Thao tác tệp mới tạm dừng cho đến khi bắt đầu cập nhật.";
 "Cancel Update" = "Hủy cập nhật";
+"Auto-hide on displays without a notch" = "Tự ẩn trên màn hình không có notch";
+"Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible." = "Rê chuột vào vùng notch ở chính giữa cạnh trên để hiện lại. Bảng đang mở và thông báo vẫn hiển thị.";
+"Preview sound" = "Nghe thử âm thanh";
+"Agent Monitor is off" = "Theo dõi AI Agent đang tắt";
+"Previous track" = "Bài trước";
+"Next track" = "Bài tiếp theo";
+"Play" = "Phát";
+"Copy track info" = "Sao chép thông tin bài hát";
+"Open terminal" = "Mở terminal";
+"Cannot add a folder that contains the File Tray." = "Không thể thêm thư mục chứa Khay file.";

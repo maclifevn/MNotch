@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.2 — Horizontal HUDs and notch polish
+
+- Fill the entire visible menu-bar band and contain the contrast border; volume
+  and brightness HUDs keep the closed notch height while expanding sideways.
+- Allow temporary passive HUDs in full screen while keeping the normal notch
+  hidden, with Mission Control and gaming suppression preserved.
+- Add simulated-notch auto-hide and refresh application/menu-bar icons.
+- Bound thumbnail ownership, background rendering, service shutdown and file
+  reads; enforce debug/release/sanitizer/script checks before release signing.
+- Enable brightness on the locally verified Mac17,3 / macOS 27.0.1 (26A434)
+  combination through one serial hardware worker, coalesced writes and a
+  freshness lease that returns unavailable controls to macOS.
+
 ## 1.5.1 — Volume control recovery
 
 - Let macOS handle volume keys when audio controls are unavailable, writes fail,

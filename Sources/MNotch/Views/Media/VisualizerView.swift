@@ -1,7 +1,18 @@
 import SwiftUI
 
+private struct NotchRenderingPausedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var notchRenderingPaused: Bool {
+        get { self[NotchRenderingPausedKey.self] }
+        set { self[NotchRenderingPausedKey.self] = newValue }
+    }
+}
+
 /// Decorative audio bars, Alcove-style: phase-shifted sines per bar, springing
-/// to zero amplitude when paused. Runs at 24fps (organic enough for 4 bars)
+/// to zero amplitude when paused. Runs at 14fps (organic enough for 4 bars)
 /// and fully pauses its timeline shortly after playback stops, so an idle
 /// notch costs nothing.
 struct VisualizerView: View {
@@ -11,6 +22,7 @@ struct VisualizerView: View {
     var gradient: [Color]? = nil
     var barCount = 4
 
+    @Environment(\.notchRenderingPaused) private var renderingPaused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var playStateChangedAt = Date.distantPast
@@ -20,7 +32,7 @@ struct VisualizerView: View {
     var body: some View {
         TimelineView(.animation(
             minimumInterval: 1 / 14,
-            paused: !engineRunning || reduceMotion
+            paused: !engineRunning || reduceMotion || renderingPaused
         )) { timeline in
             Canvas { context, size in
                 let t = timeline.date.timeIntervalSinceReferenceDate
@@ -46,7 +58,7 @@ struct VisualizerView: View {
                         width: barWidth,
                         height: height
                     )
-                    let barColor = gradient.map { $0[i % $0.count] } ?? color
+                    let barColor = gradient.flatMap { $0.isEmpty ? nil : $0[i % $0.count] } ?? color
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: barWidth / 2),
                         with: .color(barColor)

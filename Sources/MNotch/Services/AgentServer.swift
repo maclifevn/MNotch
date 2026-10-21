@@ -442,9 +442,7 @@ final class AgentServer {
     }
 
     private func loadOrCreateToken() -> String {
-        if let reader = try? FileHandle(forReadingFrom: tokenURL) {
-            defer { try? reader.close() }
-            let bytes = (try? reader.read(upToCount: 129)) ?? Data()
+        if let bytes = try? BoundedFileReader.read(tokenURL, limit: 128) {
             let existing = String(data: bytes, encoding: .utf8) ?? ""
             let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty, bytes.count <= 128 {

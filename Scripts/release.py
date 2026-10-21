@@ -14,11 +14,25 @@ import tempfile
 from update_metadata import archive_metadata, check_upgrade, version_tuple
 
 ROOT = Path(__file__).resolve().parent.parent
+VALIDATION_CHECKS = ['debug', 'release', 'address', 'thread', 'scripts']
 
 
 def run(command, *, capture=False, environment=None):
     return subprocess.run(command, cwd=ROOT, env=environment, check=True,
                           text=True, capture_output=capture).stdout
+
+
+def validate_source():
+    commands = [
+        ['swift', 'test', '--disable-automatic-resolution'],
+        ['swift', 'test', '-c', 'release', '--disable-automatic-resolution'],
+        ['swift', 'test', '--disable-automatic-resolution', '--sanitize=address'],
+        ['swift', 'test', '--disable-automatic-resolution', '--sanitize=thread'],
+        ['python3', '-m', 'unittest', 'discover', '-s', 'Tests/BuildChecks', '-v'],
+    ]
+    for command in commands:
+        run(command)
+    return list(VALIDATION_CHECKS)
 
 
 def preflight(version):
@@ -92,6 +106,10 @@ def prepare(version, critical):
     destination = ROOT / 'build/releases' / f'{version}-{build}'
     if destination.exists():
         raise ValueError('release output already exists; preserve it and use a new version/build')
+    validation = validate_source()
+    _, validated_head, validated_build = preflight(version)
+    if (validated_head, validated_build) != (head, build):
+        raise ValueError('source changed during release validation')
     run(['Scripts/notarize.sh'], environment=env)
     run(['Scripts/create-dmg.sh'], environment=env)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +127,7 @@ def prepare(version, critical):
             raise ValueError('source changed during release preparation')
         names = ['appcast.xml', f'MNotch-{version}.zip', f'MNotch-{version}.dmg', 'MNotch.dmg']
         manifest = {'schema': 1, 'version': version, 'build': build, 'commit': head,
+                    'validation': validation,
                     'bootstrap_allowed': env.get('MNOTCH_BOOTSTRAP_UPDATE_FEED') == 'true',
                     'repository': os.environ.get('MNOTCH_RELEASE_REPOSITORY', 'maclifevn/MNotch'),
                     'assets': {name: {'sha256': digest(stage / name),
@@ -126,6 +145,8 @@ def publish(version):
     manifest = json.loads((destination / 'release-manifest.json').read_text())
     if (manifest.get('schema'), manifest.get('version'), manifest.get('build'), manifest.get('commit')) != (1, version, build, head):
         raise ValueError('release manifest does not match the clean source/tag')
+    if manifest.get('validation') != VALIDATION_CHECKS:
+        raise ValueError('release manifest is missing required regression checks; prepare it again')
     repository = os.environ.get('MNOTCH_RELEASE_REPOSITORY', 'maclifevn/MNotch')
     if manifest.get('repository') != repository:
         raise ValueError('release repository differs from the prepared manifest')

@@ -77,7 +77,7 @@ final class NotchWindowController {
             isLocked: AppServices.shared.lockScreen.isLocked,
             featureEnabled: settings.lockEnabled && PrivateAPICompatibility.permits(.lockScreen)
         )
-        let hidden = AppServices.shared.occlusion.shouldHide
+        let occlusion = AppServices.shared.occlusion.state
 
         // When no display has a real notch (Mac mini/Studio, Intel Macs, or a
         // MacBook running lid-closed on an external), fall back to a simulated
@@ -100,10 +100,7 @@ final class NotchWindowController {
             if elevateForLock {
                 panel.level = NSWindow.Level(rawValue: Int(Int32.max) - 2)
             }
-            if hidden {
-                panel.alphaValue = 0
-                panel.setInteractionSuppressed(true)
-            }
+            panel.setOcclusion(occlusion, animated: false)
             if elevateForLock {
                 // The window must already be ordered before SkyLight moves it;
                 // ordering it afterward can pull it back to the desktop space.
@@ -166,18 +163,12 @@ final class NotchWindowController {
                 self.rebuild()
             }
         }
-        AppServices.shared.occlusion.onHideChanged = { [weak self] hide in
+        AppServices.shared.occlusion.onChange = { [weak self] occlusion in
             guard let self else { return }
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Anim.reduceMotion ? 0.1 : 0.25
-                for panel in self.panels {
-                    panel.animator().alphaValue = hide ? 0 : 1
-                }
-            }
             for panel in self.panels {
-                panel.setInteractionSuppressed(hide)
+                panel.setOcclusion(occlusion)
             }
-            if !hide { self.refreshPointerInteractions() }
+            if occlusion == .visible { self.refreshPointerInteractions() }
         }
     }
 

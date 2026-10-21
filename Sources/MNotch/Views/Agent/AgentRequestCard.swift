@@ -101,6 +101,8 @@ struct AgentRequestCard: View {
                     .foregroundStyle(.white.opacity(0.45))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("Open terminal"))
+            .help(L10n.string("Open terminal"))
         }
     }
 

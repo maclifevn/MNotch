@@ -115,6 +115,37 @@ class ReleasePreflightTests(unittest.TestCase):
         with patch.dict(os.environ, {'BUILD_NUMBER': 'nan'}), self.assertRaisesRegex(ValueError, 'positive integer'):
             release.preflight('1.5.0')
 
+    def testAllRegressionChecksRunBeforeReleasePreparation(self):
+        with patch.object(release, 'run') as runner:
+            self.assertEqual(release.validate_source(), ['debug', 'release', 'address', 'thread', 'scripts'])
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertEqual(len(commands), 5)
+        self.assertIn('--sanitize=address', commands[2])
+        self.assertIn('--sanitize=thread', commands[3])
+        self.assertEqual(commands[-1][0], 'python3')
+
+    def testFailedRegressionStopsBeforeNotarizationOrUpload(self):
+        source = release.preflight('1.5.0')
+        with patch.object(release, 'preflight', return_value=source), \
+             patch.object(release, 'signing_preflight'), \
+             patch.object(release, 'run', side_effect=subprocess.CalledProcessError(1, ['swift', 'test'])) as runner:
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.prepare('1.5.0', False)
+        self.assertEqual(runner.call_count, 1)
+        self.assertEqual(runner.call_args.args[0][0:2], ['swift', 'test'])
+
+    def testPublishingOldManifestWithoutRegressionReceiptIsRejected(self):
+        notes, head, build = source = release.preflight('1.5.0')
+        destination = self.directory / 'build/releases' / f'1.5.0-{build}'
+        destination.mkdir(parents=True)
+        (destination / 'release-manifest.json').write_text(json.dumps({
+            'schema': 1, 'version': '1.5.0', 'build': build, 'commit': head,
+        }))
+        with patch.object(release, 'preflight', return_value=source), patch.object(release, 'run') as runner:
+            with self.assertRaisesRegex(ValueError, 'regression checks'):
+                release.publish('1.5.0')
+        runner.assert_not_called()
+
 
 class RealSparkleSigningTests(unittest.TestCase):
     @classmethod

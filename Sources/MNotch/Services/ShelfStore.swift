@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Observation
 
 struct ShelfSnapshot: Sendable {
@@ -15,11 +16,13 @@ actor ShelfFileWorker {
     private enum WorkerError: LocalizedError {
         case capacity(Int)
         case outsideShelf
+        case recursiveSource
 
         var errorDescription: String? {
             switch self {
             case .capacity(let limit): "File Tray can hold up to \(limit) items."
             case .outsideShelf: "File is outside the File Tray."
+            case .recursiveSource: L10n.string("Cannot add a folder that contains the File Tray.")
             }
         }
     }
@@ -27,10 +30,14 @@ actor ShelfFileWorker {
     private static let itemLimit = 100
     private let directory: URL
     private let fm = FileManager.default
+    private let trashItem: @Sendable (URL) throws -> Void
     private var revision: UInt64 = 0
 
-    init(directory: URL) {
+    init(directory: URL, trashItem: @escaping @Sendable (URL) throws -> Void = {
+        try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
+    }) {
         self.directory = directory
+        self.trashItem = trashItem
     }
 
     func list() throws -> ShelfSnapshot {
@@ -57,6 +64,12 @@ actor ShelfFileWorker {
 
     func add(_ urls: [URL]) throws -> ShelfSnapshot {
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destinationComponents = directory.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        for url in urls {
+            guard url.isFileURL,
+                  !destinationComponents.starts(with: url.resolvingSymlinksInPath().standardizedFileURL.pathComponents)
+            else { throw WorkerError.recursiveSource }
+        }
         let existing = try fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
@@ -69,7 +82,7 @@ actor ShelfFileWorker {
         var copied: [URL] = []
         do {
             for url in urls {
-                let destination = uniqueDestination(for: url)
+                let destination = try uniqueDestination(for: url)
                 do {
                     try fm.copyItem(at: url, to: destination)
                 } catch {
@@ -91,7 +104,7 @@ actor ShelfFileWorker {
 
     func remove(_ url: URL) throws -> ShelfSnapshot {
         guard ShelfRetentionPolicy.belongsToShelf(url, directory: directory) else { throw WorkerError.outsideShelf }
-        try fm.trashItem(at: url, resultingItemURL: nil)
+        try trashItem(url)
         revision &+= 1
         return ShelfSnapshot(revision: revision, items: try sortedItems())
     }
@@ -99,10 +112,11 @@ actor ShelfFileWorker {
     func clear(_ urls: [URL]) throws -> ShelfClearResult {
         var removedAny = false
         var failedNames: [String] = []
-        for url in urls where fm.fileExists(atPath: url.path) {
+        for url in urls {
             guard ShelfRetentionPolicy.belongsToShelf(url, directory: directory) else { throw WorkerError.outsideShelf }
             do {
-                try fm.trashItem(at: url, resultingItemURL: nil)
+                guard try pathExists(url) else { continue }
+                try trashItem(url)
                 removedAny = true
             } catch {
                 // Continue clearing the remaining files. A single item with a
@@ -119,9 +133,19 @@ actor ShelfFileWorker {
         )
     }
 
-    private func uniqueDestination(for source: URL) -> URL {
+    private func pathExists(_ url: URL) throws -> Bool {
+        var metadata = stat()
+        if lstat(url.path, &metadata) == 0 { return true }
+        let code = errno
+        if code == ENOENT { return false }
+        throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+    }
+
+    private func uniqueDestination(for source: URL) throws -> URL {
         let original = directory.appending(path: source.lastPathComponent)
-        guard fm.fileExists(atPath: original.path) else { return original }
+        // fileExists follows symlinks and reports a dangling link as absent.
+        // Reusing that name would make failed-copy cleanup delete an old item.
+        guard try pathExists(original) else { return original }
 
         let stem = source.deletingPathExtension().lastPathComponent
         let suffix = source.pathExtension.isEmpty ? "" : ".\(source.pathExtension)"
@@ -129,7 +153,7 @@ actor ShelfFileWorker {
             let candidate = directory.appending(
                 path: "\(stem)-\(UUID().uuidString.prefix(8))\(suffix)"
             )
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
+            if try !pathExists(candidate) { return candidate }
         }
     }
 }
@@ -141,7 +165,14 @@ actor ShelfFileWorker {
 final class ShelfStore {
     static let shared = ShelfStore()
 
-    private(set) var items: [URL] = []
+    private(set) var items: [URL] = [] {
+        didSet {
+            // Cache invalidation must also happen while the shelf tab is closed.
+            for removed in Set(oldValue).subtracting(items) {
+                ShelfThumbnailCache.shared.invalidate(removed)
+            }
+        }
+    }
     /// Selection belongs to the tray, not to a transient SwiftUI tab. Keeping
     /// it here preserves multi-selection while the notch collapses, another
     /// app becomes active, or ShelfView is reconstructed.

@@ -60,6 +60,9 @@ final class SettingsStore {
             onDisplayConfigChanged?()
         }
     }
+    var autoHideSimulatedNotch: Bool {
+        didSet { save("general.autoHideSimulatedNotch", autoHideSimulatedNotch) }
+    }
     var hideMenuBarIcon: Bool { didSet { save("general.hideMenuBar", hideMenuBarIcon) } }
     /// "all" | "main" | "builtIn" | display id string
     var displayTarget: String {
@@ -422,6 +425,7 @@ final class SettingsStore {
         // includes the automatic no-physical-notch fallback; keeping those
         // separate lets Settings follow display changes without accidentally
         // persisting a temporary clamshell state.
+        autoHideSimulatedNotch = flag("general.autoHideSimulatedNotch", false)
         forceSimulatedNotch = flag("general.forceNotch", false, legacy: "display.fakeNotch")
         hideMenuBarIcon = flag("general.hideMenuBar", false)
         displayTarget = str("general.displayTarget", "all")

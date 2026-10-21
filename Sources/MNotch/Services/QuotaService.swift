@@ -44,13 +44,13 @@ final class QuotaService {
         configureClaudeCallbacksIfNeeded()
         codexClient.start()
         claudeClient.start()
-        refresh()
         let timer = Timer(timeInterval: 180, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
         timer.tolerance = 30
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+        refresh()
     }
 
     func stop() {
@@ -61,6 +61,7 @@ final class QuotaService {
     }
 
     func refresh(force: Bool = false) {
+        guard timer != nil else { return }
         codexClient.refresh()
         claudeClient.refresh(force: force)
     }

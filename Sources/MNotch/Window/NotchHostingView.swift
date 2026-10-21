@@ -48,6 +48,10 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         return viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local)
     }
 
+    func setPresentationSuppressed(_ suppressed: Bool) {
+        viewModel.isPresentationSuppressed = suppressed
+    }
+
     func setPointerInsideFromWindow(_ inside: Bool) {
         viewModel.setPointerInside(inside)
     }

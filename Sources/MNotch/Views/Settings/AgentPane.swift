@@ -9,6 +9,7 @@ struct AgentPane: View {
     @State private var claudeHooksInstalled = ClaudeHookInstaller.isInstalled
     @State private var codexHooksInstalled = CodexHookInstaller.isInstalled
     @State private var errorMessage: String?
+    @State private var checkingClaudeCLI = false
     @State private var claudeCLIInstalled: Bool?   // nil = still checking
 
     private let claudeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash"
@@ -140,7 +141,7 @@ struct AgentPane: View {
             Section("Live quota") {
                 let quota = AppServices.shared.quota
                 LabeledContent("Codex") {
-                    Text(quotaSummary(quota.codexQuota))
+                    Text(settings.agentEnabled ? quotaSummary(quota.codexQuota) : L10n.string("Agent Monitor is off"))
                         .foregroundStyle(
                             quota.codexQuota.windows.isEmpty
                                 ? Color(nsColor: .secondaryLabelColor)
@@ -148,7 +149,7 @@ struct AgentPane: View {
                         )
                 }
                 LabeledContent("Claude") {
-                    Text(quotaSummary(quota.claudeQuota))
+                    Text(settings.agentEnabled ? quotaSummary(quota.claudeQuota) : L10n.string("Agent Monitor is off"))
                         .foregroundStyle(
                             quota.claudeQuota.windows.isEmpty
                                 ? Color(nsColor: .secondaryLabelColor)
@@ -156,6 +157,7 @@ struct AgentPane: View {
                         )
                 }
                 Button("Refresh Now") { quota.refresh(force: true) }
+                    .disabled(!settings.agentEnabled)
                 Text("Codex uses the official App Server. Claude's session + weekly percentages come from the `claude` CLI (see Claude usage above).")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -191,8 +193,12 @@ struct AgentPane: View {
 
     @MainActor
     private func recheckClaudeCLI() async {
+        guard !checkingClaudeCLI else { return }
+        checkingClaudeCLI = true
+        defer { checkingClaudeCLI = false }
         // Locating the CLI can spawn a login shell — keep it off the main actor.
         let path = await Task.detached { ClaudeUsageClient.cliPath() }.value
+        guard !Task.isCancelled else { return }
         claudeCLIInstalled = (path != nil)
     }
 

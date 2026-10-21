@@ -33,6 +33,12 @@ codesign --verify --deep --strict "$APP"
 mkdir -p "$DIST_DIR"
 swift Scripts/create-dmg-background.swift "$BACKGROUND"
 
+# Optional headless metadata writer for release hosts without Finder automation.
+# It builds the same layout directly, without opening windows or sharing mounts.
+if [[ -n "${MNOTCH_DMG_LAYOUT_PYTHON:-}" ]]; then
+    "$MNOTCH_DMG_LAYOUT_PYTHON" Scripts/create-dmg-headless.py \
+        "$APP" "$FINAL_DMG" "$BACKGROUND"
+else
 # Detach any leftover "MNotch" volumes from a previous run. Otherwise the new
 # image mounts as "MNotch 1/2/…", but the Finder AppleScript below targets the
 # clashing name and writes the layout/.DS_Store to the WRONG volume — the final
@@ -128,6 +134,8 @@ hdiutil convert "$RW_DMG" \
     -format UDZO \
     -imagekey zlib-level=9 \
     -o "$FINAL_DMG" >/dev/null
+
+fi
 
 codesign --force --sign "$SIGN_ID" --timestamp "$FINAL_DMG"
 hdiutil verify "$FINAL_DMG" >/dev/null
