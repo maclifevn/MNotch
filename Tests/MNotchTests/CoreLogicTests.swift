@@ -608,6 +608,33 @@ final class CoreLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testDisplayHUDAloneStartsHardwareAndKeyHandlingAcrossSleepWake() {
+        let suite = "MNotchTests.displayHUD.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        settings.soundHUDEnabled = false
+        settings.mediaEnabled = false
+        settings.displayHUDEnabled = true
+        settings.lockEnabled = false
+        let flags = FeatureFlags.capture(settings)
+        let active = FeatureDemand(flags: flags)
+        XCTAssertTrue(flags.displayHUDEnabled)
+        XCTAssertTrue(active.displayControls)
+        XCTAssertTrue(active.keys)
+        XCTAssertFalse(active.audio)
+        let sleeping = active.suspended(true)
+        XCTAssertFalse(sleeping.displayControls)
+        XCTAssertFalse(sleeping.keys)
+        XCTAssertEqual(active.suspended(false), active)
+
+        settings.displayHUDEnabled = false
+        let disabled = FeatureDemand(settings: settings)
+        XCTAssertFalse(disabled.displayControls)
+        XCTAssertFalse(disabled.keys)
+    }
+
+    @MainActor
     func testFeatureDemandStartsOnlyRequestedServices() {
         let demand = FeatureDemand(flags: FeatureFlags(
             mediaEnabled: true,

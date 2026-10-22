@@ -26,10 +26,7 @@ struct NotchBodyView: View {
     /// Behind-window blur samples bright desktop content and creates a white
     /// halo, so it must never be used as the expanded surface shadow.
     private var usesFloatingSurfaceShadow: Bool {
-        switch viewModel.status {
-        case .expanded, .pop(.agentConfirm): true
-        default: false
-        }
+        viewModel.status.isExpanded
     }
 
     var body: some View {

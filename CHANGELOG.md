@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.3 — Brightness compatibility, finer volume and compact notifications
+
+- Detect built-in display brightness support at runtime instead of limiting
+  the HUD to one Mac model, macOS patch and build. Display-only configurations
+  start brightness polling and key handling, including after sleep/wake.
+- Show actual brightness control failures in Settings and diagnostics; retain
+  native key handling when controls are missing, fail or stop responding.
+- Resample after a stalled hardware call before taking control of brightness
+  keys again, so an old result cannot overwrite newer native adjustments.
+- Adjust volume by 1% per key press (0.25% with Shift + Option), with consistent
+  steps while holding a key. Ignore snapshots from earlier audio requests until
+  the latest request completes, and preserve the order of volume/mute commands.
+- Keep charging, battery, Bluetooth, Focus, calendar, Pomodoro, accessibility
+  and agent notifications within the menu-bar band. Agent confirmations use
+  side wings, and hover feedback expands horizontally without dipping below it.
+
 ## 1.5.2 — Horizontal HUDs and notch polish
 
 - Fill the entire visible menu-bar band and contain the contrast border; volume

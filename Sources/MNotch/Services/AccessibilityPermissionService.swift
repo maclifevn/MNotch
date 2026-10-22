@@ -29,7 +29,7 @@ final class AccessibilityPermissionService {
         AccessibilityRequirement.isRequired(
             granted: isGranted,
             soundHUDEnabled: SettingsStore.shared.soundHUDEnabled,
-            displayHUDEnabled: SettingsStore.shared.displayHUDEnabled && (PrivateAPICompatibility.permits(.displayBrightness) || PrivateAPICompatibility.permits(.keyboardBacklight))
+            displayHUDEnabled: SettingsStore.shared.displayHUDEnabled
         )
     }
 

@@ -23,6 +23,7 @@ final class BrightnessService {
     private(set) var brightness: Double = 0.5
     private(set) var isRunning = false
     private(set) var isResponsive = false
+    private(set) var hasFailure = false
     @ObservationIgnored var onChanged: ((Double) -> Void)?
 
     init(
@@ -46,6 +47,7 @@ final class BrightnessService {
 
     func start() {
         guard permitted else {
+            hasFailure = true
             AppDiagnostics.record(.brightness, .unsupportedOS)
             return
         }
@@ -53,6 +55,7 @@ final class BrightnessService {
         isRunning = true
         generation &+= 1
         writeFailed = false
+        hasFailure = false
         sampledAt = nil
         isResponsive = false
         lastPolled = nil
@@ -74,6 +77,7 @@ final class BrightnessService {
         pollTimer = nil
         isRunning = false
         isResponsive = false
+        hasFailure = false
         generation &+= 1
         pendingValue = nil
         lastPolled = nil
@@ -99,6 +103,7 @@ final class BrightnessService {
     private func requestRefresh(notifyChanges: Bool) {
         if let sampledAt, clock() - sampledAt > freshness {
             isResponsive = false
+            hasFailure = true
             pendingValue = nil
         }
         guard isRunning, operationTask == nil else { return }
@@ -123,11 +128,19 @@ final class BrightnessService {
                 if self.isRunning { self.requestRefresh(notifyChanges: false) }
                 return
             }
-            // Once the lease expired, native keys may already have changed
-            // brightness. Do not replay old pending steps over those changes.
-            if self.clock() - startedAt > self.freshness { self.pendingValue = nil }
             switch result {
             case .success(let snapshot):
+                // Once the lease expired, native keys may already have changed
+                // brightness. Discard pending steps and resample before taking
+                // control again; the result may predate the stalled call.
+                if self.clock() - startedAt > self.freshness {
+                    self.pendingValue = nil
+                    self.sampledAt = nil
+                    self.isResponsive = false
+                    self.hasFailure = true
+                    self.requestRefresh(notifyChanges: false)
+                    return
+                }
                 guard snapshot.value.isFinite, (0...1).contains(snapshot.value), snapshot.displayID != 0 else {
                     self.fail(.readFailed(-1), operation: operation)
                     return
@@ -140,6 +153,7 @@ final class BrightnessService {
                 self.sampledAt = self.clock()
                 self.isResponsive = true
                 self.lastFailure = nil
+                self.hasFailure = self.writeFailed
                 let previous = self.lastPolled
                 self.lastPolled = snapshot.value
                 // A completion must not roll the HUD backward over a newer
@@ -158,6 +172,7 @@ final class BrightnessService {
 
     private func fail(_ failure: BrightnessHardwareFailure, operation: BrightnessHardwareWorker.Operation) {
         isResponsive = false
+        hasFailure = true
         sampledAt = nil
         pendingValue = nil
         if case .write = operation { writeFailed = true }

@@ -18,9 +18,9 @@ struct HUDSettingsPane: View {
                 Toggle(isOn: $enabled) {
                     Label(LocalizedStringKey(title), systemImage: symbol)
                 }
-                if symbol == "sun.max.fill",
-                   !PrivateAPICompatibility.permits(.displayBrightness) {
-                    Text(L10n.string(PrivateAPICompatibility.unavailableReason))
+                if symbol == "sun.max.fill", enabled,
+                   AppServices.shared.brightness.hasFailure {
+                    Text("Display brightness control is unavailable. macOS will handle the brightness keys.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Group {

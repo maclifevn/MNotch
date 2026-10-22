@@ -32,7 +32,7 @@ struct FeatureFlags: Equatable, Sendable {
         FeatureFlags(
             mediaEnabled: settings.mediaEnabled,
             soundHUDEnabled: settings.soundHUDEnabled,
-            displayHUDEnabled: settings.displayHUDEnabled && (PrivateAPICompatibility.permits(.displayBrightness) || PrivateAPICompatibility.permits(.keyboardBacklight)),
+            displayHUDEnabled: settings.displayHUDEnabled,
             batteryEnabled: settings.batteryEnabled,
             connectivityEnabled: settings.connectivityEnabled,
             calendarEnabled: settings.calendarEnabled,

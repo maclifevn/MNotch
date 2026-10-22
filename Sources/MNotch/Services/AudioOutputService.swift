@@ -14,6 +14,7 @@ final class AudioHALWorker: @unchecked Sendable {
         let volumeAvailable: Bool
         let muteAvailable: Bool
         let sampledAt: TimeInterval
+        let completedRequestID: UInt64
     }
 
     typealias Update = @Sendable (Snapshot) -> Void
@@ -32,6 +33,9 @@ final class AudioHALWorker: @unchecked Sendable {
     private var outputSymbol = "laptopcomputer"
     private var pendingVolume: Double?
     private var pendingMute: Bool?
+    private var unmuteOnVolumeWrite = false
+    private var queuedRequestID: UInt64 = 0
+    private var completedRequestID: UInt64 = 0
     private var writeDrainScheduled = false
     private var refreshScheduled = false
     private var deviceRefreshScheduled = false
@@ -157,6 +161,7 @@ final class AudioHALWorker: @unchecked Sendable {
             self.generation &+= 1
             self.pendingVolume = nil
             self.pendingMute = nil
+            self.unmuteOnVolumeWrite = false
             self.writeDrainScheduled = false
             self.refreshScheduled = false
             self.deviceRefreshScheduled = false
@@ -175,18 +180,25 @@ final class AudioHALWorker: @unchecked Sendable {
 
     /// Rapid key repeats collapse to the latest requested values. Only one
     /// queue drain touches HAL, instead of one blocking round-trip per event.
-    func setVolume(_ value: Double) {
+    func setVolume(_ value: Double, requestID: UInt64 = 0) {
         queue.async { [weak self] in
             guard let self, self.started else { return }
             self.pendingVolume = SafeNumeric.unit(value, fallback: self.volume)
+            // Preserve an earlier positive request's unmute intent even if
+            // a burst of subsequent down steps reaches zero before draining.
+            if value > 0 { self.unmuteOnVolumeWrite = true }
+            self.queuedRequestID = max(self.queuedRequestID, requestID)
             self.scheduleWriteDrain()
         }
     }
 
-    func setMuted(_ muted: Bool) {
+    func setMuted(_ muted: Bool, requestID: UInt64 = 0) {
         queue.async { [weak self] in
             guard let self, self.started else { return }
             self.pendingMute = muted
+            // An explicit mute after a volume request wins over auto-unmute.
+            self.unmuteOnVolumeWrite = false
+            self.queuedRequestID = max(self.queuedRequestID, requestID)
             self.scheduleWriteDrain()
         }
     }
@@ -207,6 +219,9 @@ final class AudioHALWorker: @unchecked Sendable {
         guard started, deviceID != kAudioObjectUnknown else {
             pendingVolume = nil
             pendingMute = nil
+            unmuteOnVolumeWrite = false
+            completedRequestID = queuedRequestID
+            publish()
             return
         }
 
@@ -219,13 +234,16 @@ final class AudioHALWorker: @unchecked Sendable {
                 volume = Double(level)
                 volumeWriteFailed = false
                 volumeAvailable = true
-                if muted, requestedVolume > 0 { pendingMute = false }
+                if unmuteOnVolumeWrite, muted || pendingMute == true {
+                    pendingMute = false
+                }
             } else {
                 volumeWriteFailed = true
                 volumeAvailable = false
                 recordFailure(.writeFailed, status: status)
             }
         }
+        unmuteOnVolumeWrite = false
 
         if let requestedMute = pendingMute {
             pendingMute = nil
@@ -245,6 +263,9 @@ final class AudioHALWorker: @unchecked Sendable {
         // HAL writes may apply asynchronously. Keep the accepted value until
         // a property notification or the next recovery poll confirms it;
         // reading immediately can restore the old level during key repeats.
+        // Acknowledge only after both writes (including auto-unmute) finish,
+        // even on failure, so the service can reconcile its optimistic state.
+        completedRequestID = queuedRequestID
         publish()
 
         // A request can arrive while a slow HAL call is returning.
@@ -412,7 +433,8 @@ final class AudioHALWorker: @unchecked Sendable {
             outputSymbol: outputSymbol,
             volumeAvailable: volumeAvailable,
             muteAvailable: muteAvailable,
-            sampledAt: ProcessInfo.processInfo.systemUptime
+            sampledAt: ProcessInfo.processInfo.systemUptime,
+            completedRequestID: completedRequestID
         ))
     }
 }
@@ -445,6 +467,8 @@ final class AudioOutputService {
     @ObservationIgnored private let now: () -> TimeInterval
     @ObservationIgnored private var lastResponse: TimeInterval?
     @ObservationIgnored private var runGeneration: UInt64 = 0
+    @ObservationIgnored private var requestSequence: UInt64 = 0
+    @ObservationIgnored private var latestRequestID: UInt64 = 0
 
     init(hal: AudioHALWorker = AudioHALWorker(), now: @escaping () -> TimeInterval = {
         ProcessInfo.processInfo.systemUptime
@@ -475,6 +499,7 @@ final class AudioOutputService {
         lastResponse = nil
         volumeAvailable = false
         muteAvailable = false
+        latestRequestID = 0
         runGeneration &+= 1
         hal.stop()
     }
@@ -490,25 +515,46 @@ final class AudioOutputService {
         let clamped = SafeNumeric.unit(newVolume)
         volume = clamped
         if muted, clamped > 0 { muted = false }
-        hal.setVolume(clamped)
+        hal.setVolume(clamped, requestID: nextRequestID())
+    }
+
+    /// Small, consistent steps for both individual presses and key repeats.
+    @discardableResult
+    func step(up: Bool, fine: Bool = false) -> Double {
+        guard canSetVolume else { return volume }
+        let increment = fine ? 0.0025 : 0.01
+        setVolume(volume + (up ? increment : -increment))
+        return volume
     }
 
     func setMuted(_ newMuted: Bool) {
         guard isResponsive else { return }
         muted = newMuted
-        hal.setMuted(newMuted)
+        hal.setMuted(newMuted, requestID: nextRequestID())
+    }
+
+    private func nextRequestID() -> UInt64 {
+        requestSequence &+= 1
+        latestRequestID = requestSequence
+        return latestRequestID
     }
 
     private func apply(_ snapshot: AudioHALWorker.Snapshot) {
-        let changed = volume != snapshot.volume || muted != snapshot.muted
-        volume = SafeNumeric.unit(snapshot.volume, fallback: volume)
-        muted = snapshot.muted
+        let previousVolume = volume
+        let previousMuted = muted
+        // A refresh or an earlier write can reach the main actor after a newer
+        // key press. Keep that press as the base for subsequent repeats until
+        // HAL finishes the request; still apply health/lease data immediately.
+        if snapshot.completedRequestID >= latestRequestID {
+            volume = SafeNumeric.unit(snapshot.volume, fallback: volume)
+            muted = snapshot.muted
+        }
         outputName = snapshot.outputName
         outputSymbol = snapshot.outputSymbol
         volumeAvailable = snapshot.volumeAvailable
         muteAvailable = snapshot.muteAvailable
         lastResponse = snapshot.sampledAt
-        if changed {
+        if volume != previousVolume || muted != previousMuted {
             onVolumeChanged?(volume, muted)
         }
     }

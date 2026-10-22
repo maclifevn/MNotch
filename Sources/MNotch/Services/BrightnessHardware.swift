@@ -21,14 +21,17 @@ protocol BrightnessHardwareAccess: Sendable {
 final class DisplayServicesBrightnessHardware: BrightnessHardwareAccess, @unchecked Sendable {
     private typealias GetFn = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
     private typealias SetFn = @convention(c) (CGDirectDisplayID, Float) -> Int32
+    private typealias CanChangeFn = @convention(c) (CGDirectDisplayID) -> Bool
     private var handle: UnsafeMutableRawPointer?
     private var getFn: GetFn?
     private var setFn: SetFn?
+    private var canChangeFn: CanChangeFn?
     private var attemptedLoad = false
 
     func read() -> Result<BrightnessSnapshot, BrightnessHardwareFailure> {
         loadIfNeeded()
-        guard getFn != nil, setFn != nil, let display = builtInDisplay() else { return .failure(.unavailable) }
+        guard getFn != nil, setFn != nil, let display = builtInDisplay(),
+              canChangeFn?(display) != false else { return .failure(.unavailable) }
         return read(displayID: display)
     }
 
@@ -37,6 +40,7 @@ final class DisplayServicesBrightnessHardware: BrightnessHardwareAccess, @unchec
         // Never redirect an old queued command to another display after a
         // clamshell/hot-plug change, or to an external primary display.
         guard builtInDisplay() == displayID else { return .failure(.displayChanged) }
+        guard canChangeFn?(displayID) != false else { return .failure(.unavailable) }
         let status = setFn(displayID, Float(value))
         guard status == 0 else { return .failure(.writeFailed(status)) }
         return read(displayID: displayID)
@@ -61,6 +65,12 @@ final class DisplayServicesBrightnessHardware: BrightnessHardwareAccess, @unchec
         self.handle = handle
         if let symbol = dlsym(handle, "DisplayServicesGetBrightness") { getFn = unsafeBitCast(symbol, to: GetFn.self) }
         if let symbol = dlsym(handle, "DisplayServicesSetBrightness") { setFn = unsafeBitCast(symbol, to: SetFn.self) }
+        // Older implementations can omit this optional query; in that case a
+        // successful, validated read plus the set symbol is the capability
+        // probe, and any failed write immediately releases key handling.
+        if let symbol = dlsym(handle, "DisplayServicesCanChangeBrightness") {
+            canChangeFn = unsafeBitCast(symbol, to: CanChangeFn.self)
+        }
     }
 
     private func builtInDisplay() -> CGDirectDisplayID? {

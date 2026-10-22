@@ -5,21 +5,59 @@ import XCTest
 
 @MainActor
 final class BrightnessTests: XCTestCase {
-    func testCompatibilityIsLimitedToTheVerifiedHostAndBrightness() {
-        let version = OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 1)
-        XCTAssertTrue(PrivateAPICompatibility.permits(.displayBrightness, version: version,
-            build: "26A434", model: "Mac17,3"))
-        for integration in [PrivateAPICompatibility.Integration.keyboardBacklight, .lockScreen] {
-            XCTAssertFalse(PrivateAPICompatibility.permits(integration, version: version,
-                build: "26A434", model: "Mac17,3"))
+    func testBrightnessProbesEverySupportedOSWithoutAHostAllowlist() {
+        // Previously only one model / patch / build was allowed, so working
+        // brightness keys on every other Mac silently fell through to macOS.
+        for major in [15, 26, 27, 99] {
+            for patch in [0, 1, 2, 99] {
+                let version = OperatingSystemVersion(majorVersion: major, minorVersion: 0, patchVersion: patch)
+                XCTAssertTrue(PrivateAPICompatibility.permits(.displayBrightness, version: version))
+                for integration in [PrivateAPICompatibility.Integration.keyboardBacklight, .lockScreen] {
+                    XCTAssertFalse(PrivateAPICompatibility.permits(integration, version: version))
+                }
+            }
         }
-        XCTAssertFalse(PrivateAPICompatibility.permits(.displayBrightness, version: version,
-            build: "26A999", model: "Mac17,3"))
-        XCTAssertFalse(PrivateAPICompatibility.permits(.displayBrightness, version: version,
-            build: "26A434", model: "Mac17,1"))
         XCTAssertFalse(PrivateAPICompatibility.permits(.displayBrightness,
-            version: .init(majorVersion: 27, minorVersion: 0, patchVersion: 2),
-            build: "26A434", model: "Mac17,3"))
+            version: .init(majorVersion: 14, minorVersion: 0, patchVersion: 0)))
+    }
+
+    func testCapabilityFailureKeepsNativeKeysUntilTheDisplayBecomesAvailable() async {
+        let hardware = TestBrightnessHardware()
+        hardware.update { $0.readFailure = .unavailable }
+        let service = BrightnessService(hardware: hardware)
+        service.start()
+        defer { service.stop() }
+        await eventually { hardware.snapshot.completedReads == 1 && !service.isUpdating }
+        XCTAssertTrue(service.isRunning)
+        XCTAssertTrue(service.hasFailure)
+        XCTAssertFalse(service.available)
+        _ = service.step(up: true, fine: false)
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+
+        hardware.update { $0.readFailure = nil; $0.value = 0.75 }
+        service.refresh()
+        await eventually { service.available }
+        XCTAssertFalse(service.hasFailure)
+        XCTAssertEqual(service.step(up: false, fine: false), 0.6875)
+        await eventually { hardware.snapshot.value == 0.6875 && !service.isUpdating }
+    }
+
+    func testSlowReadMustResampleBeforeTakingKeysFromMacOS() async {
+        let hardware = TestBrightnessHardware()
+        let clock = BrightnessTestClock()
+        let release = DispatchSemaphore(value: 0)
+        hardware.update { $0.blockRead = release }
+        let service = BrightnessService(hardware: hardware, clock: { clock.now })
+        service.start()
+        defer { service.stop() }
+        await eventually { hardware.snapshot.reads == 1 }
+        clock.advance(3)
+        // Native keys may have adjusted the display while the API was stuck.
+        hardware.update { $0.value = 0.75 }
+        release.signal()
+        await eventually { service.available && service.brightness == 0.75 }
+        XCTAssertEqual(hardware.snapshot.reads, 2)
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
     }
 
     func testUnpermittedServiceDoesNotTouchHardware() async {
@@ -34,6 +72,47 @@ final class BrightnessTests: XCTestCase {
         XCTAssertFalse(service.isRunning)
         XCTAssertEqual(hardware.snapshot.reads, 0)
         XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+    }
+
+    func testKeysStayNativeBeforeTheInitialSampleAndAfterStop() async {
+        let hardware = TestBrightnessHardware()
+        let release = DispatchSemaphore(value: 0)
+        hardware.update { $0.blockRead = release }
+        let service = BrightnessService(hardware: hardware)
+        service.start()
+        await eventually { hardware.snapshot.reads == 1 }
+        XCTAssertFalse(service.available)
+        _ = service.step(up: true, fine: false)
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+        release.signal()
+        await eventually { service.available }
+        service.stop()
+        _ = service.step(up: true, fine: false)
+        XCTAssertFalse(service.available)
+        XCTAssertFalse(service.hasFailure)
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+    }
+
+    func testLateWriteFailureCannotBeClearedByASuccessfulRead() async {
+        let hardware = TestBrightnessHardware()
+        let clock = BrightnessTestClock()
+        let service = BrightnessService(hardware: hardware, clock: { clock.now })
+        service.start()
+        defer { service.stop() }
+        await eventually { service.available }
+        let release = DispatchSemaphore(value: 0)
+        hardware.update { $0.blockWrite = release; $0.writeFailure = .writeFailed(-50) }
+        _ = service.step(up: true, fine: false)
+        await eventually { hardware.snapshot.writes.count == 1 }
+        clock.advance(3)
+        release.signal()
+        await eventually { service.hasFailure && !service.isUpdating }
+        service.refresh()
+        await eventually { service.isResponsive }
+        XCTAssertFalse(service.available)
+        XCTAssertTrue(service.hasFailure)
+        _ = service.step(up: true, fine: false)
+        XCTAssertEqual(hardware.snapshot.writes.count, 1)
     }
 
     func testRepeatedStepsCoalesceWithoutRollingBackTheHUD() async {
@@ -194,6 +273,7 @@ private final class TestBrightnessHardware: BrightnessHardwareAccess, @unchecked
         var reads = 0
         var completedReads = 0
         var writes: [Write] = []
+        var readFailure: BrightnessHardwareFailure?
         var writeFailure: BrightnessHardwareFailure?
         var blockRead: DispatchSemaphore?
         var blockWrite: DispatchSemaphore?
@@ -204,15 +284,16 @@ private final class TestBrightnessHardware: BrightnessHardwareAccess, @unchecked
     func update(_ body: (inout State) -> Void) { lock.withLock { body(&state) } }
 
     func read() -> Result<BrightnessSnapshot, BrightnessHardwareFailure> {
-        let (result, block): (BrightnessSnapshot, DispatchSemaphore?) = lock.withLock {
+        let (result, block): (Result<BrightnessSnapshot, BrightnessHardwareFailure>, DispatchSemaphore?) = lock.withLock {
             state.reads += 1
             let block = state.blockRead
             state.blockRead = nil
-            return (.init(value: state.value, displayID: state.display), block)
+            if let failure = state.readFailure { return (.failure(failure), block) }
+            return (.success(.init(value: state.value, displayID: state.display)), block)
         }
         block?.wait()
         lock.withLock { state.completedReads += 1 }
-        return .success(result)
+        return result
     }
 
     func write(_ value: Double, displayID: CGDirectDisplayID) -> Result<BrightnessSnapshot, BrightnessHardwareFailure> {

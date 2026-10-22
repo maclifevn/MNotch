@@ -329,3 +329,4 @@
 "Copy track info" = "Sao chép thông tin bài hát";
 "Open terminal" = "Mở terminal";
 "Cannot add a folder that contains the File Tray." = "Không thể thêm thư mục chứa Khay file.";
+"Display brightness control is unavailable. macOS will handle the brightness keys." = "Chưa thể điều khiển độ sáng màn hình. macOS sẽ xử lý các phím độ sáng.";

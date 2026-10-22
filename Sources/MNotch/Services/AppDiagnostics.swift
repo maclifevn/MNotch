@@ -115,6 +115,7 @@ enum AppDiagnostics {
                 "brightnessAvailable": services.brightness.available,
                 "brightnessRunning": services.brightness.isRunning,
                 "brightnessResponsive": services.brightness.isResponsive,
+                "brightnessControlFailed": services.brightness.hasFailure,
                 "keyboardBacklightAvailable": services.backlight.available,
                 "mediaPolling": services.media.isPolling,
                 "audioRunning": services.audio.isRunning,

@@ -5,6 +5,185 @@ import XCTest
 
 @MainActor
 final class AudioOutputTests: XCTestCase {
+    func testVolumeKeysUseOnePercentAndQuarterPercentSteps() async {
+        let hardware = TestAudioHardware()
+        hardware.update { $0.devices[10]?.volume = 1 }
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume }
+
+        XCTAssertEqual(audio.step(up: false), 0.99, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[10]!.volume) - 0.99) < 0.000001 }
+        XCTAssertEqual(audio.step(up: false, fine: true), 0.9875, accuracy: 0.000001)
+        XCTAssertEqual(audio.step(up: true, fine: true), 0.99, accuracy: 0.000001)
+        XCTAssertEqual(audio.step(up: true), 1, accuracy: 0.000001)
+        await eventually { hardware.snapshot.devices[10]?.volume == 1 }
+    }
+
+    func testVolumeStepsClampAtBothEndsAndAccumulateRepeatedKeys() async {
+        let hardware = TestAudioHardware()
+        hardware.update { $0.devices[10]?.volume = 1 }
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume }
+
+        XCTAssertEqual(audio.step(up: true), 1)
+        XCTAssertEqual(audio.step(up: true, fine: true), 1)
+        for _ in 0..<20 { _ = audio.step(up: false) }
+        for _ in 0..<10 { _ = audio.step(up: true) }
+        XCTAssertEqual(audio.volume, 0.9, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[10]!.volume) - 0.9) < 0.000001 }
+
+        for _ in 0..<100 { _ = audio.step(up: false) }
+        XCTAssertEqual(audio.volume, 0)
+        XCTAssertEqual(audio.step(up: false, fine: true), 0)
+        await eventually { hardware.snapshot.devices[10]?.volume == 0 }
+    }
+
+    func testUnavailableVolumeStepsNeverWriteToHardware() async {
+        let hardware = TestAudioHardware()
+        hardware.update { $0.devices[10]?.supportsVolume = false }
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.isResponsive }
+        let initialVolume = audio.volume
+
+        XCTAssertEqual(audio.step(up: false), initialVolume)
+        XCTAssertEqual(audio.step(up: true, fine: true), initialVolume)
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+    }
+
+    func testEarlierRefreshCannotRollBackPendingVolumeSteps() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume && audio.canSetMute }
+
+        let releaseRefresh = DispatchSemaphore(value: 0)
+        let releaseWrite = DispatchSemaphore(value: 0)
+        defer { releaseRefresh.signal(); releaseWrite.signal() }
+        hardware.update { $0.blockNextDefaultRead = releaseRefresh }
+        audio.refresh()
+        await eventually { hardware.snapshot.readBlocked }
+
+        XCTAssertEqual(audio.step(up: false), 0.49, accuracy: 0.000001)
+        hardware.update {
+            // This capability change proves the earlier snapshot reached the
+            // main actor while its volume value must remain suppressed.
+            $0.devices[10]?.supportsMute = false
+            $0.blockNextWrite = releaseWrite
+        }
+        releaseRefresh.signal()
+        await eventually { hardware.snapshot.writeBlocked && !audio.canSetMute }
+        XCTAssertTrue(audio.canSetVolume)
+        XCTAssertEqual(audio.volume, 0.49, accuracy: 0.000001)
+        XCTAssertEqual(audio.step(up: false), 0.48, accuracy: 0.000001)
+
+        releaseWrite.signal()
+        await eventually {
+            abs(Double(hardware.snapshot.devices[10]!.volume) - 0.48) < 0.000001
+                && abs(audio.volume - 0.48) < 0.000001
+        }
+    }
+
+    func testVolumeStepAfterQueuedMuteUnmutesTheOutput() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume && audio.canSetMute }
+
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        hardware.update { $0.blockNextDefaultRead = release }
+        audio.refresh()
+        await eventually { hardware.snapshot.readBlocked }
+        audio.setMuted(true)
+        XCTAssertEqual(audio.step(up: true), 0.51, accuracy: 0.000001)
+        XCTAssertFalse(audio.muted)
+        release.signal()
+
+        await eventually {
+            hardware.snapshot.writes.count >= 2
+                && abs(Double(hardware.snapshot.devices[10]!.volume) - 0.51) < 0.000001
+                && hardware.snapshot.devices[10]?.mute == 0
+                && !audio.muted
+        }
+    }
+
+    func testExplicitMuteAfterQueuedVolumeStepWins() async {
+        let hardware = TestAudioHardware()
+        hardware.update { $0.devices[10]?.mute = 1 }
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume && audio.muted }
+
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        hardware.update { $0.blockNextDefaultRead = release }
+        audio.refresh()
+        await eventually { hardware.snapshot.readBlocked }
+        XCTAssertEqual(audio.step(up: true), 0.51, accuracy: 0.000001)
+        audio.setMuted(true)
+        release.signal()
+
+        await eventually {
+            hardware.snapshot.writes.count >= 2
+                && abs(Double(hardware.snapshot.devices[10]!.volume) - 0.51) < 0.000001
+                && hardware.snapshot.devices[10]?.mute == 1
+                && audio.muted
+        }
+    }
+
+    func testCoalescingVolumeToZeroKeepsEarlierUnmuteIntent() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume && audio.canSetMute }
+
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        hardware.update { $0.blockNextDefaultRead = release }
+        audio.refresh()
+        await eventually { hardware.snapshot.readBlocked }
+        audio.setMuted(true)
+        _ = audio.step(up: true)
+        audio.setVolume(0)
+        XCTAssertFalse(audio.muted)
+        release.signal()
+
+        await eventually {
+            hardware.snapshot.writes.count >= 2
+                && hardware.snapshot.devices[10]?.volume == 0
+                && hardware.snapshot.devices[10]?.mute == 0
+                && audio.volume == 0 && !audio.muted
+        }
+    }
+
+    func testMissingDefaultRetiresPendingStepAndFollowsRecoveredVolume() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume }
+        hardware.update { $0.defaultDevice = AudioObjectID(kAudioObjectUnknown) }
+        XCTAssertEqual(audio.step(up: false), 0.49, accuracy: 0.000001)
+        await eventually { !audio.canSetVolume }
+        XCTAssertTrue(hardware.snapshot.writes.isEmpty)
+
+        hardware.update { $0.defaultDevice = 10; $0.devices[10]?.volume = 0.25 }
+        audio.refresh()
+        await eventually { audio.canSetVolume && audio.volume == 0.25 }
+        XCTAssertEqual(audio.step(up: false), 0.24, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[10]!.volume) - 0.24) < 0.000001 }
+    }
+
     func testUnavailableOutputsNeverTakeOverVolumeKeysAndRecoverWithoutRestart() async {
         let hardware = TestAudioHardware()
         hardware.update { $0.devices[10]?.supportsVolume = false }
@@ -75,6 +254,11 @@ final class AudioOutputTests: XCTestCase {
         hardware.update { $0.defaultDevice = 20; $0.devices[20] = .init() }
         audio.refresh()
         await eventually { audio.canSetVolume }
+        XCTAssertEqual(audio.step(up: false), 0.49, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[20]!.volume) - 0.49) < 0.000001 }
+        hardware.update { $0.devices[20]?.volume = 0.25 }
+        audio.refresh()
+        await eventually { audio.volume == 0.25 }
     }
 
     func testMuteFailureDoesNotDisableUnmutedVolumeControl() async {
@@ -269,6 +453,8 @@ private final class TestAudioHardware: AudioHardwareAccess, @unchecked Sendable 
         var defaultReads = 0
         var blockNextDefaultRead: DispatchSemaphore?
         var readBlocked = false
+        var blockNextWrite: DispatchSemaphore?
+        var writeBlocked = false
         var deferWrites = false
     }
 
@@ -327,6 +513,16 @@ private final class TestAudioHardware: AudioHardwareAccess, @unchecked Sendable 
 
     func write(_ object: AudioObjectID, _ address: inout AudioObjectPropertyAddress,
                _ size: UInt32, _ data: UnsafeRawPointer) -> OSStatus {
+        let release = lock.withLock {
+            let release = state.blockNextWrite
+            state.blockNextWrite = nil
+            state.writeBlocked = release != nil
+            return release
+        }
+        if let release {
+            _ = release.wait(timeout: .now() + 5)
+            update { $0.writeBlocked = false }
+        }
         guard let device = snapshot.devices[object] else { return kAudioHardwareBadObjectError }
         update { $0.writes.append(.init(object: object, selector: address.mSelector)) }
         guard device.writeStatus == noErr else { return device.writeStatus }

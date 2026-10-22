@@ -481,10 +481,10 @@ final class StabilityTests: XCTestCase {
         XCTAssertThrowsError(try FileManager.default.destinationOfSymbolicLink(atPath: link.path))
     }
 
-    func testUnverifiedPrivateAPIsAreDisabledEvenWhenSymbolsMightExist() {
+    func testUnverifiedBacklightAndLockAPIsStayDisabledEvenWhenSymbolsMightExist() {
         for major in [15, 26, 27, 99] {
             let version = OperatingSystemVersion(majorVersion: major, minorVersion: 0, patchVersion: 0)
-            for integration in PrivateAPICompatibility.Integration.allCases {
+            for integration in [PrivateAPICompatibility.Integration.keyboardBacklight, .lockScreen] {
                 XCTAssertFalse(PrivateAPICompatibility.permits(integration, version: version))
             }
         }

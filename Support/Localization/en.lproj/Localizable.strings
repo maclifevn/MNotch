@@ -31,3 +31,4 @@
 "Skip to the next phase" = "Skip to the next phase";
 "Reset the session" = "Reset the session";
 "Cannot add a folder that contains the File Tray." = "Cannot add a folder that contains the File Tray.";
+"Display brightness control is unavailable. macOS will handle the brightness keys." = "Display brightness control is unavailable. macOS will handle the brightness keys.";

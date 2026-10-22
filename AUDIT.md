@@ -498,3 +498,115 @@ Candidate: `1.4.1-audit10 (101)`. Bằng chứng build, chữ ký, backup và c�
   Fixture expiry giữ kiểm tra gia hạn rồi chờ trạng thái đóng với timeout 3s;
   fixture thumbnail giữ ảnh trong reference MainActor thay vì truyền NSImage
   qua Task.value. Không thay đổi code vẽ/HUD hoặc thêm Sendable không an toàn.
+
+## 2026-10-22 — Sửa HUD độ sáng theo phản hồi của Hoàng Minh
+
+Ảnh phản hồi: âm lượng hiện ở notch, còn phím độ sáng chỉ hiện HUD của macOS
+dù Display đã bật. Nguyên nhân xác định trong source là allowlist chỉ nhận
+`Mac17,3 / macOS 27.0.1 / 26A434`. Mọi model/build/patch khác bị chặn trước
+khi kiểm tra phần cứng. Gate được áp dụng ở cả `BrightnessService`, lifecycle
+`FeatureFlags.capture` và yêu cầu Accessibility. Vì vậy quyền âm lượng vẫn
+hoạt động nhưng `brightness.available` luôn false và phím độ sáng đi về macOS.
+Các giới hạn brightness theo host ghi ở các mốc audit trước là trạng thái lịch sử.
+
+Thay đổi:
+
+- Cho phép probe DisplayServices trên macOS 15+ theo khả năng thực tế của
+  active built-in display, bỏ hoàn toàn kiểm tra model/build/patch. Cần đủ
+  symbol get/set, query `DisplayServicesCanChangeBrightness` nếu có, read
+  thành công và giá trị hữu hạn trong 0...1 trước khi service nhận phím.
+  Query tùy chọn không gây mất hỗ trợ khi implementation cũ chỉ có get/set.
+  Chữ ký C đối chiếu với [nriley/brightness](https://github.com/nriley/brightness/blob/master/brightness.c).
+- Lifecycle và yêu cầu Accessibility theo đúng setting Display, kể cả khi
+  Sound/Now Playing tắt. Giữ giới hạn một hardware operation trên serial
+  queue, coalesce key repeat và trả phím về macOS khi không khả dụng/lỗi/hết lease.
+- Kết quả thành công nhưng quá hạn lease 2,5 giây bị bỏ; đọc lại trước khi
+  nhận phím để tránh dùng mức sáng cũ sau khi native keys đã điều chỉnh.
+  Lỗi ghi tới muộn vẫn bị latch; read thành công không tự xác nhận khả năng ghi.
+- Settings hiển thị lỗi điều khiển thực tế bằng EN/VI; diagnostics thêm
+  `brightnessControlFailed`. Các gate keyboard backlight và lock-screen giữ nguyên.
+
+Kiểm chứng trên host `Mac17,3 / macOS 27.0.1 / 26A434`:
+
+- Debug: **145 tests**, release: **145 tests**, build/release scripts: **32 tests**, đều qua.
+  Fixture mới gồm policy qua nhiều OS/patch, Display-only demand/sleep/wake,
+  unavailable → phục hồi, initial-read/stop, read bị treo và write failure tới muộn.
+- Address Sanitizer và Thread Sanitizer: mỗi cấu hình **12 brightness tests** qua.
+- Native probe compile trực tiếp service/worker/policy production: **66 writes**,
+  **1.000 repeat steps**, **100 stop/start cycles**, 0 lỗi và 0 hardware calls
+  trên main thread. Độ sáng ban đầu và sau restore đều `0.75544941425323486`.
+  Nguồn probe, kết quả JSON và logs ở `build/brightness-fix-2026-10-22/`.
+- Candidate local `1.5.3-dev (104)` ad-hoc được build và kiểm tra bundle:
+  7 Mach-O có deployment target tối đa macOS 15.0, dSYM khớp UUID, codesign
+  verify và Info.plist lint qua. Archive: `build/brightness-fix-2026-10-22/MNotch-brightness-fix.zip`.
+
+Chưa kiểm chứng trực tiếp trên máy Hoàng Minh hoặc nghiệm thu sleep/wake và
+clamshell thật ở host khác. Runtime probing loại bỏ nguyên nhân bị chặn theo
+host; kết quả local không chứng nhận mọi tổ hợp phần cứng/macOS.
+
+## 2026-10-22 — Chỉnh âm lượng theo bước nhỏ trước khi phát hành 1.5.3
+
+Nguyên nhân 100% → 94% sau một lần bấm là bước cố định `1/16` (6,25%)
+trong `AppServices`, được HUD làm tròn. Không có bằng chứng phím bị xử lý lặp
+hai lần. Đổi thành 1% mỗi lần bấm/repeat; Shift + Option dùng bước 0,25%.
+
+- Đưa phép tăng/giảm vào `AudioOutputService.step`, giữ giới hạn 0...1 và
+  điều kiện trả phím cho macOS khi output không điều khiển được.
+- Đánh số yêu cầu volume/mute; chỉ cập nhật giá trị từ snapshot sau khi worker
+  hoàn thành yêu cầu mới nhất. Snapshot cũ vẫn cập nhật capability/lease nhưng
+  không được ghi đè giá trị đang chờ, tránh mất bước khi bấm nhanh.
+- Hoàn tất acknowledgement cả khi ghi lỗi/mất output; bảo toàn thứ tự mute và
+  auto-unmute khi coalesce nhiều lệnh, kể cả chuỗi volume dương rồi về 0.
+  Sequence này không khẳng định loại bỏ mọi stale readback từ driver sau khi
+  lệnh ghi đã được xác nhận; không thêm giả định về thời gian áp dụng của driver.
+- Debug **153 tests**, release **153 tests**, Address Sanitizer và Thread
+  Sanitizer mỗi cấu hình **21 audio tests**, tất cả qua. Các regression dùng
+  hardware giả, gồm refresh cũ bị chặn, ghi lỗi, đổi/mất output, repeat, clamp
+  và thứ tự mute. Log ở `build/volume-fix-2026-10-22/`.
+
+Theo yêu cầu mới nhất, tạm dừng phát hành chính thức để kiểm tra bản dev mới.
+Candidate `1.5.3-dev (105)` đã được ký cùng Developer ID, kiểm tra 7 Mach-O/
+dSYM và cài tại `/Applications/MNotch.app`; startup log xác nhận event tap
+active. Backup build 104 và install record lưu cùng thư mục log ở trên.
+
+## 2026-10-22 — Giữ mọi thông báo tạm thời trong hàng menu
+
+Ảnh cắm sạc cho thấy notch tràn xuống dưới 6 pt: nhánh `.pop` vẫn cộng
+`popExtraHeight = 6`, trong khi `.hud` đã dùng đúng `geometry.notchHeight`.
+Nhánh xác nhận Agent còn cao thêm 36 pt, đặt nội dung dưới camera và có bóng đổ.
+
+- Tất cả `PopKind` dùng chiều cao của hàng menu: Trợ năng, sạc, pin yếu,
+  nguồn điện thấp, Bluetooth, Focus, lịch, trạng thái/xác nhận Agent và Pomodoro.
+- Xác nhận duyệt/từ chối dùng hai cánh cạnh camera; chỉ panel mở rộng mới có
+  bóng đổ. `PopWings` căn giữa theo chiều cao thật, giới hạn một dòng và clip
+  từng cánh để chữ dài không tràn vào camera hoặc xuống dưới.
+- Hover notch đóng chỉ tăng chiều ngang; loại bỏ phần cao thêm 4 pt khi thông
+  báo xuất hiện/biến mất dưới con trỏ. Panel mở rộng và ưu tiên/fullscreen giữ
+  hành vi cũ.
+- Debug: 153 regression tests hiện có và 2 `PopLayoutTests` mới đều qua.
+  512 trường hợp geometry; 248 render pixel với 16 biến thể thông báo, notch
+  thật/giả, band 20/24/32/33 pt, scale 1×/2×, outline bật/tắt, shadow bật.
+  Kiểm tra đáy opaque, toàn bộ canvas dưới band alpha 0, nội dung ở cả hai
+  cánh và khoảng camera trống; fixture có nhãn tiếng Việt dài.
+- Đã xem ảnh render sạc, Trợ năng ở band 20 pt và xác nhận Agent/Pomodoro
+  ở 33 pt. 21 ảnh và kết quả kiểm tra nằm trong `build/pop-band-fix-2026-10-22/`.
+- Release: toàn bộ **155 tests** qua, gồm cùng ma trận render pixel. Tuning
+  chiều cao của app đang cài là 0; lỗi trong ảnh không đến từ offset người dùng.
+- Candidate `1.5.3-dev (106)` ký cùng Developer ID, verify bundle/dSYM qua,
+  đã cài và mở tại `/Applications/MNotch.app`. Backup build 105 và install
+  record lưu trong thư mục bằng chứng ở trên. Chưa phát hành chính thức.
+
+## 2026-10-22 — Chốt nguồn phát hành 1.5.3
+
+Người dùng đã xác nhận độ sáng hoạt động, tiếp tục kiểm tra candidate
+`1.5.3-dev (106)` và xác nhận notch không còn tràn xuống dưới trước khi yêu cầu
+phát hành chính thức. Bản chính thức dùng build **107**, cao hơn các candidate
+104–106 và bản stable 1.5.2 (103).
+
+Phạm vi phát hành gồm các sửa lỗi độ sáng, bước âm lượng 1%/0,25% và toàn bộ
+thông báo tạm thời trong hàng menu ở các mục trên. Các commit thử nghiệm
+phối hợp kéo/thả MFinder đã được revert; không nằm trong thay đổi của bản này.
+Quy trình release tiếp tục yêu cầu debug/release, ASan, TSan, script checks,
+notarization app/DMG, chữ ký Sparkle, kiểm tra bản tải công khai và cài cập nhật
+thực tế. Bằng chứng của lần phát hành lưu ngoài source trong
+`build/release-1.5.3-2026-10-22/` và `build/releases/1.5.3-107/`.
