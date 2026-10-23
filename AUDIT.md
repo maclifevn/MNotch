@@ -382,18 +382,29 @@ nhân crash; không viết lại kiến trúc/UI để suy đoán xử lý chún
 
 ## Thu thập báo cáo crash hoặc treo mới
 
-1. **Settings → About → Export Diagnostics**: lưu JSON của phiên vừa gặp lỗi.
-   Report chỉ chứa version/build/OS/arm64, boolean service state và tối đa 256
-   enum error/status/elapsed events. Không có token, tài khoản, path, tên/nội dung
-   file, hội thoại hay calendar title. Không tự upload. Buffer được reset khi
-   process khởi động lại, nên JSON sau relaunch không chứa sự kiện trước crash.
+1. **Settings → About → Export Diagnostics**: lưu JSON gồm phiên hiện tại và
+   lịch sử lưu bền tại `~/Library/Application Support/MNotch/Diagnostics`.
+   Export sau khi mở lại app vẫn chứa phiên trước. Giữ năm phiên gần nhất;
+   mỗi phiên có hai journal tối đa 512 KiB/file, tối đa hai stack sample
+   512 KiB/file và checkpoint giới hạn. Quyền thư mục 0700, file 0600.
+   Event dùng enum/status/elapsed; heartbeat 5s lưu trạng thái service/nhận chuột,
+   CPU time và RAM, kèm model Mac và bản OS/build. Không có token, tài khoản,
+   nội dung file, hội thoại hay calendar title; không tự upload.
 2. Nếu app tự thoát: lấy report MNotch `.ips` từ Console → Crash Reports hoặc
    `~/Library/Logs/DiagnosticReports`. Giữ nguyên version/UUID, exception type,
    crashed thread và stack. Crash trong Perl helper cần report của helper đúng
    thời điểm, kèm JSON service diagnostics của app.
-3. Nếu “Not Responding”: Activity Monitor → MNotch → **Sample Process** trong
-   lúc đang treo; nếu có thể lấy thêm mẫu thứ hai sau vài giây, rồi mới Force
-   Quit. Stack giúp phân biệt main-thread block với helper/driver/database.
+3. Watchdog chạy độc lập với main run loop và hàng đợi ghi file. Quá 5s không
+   trả lời sẽ ghi `mainThreadUnresponsive`, thử `/usr/bin/sample` đúng PID app
+   trong 2s (deadline 8s, output 512 KiB), và ghi thời gian phục hồi khi có.
+   Tối đa hai lần lấy mẫu/phiên, cách nhau ít nhất 60s. Header đường dẫn và các
+   absolute path bị bỏ trước khi lưu; symbol và image UUID vẫn còn. Sleep/wake
+   hủy probe cũ; khoảng trễ của chính watchdog được ghi `watchdogDelayed`,
+   không quy thành treo main thread. Nếu chưa có mẫu tự động, dùng Activity
+   Monitor → MNotch → **Sample Process** lúc đang treo trước khi Force Quit.
+   Khi toàn hệ thống dừng chạy hoặc mất điện, app không thể tự lấy stack mới;
+   chỉ còn checkpoint/event đã ghi trước đó và dấu `previousSessionUnclosed`
+   ở lần chạy sau. Dấu này không khẳng định crash hay MNotch gây treo máy.
 4. Ghi thao tác trước lỗi, OS/patch, màn hình/audio device vừa thay đổi, quyền
    vừa cấp/thu hồi và khả năng tái hiện. Raw `.ips`/sample hệ thống có thể chứa
    đường dẫn/tên máy; xem và che thông tin cá nhân trước khi chia sẻ công khai.

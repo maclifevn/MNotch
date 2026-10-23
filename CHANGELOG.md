@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.5 — Persistent hang diagnostics
+
+- Save bounded local diagnostics across relaunches, including the previous
+  session, Mac/OS build, service/input state, CPU time and resident memory.
+- Detect a main run loop that stops responding for 5 seconds from a separate
+  watchdog queue; record recovery and try a bounded stack sample of MNotch.
+  Distinguish sleep/wake, watchdog delays and unclosed sessions from confirmed
+  main-thread stalls. Include saved history in Export Diagnostics.
+
 ## 1.5.4 — Codex discovery and persistent Claude quota
 
 - Discover the CLI bundled inside current Codex applications, including moved

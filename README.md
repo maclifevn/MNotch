@@ -90,10 +90,24 @@ MNotch is designed to keep its work on your Mac:
 - The File Tray stores its working copies under `~/Library/Application Support/MNotch/Shelf`. When “clear after drag” is enabled, a hidden backing copy can remain for up to 24 hours so receiving apps can finish an import or upload safely.
 - Agent hooks communicate with MNotch over a token-protected listener bound to `127.0.0.1`. Hook installation is explicit and reversible in Settings.
 - Codex quota is requested through the local Codex App Server, including the CLI bundled inside the Codex app. Claude quota uses an existing Desktop or CLI OAuth sign-in. In Settings → AI Agent → Claude usage, **Connect Claude** enables reading Desktop's encrypted saved credentials; macOS may ask once for access to the **Claude Safe Storage** Keychain item. Choose **Always Allow** to keep access after restarting MNotch; **Allow** keeps the approved key in memory for the current run. Background polls stay silent. Neither Claude Code nor Claude Desktop needs to remain open. Only unexpired access tokens for the selected account and organization are reused; if the saved sign-in expires or is revoked, sign in to Claude again and reconnect. MNotch never refreshes shared tokens, changes Claude's files, or reads transcripts. Tokens stay in memory and are sent only to Anthropic's usage endpoint.
-- **Settings → About → Export Diagnostics** saves a local JSON report containing
-  app/OS versions, service states and bounded numeric error/timing metadata. It
-  excludes tokens, account details, file contents, paths and conversations.
-  Nothing is uploaded automatically. See [AUDIT.md](AUDIT.md) for crash/hang reports.
+- Diagnostics are saved automatically under `~/Library/Application Support/MNotch/Diagnostics`,
+  with a checkpoint every 5 seconds. The last five sessions retain bounded event logs,
+  service/input state, CPU time, resident memory, Mac model and OS/build information.
+  A background watchdog records a main run loop that fails to respond for 5 seconds,
+  recovery, and sessions left unclosed after a crash, Force Quit or forced reboot.
+  Sleep/wake and delays affecting the watchdog itself are recorded separately.
+- On a detected hang, MNotch tries to sample **its own process** for 2 seconds,
+  at most twice per session and at least 60 seconds apart. Samples have an 8-second
+  deadline and a 512 KiB output limit; unavailable sampling is recorded without
+  interrupting the app. Process/path headers and absolute paths are removed from
+  saved stacks; symbols and image UUIDs remain for diagnosis.
+- **Settings → About → Export Diagnostics** includes the current report and saved
+  history, so export **after relaunching** still includes the previous session.
+  Logs and samples stay local, exclude tokens, account details, file contents and
+  conversations, and use owner-only file permissions. Each session keeps two
+  512 KiB journal segments, up to two 512 KiB sample files and a bounded checkpoint
+  (about 11 MiB for five sessions). Nothing is uploaded automatically.
+  See [AUDIT.md](AUDIT.md) for crash/hang reports.
 
 ## Build from source
 

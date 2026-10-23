@@ -7,8 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updates = AppUpdateController.shared
     private var permissionNoticeTask: Task<Void, Never>?
     private let healthProbe = AppHealthProbe()
+    private let hangMonitor = AppHangMonitor(recorder: AppDiagnostics.persistence)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDiagnostics.persistence.start()
+        hangMonitor.start()
         AppDiagnostics.record(.application, .started)
         installMainMenu()
         AppServices.shared.startAll()
@@ -101,5 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchController?.stop()
         permissionNoticeTask?.cancel()
         AppServices.shared.stopAll()
+        hangMonitor.stop()
+        AppDiagnostics.persistence.finish()
     }
 }

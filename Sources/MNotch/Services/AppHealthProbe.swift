@@ -1,7 +1,7 @@
 import Foundation
 
-/// Opt-in local soak instrumentation. Production runs create no extra timer or
-/// file; the isolated harness supplies the destination and unique bundle ID.
+/// Extra opt-in soak instrumentation, separate from the always-on persistent
+/// journal/watchdog. The harness supplies its destination and unique bundle ID.
 @MainActor
 final class AppHealthProbe {
     private var timer: Timer?

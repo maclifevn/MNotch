@@ -7,7 +7,7 @@ let mnotchLog = Logger(subsystem: "com.mnotch.app", category: "application")
 
 enum DiagnosticComponent: String, Codable, Sendable {
     case application, subprocess, media, claude, codex, agentServer, calendar
-    case brightness, keyboardBacklight, lockScreen, updates, audio, keyInput
+    case brightness, keyboardBacklight, lockScreen, updates, audio, keyInput, watchdog
 }
 
 enum DiagnosticCode: String, Codable, Sendable {
@@ -28,7 +28,7 @@ struct DiagnosticEvent: Codable, Sendable {
 
 /// Deliberately accepts enums and numeric metadata only. Raw error messages,
 /// commands, paths, titles, tokens and account/session data cannot enter an
-/// exported report. The bounded log lives in memory and is never uploaded.
+/// exported event. A bounded memory buffer supplements the local disk journal.
 final class DiagnosticBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var events: [DiagnosticEvent] = []
@@ -60,6 +60,9 @@ final class DiagnosticBuffer: @unchecked Sendable {
 
 enum AppDiagnostics {
     static let buffer = DiagnosticBuffer()
+    static let persistence = DiagnosticRecorder(
+        directory: AppPaths.supportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory)
+    )
 
     struct Report: Codable, Sendable {
         let schemaVersion: Int
@@ -70,6 +73,7 @@ enum AppDiagnostics {
         let architecture: String
         let runtime: [String: Bool]
         let events: [DiagnosticEvent]
+        var history: DiagnosticHistory? = nil
     }
 
     static func record(
@@ -77,7 +81,9 @@ enum AppDiagnostics {
         status: Int32? = nil, elapsed: TimeInterval? = nil
     ) {
         let elapsed = elapsed.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-        buffer.append(.init(time: .now, component: component, code: code, status: status, elapsed: elapsed))
+        let event = DiagnosticEvent(time: .now, component: component, code: code, status: status, elapsed: elapsed)
+        buffer.append(event)
+        persistence.record(.init(time: event.time, kind: .event, event: event))
         Logger(subsystem: "com.mnotch.app", category: component.rawValue)
             .info("event=\(code.rawValue, privacy: .public) status=\(status ?? 0) elapsed=\(elapsed ?? 0)")
     }
@@ -91,8 +97,6 @@ enum AppDiagnostics {
 
     @MainActor
     static func report() -> Report {
-        let services = AppServices.shared
-        let settings = SettingsStore.shared
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return Report(
             schemaVersion: 1, createdAt: .now,
@@ -100,7 +104,16 @@ enum AppDiagnostics {
             appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development",
             macOSVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
             architecture: "arm64",
-            runtime: [
+            runtime: runtimeState(), events: buffer.snapshot()
+        )
+    }
+
+    @MainActor
+    static func runtimeState() -> [String: Bool] {
+        let services = AppServices.shared
+        let settings = SettingsStore.shared
+        let panels = NSApp?.windows.compactMap { $0 as? NotchPanel } ?? []
+        return [
                 "mediaEnabled": settings.mediaEnabled,
                 "agentEnabled": settings.agentEnabled,
                 "calendarEnabled": settings.calendarEnabled,
@@ -111,6 +124,9 @@ enum AppDiagnostics {
                 "displayHUDEnabled": settings.displayHUDEnabled,
                 "accessibilityGranted": services.accessibility.isGranted,
                 "eventTapActive": services.keys.tapActive,
+                "notchPanelVisible": panels.contains { $0.isVisible },
+                "notchInterceptingMouse": panels.contains { $0.isVisible && !$0.ignoresMouseEvents },
+                "mouseButtonPressed": NSEvent.pressedMouseButtons != 0,
                 "calendarAuthorized": services.calendar.authorized,
                 "brightnessAvailable": services.brightness.available,
                 "brightnessRunning": services.brightness.isRunning,
@@ -129,8 +145,7 @@ enum AppDiagnostics {
                 "subprocessesActive": SubprocessLifecycle.shared.activeGroupCount > 0,
                 "updatePreparing": AppUpdateController.shared.isPreparingForInstallation,
                 "lockCompatibilityVerified": PrivateAPICompatibility.permits(.lockScreen),
-            ], events: buffer.snapshot()
-        )
+            ]
     }
 
     @MainActor
@@ -141,16 +156,17 @@ enum AppDiagnostics {
         panel.nameFieldStringValue = "MNotch-diagnostics.json"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            do {
-                let data = try encode(report())
-                Task {
-                    do {
-                        try await Task.detached(priority: .utility) {
-                            try data.write(to: url, options: .atomic)
-                        }.value
-                    } catch { showExportError() }
-                }
-            } catch { showExportError() }
+            let current = report()
+            Task {
+                var exported = current
+                exported.history = await persistence.history()
+                do {
+                    let report = exported
+                    try await Task.detached(priority: .utility) {
+                        try encode(report).write(to: url, options: .atomic)
+                    }.value
+                } catch { showExportError() }
+            }
         }
     }
 
