@@ -132,13 +132,14 @@ final class PersistentDiagnosticsTests: XCTestCase {
         let session = metadata()
         let store = DiagnosticFileStore(directory: directory)
         try store.begin(session)
-        let raw = "Process: secret\nPath: /Users/alice/private/MNotch\nCall graph:\n main (/Users/alice/My Private/source.swift:2)\nBinary Images:\n MNotch <SAMPLE-UUID> /Volumes/Private/MNotch\n"
+        let raw = "Process: secret\nPath: /Users/alice/private/MNotch\nCall graph:\n -[NSURL initFileURLWithPath:]\n main (/Users/alice/My Private/source.swift:2)\nBinary Images:\n MNotch <SAMPLE-UUID> /Volumes/Private/MNotch\n"
         let text = try XCTUnwrap(DiagnosticStackSample.sanitizedStack(Data(raw.utf8)))
         XCTAssertFalse(text.contains("secret"))
         XCTAssertFalse(text.contains("alice"))
         XCTAssertFalse(text.contains("Private"))
         XCTAssertFalse(text.contains("/Volumes"))
         XCTAssertTrue(text.contains("SAMPLE-UUID"))
+        XCTAssertTrue(text.contains("initFileURLWithPath:"), "preserve symbols containing Path:, which are not path headers")
         try store.saveSample(.init(id: UUID(), time: .now, outcome: .captured, exitStatus: 0, text: text))
         try store.finish()
         let sessionDirectory = directory.appending(path: "session-\(session.id.uuidString)")
@@ -203,7 +204,7 @@ final class PersistentDiagnosticsTests: XCTestCase {
         let text = try XCTUnwrap(sample.text)
         XCTAssertTrue(text.hasPrefix("Call graph:"))
         XCTAssertFalse(text.contains(NSHomeDirectory()))
-        XCTAssertFalse(text.contains("Path:"))
+        XCTAssertFalse(text.split(separator: "\n").contains { $0.hasPrefix("Path:") })
         XCTAssertLessThan(text.utf8.count, 512 * 1024)
     }
 
