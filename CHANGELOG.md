@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.4 — Codex discovery and persistent Claude quota
+
+- Discover the CLI bundled inside current Codex applications, including moved
+  or renamed apps, while preserving CLI overrides and legacy paths.
+- Read Claude subscription session and weekly quota through the read-only OAuth
+  usage endpoint instead of interpreting CLI token/cost statistics.
+- Connect Claude Desktop's encrypted saved sign-in explicitly through macOS
+  Keychain so quota continues updating after Claude Code and Desktop close.
+  Reuse only unexpired tokens for the selected account and organization; do not
+  refresh shared tokens or change Claude's files.
+- Update connection guidance, Vietnamese translations, and regression coverage
+  for application discovery, quota responses, and encrypted credential caches.
+
 ## 1.5.3 — Brightness compatibility, finer volume and compact notifications
 
 - Detect built-in display brightness support at runtime instead of limiting

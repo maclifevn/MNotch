@@ -610,3 +610,25 @@ Quy trình release tiếp tục yêu cầu debug/release, ASan, TSan, script che
 notarization app/DMG, chữ ký Sparkle, kiểm tra bản tải công khai và cài cập nhật
 thực tế. Bằng chứng của lần phát hành lưu ngoài source trong
 `build/release-1.5.3-2026-10-22/` và `build/releases/1.5.3-107/`.
+
+## 2026-10-23 — Chốt nguồn phát hành 1.5.4
+
+Theo yêu cầu phát hành của người dùng, 1.5.4 lấy nguồn từ `main` sau PR #1,
+gồm nhận diện CodexCLI tích hợp và hạn mức Claude từ đăng nhập đã lưu. Dùng
+build **108**, cao hơn stable 1.5.3 (107), giữ bundle ID, Developer ID team,
+khóa Sparkle và URL feed hiện có.
+
+- Đã kiểm chứng quota Claude cập nhật khi không còn tiến trình Claude Desktop
+  hoặc Claude Code, kể cả sau khi khởi động lại MNotch. Người dùng đã cấp
+  quyền đọc mục Claude Safe Storage; background polling không hiện prompt.
+- Bộ debug **183 tests** qua trên bản sửa; CI của PR #1 đạt cả macOS 15,
+  macOS 26, Address Sanitizer và Thread Sanitizer. Quy trình release chạy lại
+  debug/release, hai sanitizer và script checks cho commit/tag phát hành.
+- Tiếp tục nghiệm thu chữ ký/notarization app và DMG, chữ ký và lịch sử feed,
+  artifact công khai và cập nhật thực tế từ 1.5.3. Bằng chứng riêng của lượt
+  phát hành được lưu ở `build/release-1.5.4-2026-10-23/` và
+  `build/releases/1.5.4-108/`.
+
+Phạm vi kiểm chứng mới tập trung vào Codex/quota và đường cập nhật. Các giới
+hạn ma trận phần cứng và workload soak ở các mốc audit trước vẫn được giữ
+nguyên; không coi kết quả CI hoặc notarization là kiểm chứng mọi thiết bị.
