@@ -14,14 +14,17 @@ struct PopWings<Left: View, Right: View>: View {
     var body: some View {
         HStack(spacing: 0) {
             left
-                .frame(width: wingWidth, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: wingWidth, height: geometry.notchHeight, alignment: .leading)
+                .clipped()
             Spacer(minLength: geometry.notchWidth)
             right
-                .frame(width: wingWidth, alignment: .trailing)
+                .lineLimit(1)
+                .frame(width: wingWidth, height: geometry.notchHeight, alignment: .trailing)
+                .clipped()
         }
         .padding(.horizontal, sidePadding)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 2)
+        .frame(height: geometry.notchHeight)
     }
 }
 
@@ -228,16 +231,17 @@ struct AgentPopView: View {
     }
 }
 
-/// Compact confirmation pill shown briefly after Approve/Reject (reference 2).
+/// Brief acknowledgement after Approve/Reject, beside the camera cutout.
 struct AgentConfirmView: View {
     let approved: Bool
     let geometry: NotchGeometry
 
     var body: some View {
-        HStack(spacing: 7) {
+        PopWings(geometry: geometry) {
             Image(systemName: approved ? "checkmark" : "xmark")
                 .font(.system(size: 12, weight: .bold))
                 .notchBounce()
+        } right: {
             Text(
                 approved ? L10n.string("Approved") : L10n.string("Rejected")
             )
@@ -248,8 +252,7 @@ struct AgentConfirmView: View {
                 ? Color(red: 0.40, green: 0.90, blue: 0.50)
                 : Color(red: 0.95, green: 0.45, blue: 0.45)
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(.top, geometry.notchHeight - 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

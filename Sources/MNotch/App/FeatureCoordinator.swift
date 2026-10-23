@@ -44,7 +44,7 @@ struct FeatureFlags: Equatable, Sendable {
             mediaHideWhileSourceActive: settings.mediaHideWhileSourceActive,
             focusEnabled: settings.focusEnabled,
             agentEnabled: settings.agentEnabled,
-            lockEnabled: settings.lockEnabled,
+            lockEnabled: settings.lockEnabled && PrivateAPICompatibility.permits(.lockScreen),
             lockNowPlaying: settings.lockNowPlaying,
             lockShowVolume: settings.lockShowVolume,
             lockWidgetBattery: settings.lockWidgetBattery,

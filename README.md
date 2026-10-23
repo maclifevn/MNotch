@@ -1,81 +1,183 @@
-# MNotch
+<p align="center">
+  <img src="Support/AppIconSource.png" width="128" height="128" alt="MNotch app icon">
+</p>
 
-Dynamic Island cho Mac
+<h1 align="center">MNotch</h1>
 
-## Build & chạy
+<p align="center">
+  A native, local-first Dynamic Island for macOS.<br>
+  Turn the MacBook notch—or the top of an external display—into a useful, contextual workspace.
+</p>
 
-```sh
-Scripts/run.sh        # build + mở app
-swift test            # unit test logic lõi
-```
+<p align="center">
+  <a href="https://github.com/maclifevn/MNotch/actions/workflows/ci.yml"><img src="https://github.com/maclifevn/MNotch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/macOS-15.0%2B-black?logo=apple" alt="macOS 15 or later">
+  <img src="https://img.shields.io/badge/architecture-Apple%20Silicon-black?logo=apple" alt="Apple Silicon">
+  <img src="https://img.shields.io/badge/Swift-6.1-F05138?logo=swift&logoColor=white" alt="Swift 6.1">
+  <img src="https://img.shields.io/badge/Developer%20ID-notarized-2ea44f" alt="Developer ID notarized">
+</p>
 
-Yêu cầu: macOS 15+, Apple Silicon, Swift Command Line Tools.
+<p align="center">
+  <a href="https://github.com/maclifevn/MNotch/releases">Download</a>
+  ·
+  <a href="CHANGELOG.md">Changelog</a>
+  ·
+  <a href="https://github.com/maclifevn/MNotch/issues/new">Report a bug</a>
+</p>
 
-### Bản phát hành đã notarize
+MNotch is an AppKit and SwiftUI menu-bar utility inspired by the fluid interactions of Dynamic Island interfaces. It runs as a lightweight background app, supports both physical and simulated notches, and ships with English and Vietnamese localizations.
 
-Lưu thông tin notarization vào Keychain một lần (password phải là app-specific
-password của Apple ID):
+## Highlights
 
-```sh
-xcrun notarytool store-credentials "MNotch-notary" \
-  --apple-id "YOUR_APPLE_ID" \
-  --team-id "CF5PGH3KGK"
-```
+Display brightness is detected at runtime on the active built-in display,
+with a serial background worker and fail-open key handling. It is no longer
+restricted to one Mac model or macOS build. Unavailable, failed or stalled
+controls return brightness keys to macOS; Settings reports control failures.
+Keyboard backlight and private lock-screen overlays remain gated until their
+compatibility checks are complete.
+See [AUDIT.md](AUDIT.md) for evidence and remaining release checks.
 
-Sau đó build, ký Developer ID, notarize, staple và đóng gói bằng:
+- **Now Playing** — artwork, animated waveform, seek controls, previous/play/next, output-device status, and configurable quick actions across supported media apps.
+- **System HUDs** — replace or complement the standard volume, display-brightness, and keyboard-backlight overlays with compact notch animations.
+- **Fine volume control** — adjust volume by 1% per press, or 0.25% with Shift + Option; hold a volume key for repeated small steps.
+- **Contextual notifications** — battery, charging, low-power mode, Bluetooth devices, Focus, and upcoming calendar events.
+- **File Tray** — drop files onto the notch, select one or many, Quick Look, open, reveal in Finder, AirDrop, or drag them into another app.
+- **Calendar and Pomodoro** — see today's and upcoming events, receive quick peeks, and run focus/break cycles without opening another app.
+- **Agent Monitor** — review Claude Code and Codex permission requests, jump back to a session, and view live or cached quota windows.
+- **Lock-screen widgets** — optional media, calendar, battery, connectivity, Focus, and system-control surfaces.
+- **Multi-display support** — target all displays, the main display, the built-in display, or one specific screen. Displays without a hardware cutout use a simulated notch.
+- **Signed automatic updates** — daily checks, optional download-on-quit, and manual checks from the menu bar or Settings, protected by Sparkle Ed25519 signatures and Apple notarization.
+- **Customizable behavior** — per-feature toggles, gestures, hover/click expansion, idle activities, visual styles, timing, sounds, and launch at login.
 
-```sh
-Scripts/notarize.sh
-```
+## Requirements
 
-File để chia sẻ được tạo tại `build/distribution/MNotch.zip`.
+| Requirement | Details |
+|---|---|
+| macOS | macOS 15 Sequoia or later |
+| Mac | Apple Silicon (`arm64`) |
+| Display | A physical notch is optional; external and notch-free displays are supported |
+| Build tools | Swift toolchain and Xcode Command Line Tools |
 
-Để tạo thêm disk image kéo-thả chuẩn macOS (MNotch → Applications), chạy:
+## Install
 
-```sh
-Scripts/create-dmg.sh
-```
+1. Download the latest `MNotch.dmg` from [GitHub Releases](https://github.com/maclifevn/MNotch/releases).
+2. Open the disk image and drag **MNotch** into **Applications**.
+3. Launch MNotch. The distributed build is signed with Developer ID and notarized by Apple.
+4. Enable only the permissions required by the features you want to use.
 
-DMG đã ký và notarize được tạo tại `build/distribution/MNotch.dmg`.
+MNotch is an accessory app and does not appear in the Dock. Open Settings from the menu-bar icon or the gear button inside the expanded notch. Quit with <kbd>⌘</kbd><kbd>Q</kbd> or **Settings → General → Quit MNotch**.
 
-## Tính năng
+## Permissions
 
-- **Notch shell**: panel trong suốt đè lên notch vật lý, mở/đóng bằng hover với spring animation, hoạt động cả trong fullscreen, click ngoài vùng notch xuyên xuống app bên dưới.
-- **Now Playing (mọi app)**: album art + visualizer khi đóng; mở ra có artwork glow màu theo bìa, seek bar, prev/play/next, volume. Dữ liệu qua [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD-3, vendor source trong `Vendor/`, build bằng clang thuần). Service poll thích ứng 2 giây khi có media và 10 giây khi rảnh; elapsed được nội suy cục bộ.
-- **HUD volume/brightness/keyboard backlight** trong notch thay OSD của Apple (cần quyền Accessibility — xem dưới).
-- **Battery pop** khi cắm sạc + cảnh báo pin yếu 20%/10%.
-- **Bluetooth pop** khi kết nối AirPods/thiết bị, kèm vòng % pin (đọc từ IORegistry).
-- **File Tray**: kéo file lên notch → tự mở tray; chọn nhiều file, Quick Look, Open, Reveal in Finder, kéo ra hoặc AirDrop. Thumbnail có cache và danh sách lazy để vẫn mượt khi nhiều file.
-- **Calendar**: sự kiện còn lại trong ngày.
-- **Settings** (icon bánh răng trong panel): bật/tắt từng tính năng, fake notch trên màn ngoài, launch at login.
-- **Agent approvals + quota**: Claude Code và Codex có thể gửi permission request vào notch để xem nội dung rồi Allow/Deny. Khi không có request, tab Agent hiển thị quota còn lại theo cửa sổ 5 giờ/7 ngày, thời điểm reset và trạng thái live/cache. Codex lấy từ App Server chính thức; Claude lấy từ `/usage` của CLI cục bộ, không đọc transcript hay Keychain. Cài hook trong Settings → Agents; với Codex, mở `/hooks` một lần để review/trust command theo cơ chế bảo mật của Codex.
+Every permission is feature-specific. The rest of MNotch continues to work when an optional permission is denied.
 
-## Quyền
-
-| Quyền | Cần cho | Ghi chú |
+| Permission | Used for | Behavior when denied |
 |---|---|---|
-| Accessibility | Nuốt phím volume/brightness (ẩn OSD Apple) | Không có → HUD vẫn hiện song song OSD |
-| Calendar | Tab lịch | Hỏi khi mở tab lần đầu |
-| Bluetooth | Pop thiết bị | Hỏi lần đầu |
-| Full Disk Access | Đọc trạng thái Focus hiện tại | Không có → Focus tự tắt an toàn |
-| Apple Events | Favorite trong Music / quay lại Terminal agent | Chỉ hỏi khi dùng action tương ứng |
+| Accessibility | Intercepting volume, brightness, and keyboard-backlight keys so Apple's OSD can be suppressed | The native OSD may appear alongside MNotch |
+| Calendars | Calendar activity, event list, indicators, and reminders | Calendar features stay unavailable |
+| Bluetooth | Device connection notifications and reported battery levels | Connectivity popups stay unavailable |
+| Full Disk Access | Reading the current Focus state from macOS | Focus integration disables itself safely |
+| Automation / Apple Events | Actions such as favoriting in Music or returning to an agent terminal | macOS asks only when the relevant action is used |
 
-Nếu Accessibility chưa được cấp trong khi HUD phím đang bật, MNotch gắn badge
-cảnh báo lên icon menu bar, hiện trạng thái có thể bấm trong menu, nhắc một lần
-trên notch khi khởi động và luôn có nút cấp quyền tại Settings → General.
+If you build locally and grant Accessibility access, use the stable development-signing setup in [`Scripts/sign-cert-setup.md`](Scripts/sign-cert-setup.md). Ad-hoc signatures change identity between builds and can cause macOS to reset TCC permissions.
 
-**Quan trọng:** trước khi cấp Accessibility, tạo cert ký code ổn định theo [Scripts/sign-cert-setup.md](Scripts/sign-cert-setup.md) — nếu không, mỗi lần rebuild quyền sẽ bị reset (ad-hoc signing đổi identity liên tục).
+## Privacy and local data
 
-## Kiến trúc
+MNotch is designed to keep its work on your Mac:
 
-- `Window/` — NSPanel non-activating cố định kích thước, hitTest pass-through; mọi animation nằm trong SwiftUI.
-- `Shape/NotchShape.swift` — outline notch với radii animatable (góc trên lõm, dưới bo).
-- `State/NotchViewModel.swift` — state machine `closed / hud / pop / expanded` + hover intent (mở 120ms, đóng 350ms); panel tự đo chiều cao từng tab và toàn bộ motion policy nằm ở `State/Anim.swift`.
-- `Services/` — media (perl adapter), CoreAudio, CGEventTap, DisplayServices/CoreBrightness (private, degrade an toàn), IOKit power, IOBluetooth.
-- `App/FeatureCoordinator.swift` — một nơi duy nhất tính demand và start/stop/reconfigure service theo Settings; polling nặng dừng khi màn hình ngủ.
+- There is no analytics or telemetry SDK.
+- Preferences are stored locally through macOS user defaults.
+- The File Tray stores its working copies under `~/Library/Application Support/MNotch/Shelf`. When “clear after drag” is enabled, a hidden backing copy can remain for up to 24 hours so receiving apps can finish an import or upload safely.
+- Agent hooks communicate with MNotch over a token-protected listener bound to `127.0.0.1`. Hook installation is explicit and reversible in Settings.
+- Codex quota is requested through the local Codex App Server, including the CLI bundled inside the Codex app. Claude quota uses an existing Desktop or CLI OAuth sign-in. In Settings → AI Agent → Claude usage, **Connect Claude** enables reading Desktop's encrypted saved credentials; macOS may ask once for access to the **Claude Safe Storage** Keychain item. Choose **Always Allow** to keep access after restarting MNotch; **Allow** keeps the approved key in memory for the current run. Background polls stay silent. Neither Claude Code nor Claude Desktop needs to remain open. Only unexpired access tokens for the selected account and organization are reused; if the saved sign-in expires or is revoked, sign in to Claude again and reconnect. MNotch never refreshes shared tokens, changes Claude's files, or reads transcripts. Tokens stay in memory and are sent only to Anthropic's usage endpoint.
+- **Settings → About → Export Diagnostics** saves a local JSON report containing
+  app/OS versions, service states and bounded numeric error/timing metadata. It
+  excludes tokens, account details, file contents, paths and conversations.
+  Nothing is uploaded automatically. See [AUDIT.md](AUDIT.md) for crash/hang reports.
 
-Các tác vụ file/transcript chạy ngoài main actor; service dài hạn có lifecycle
-`start/stop` rõ ràng. CI kiểm tra debug build, unit test, release build và cú
-pháp các relay script trên mỗi push/PR.
+## Build from source
 
-Lock-screen overlay dùng SkyLight private API và luôn fail-closed: nếu phiên bản macOS hiện tại không còn tương thích, MNotch tắt riêng overlay thay vì crash hay để panel lọt ra desktop.
+Install Xcode Command Line Tools if needed:
+
+```sh
+xcode-select --install
+```
+
+Clone, test, and run:
+
+```sh
+git clone https://github.com/maclifevn/MNotch.git
+cd MNotch
+
+swift test
+Scripts/run.sh
+```
+
+`Scripts/run.sh` closes an existing MNotch process, assembles `build/MNotch.app`, signs it with the local `MNotch Dev` identity when available (or ad-hoc otherwise), and opens the app. The vendored MediaRemote adapter is built automatically on first use; Xcode itself is not required.
+
+Useful development commands:
+
+```sh
+swift build                  # Debug SwiftPM build
+swift test                   # Core logic test suite
+Scripts/build.sh             # Assemble build/MNotch.app
+Scripts/build-adapter.sh     # Rebuild the MediaRemote framework
+Scripts/build-update-feed.sh # Sign and verify the Sparkle appcast
+```
+
+## Architecture
+
+MNotch keeps the window shell stable and animates only its SwiftUI content. Long-running services are demand-driven and pause expensive polling while the display sleeps.
+
+| Area | Responsibility |
+|---|---|
+| [`Sources/MNotch/Window`](Sources/MNotch/Window) | Non-activating `NSPanel`, multi-display placement, pointer pass-through, and lock-screen presentation |
+| [`Sources/MNotch/Shape`](Sources/MNotch/Shape) | Animatable physical/simulated notch geometry |
+| [`Sources/MNotch/State`](Sources/MNotch/State) | View state machine, animation policy, settings, and panel sizing |
+| [`Sources/MNotch/Views`](Sources/MNotch/Views) | SwiftUI surfaces for media, HUDs, activities, files, agents, and Settings |
+| [`Sources/MNotch/Services`](Sources/MNotch/Services) | Media, audio, displays, power, Bluetooth, calendar, Focus, agents, and lifecycle-aware watchers |
+| [`Sources/MNotch/App/FeatureCoordinator.swift`](Sources/MNotch/App/FeatureCoordinator.swift) | Central demand calculation and service start/stop/reconfiguration |
+| [`Tests/MNotchTests`](Tests/MNotchTests) | Core policy, parser, lifecycle, state, and regression tests |
+
+CI runs on macOS 15 and 26, validating relay/release scripts, debug/release tests, real Sparkle signing fixtures, release assembly, metadata and signatures. Separate jobs run Address Sanitizer and Thread Sanitizer.
+
+## Compatibility notes
+
+MNotch uses private or undocumented macOS interfaces for media information, brightness control, and optional lock-screen placement. These integrations are isolated and designed to fail closed, but a future macOS update can still change or remove them. Please include your macOS version, Mac model, display arrangement, and reproduction steps when filing a compatibility issue.
+
+The “hide from screen capture” setting only affects compatible legacy capture paths. Modern screen recorders can still capture the complete display.
+
+## Release process
+
+The release scripts require a valid Developer ID Application certificate and a `notarytool` Keychain profile named `MNotch-notary` (both names can be overridden with environment variables).
+
+```sh
+make release VERSION=X.Y.Z  # Build/sign/notarize ZIP + DMG, sign/verify feed
+make publish VERSION=X.Y.Z  # Upload draft assets, then publish completed release
+```
+
+Commit/tag the tested source and add `ReleaseNotes/X.Y.Z.md` first. Prepared
+artifacts and SHA-256 manifest are saved under `build/releases/X.Y.Z-BUILD/`.
+Preparation reruns debug/release regressions, both sanitizers and script checks
+before notarization. Publication rejects manifests without those checks.
+Production signing uses the existing Keychain key, as in MFinder. Sparkle waits
+for File Tray work before installing; cancelling the wait resumes normal use.
+See [`RELEASING.md`](RELEASING.md) for the signing-key backup, bootstrap,
+GitHub Release, phased-rollout, and rollback checklist.
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+1. Search existing issues before opening a new one.
+2. Keep each change focused and explain the user-visible behavior it affects.
+3. Add or update regression tests for logic changes.
+4. Run `swift test` and `git diff --check` before submitting a pull request.
+
+For bugs involving permissions or agents, remove account names, file contents, tokens, and other sensitive information from logs and screenshots.
+
+## Third-party software and trademarks
+
+MNotch vendors [`mediaremote-adapter`](https://github.com/ungive/mediaremote-adapter), distributed under the BSD 3-Clause License in [`Vendor/mediaremote-adapter/LICENSE`](Vendor/mediaremote-adapter/LICENSE), and uses [Sparkle 2](https://github.com/sparkle-project/Sparkle), distributed under its permissive license and bundled with the release app.
+
+MNotch is an independent project and is not affiliated with Apple, Alcove, Anthropic, or OpenAI. Apple, macOS, MacBook, and related marks are trademarks of Apple Inc. Other product names belong to their respective owners.

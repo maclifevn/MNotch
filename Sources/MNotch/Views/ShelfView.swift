@@ -1,6 +1,3 @@
-// QuickLookThumbnailing lacks Sendable annotations on SDKs before macOS 26,
-// where returning a thumbnail across the actor boundary is a hard error.
-@preconcurrency import QuickLookThumbnailing
 @preconcurrency import QuickLookUI
 import AppKit
 import SwiftUI
@@ -27,6 +24,7 @@ enum ShelfDragSelection {
 @MainActor
 enum ShelfOutgoingDragState {
     private static var active = false
+    private(set) static var hasLiveSession = false
     private static var deadline: Date?
 
     static var isActive: Bool {
@@ -38,11 +36,13 @@ enum ShelfOutgoingDragState {
     }
 
     static func begin() {
+        hasLiveSession = true
         active = true
         deadline = Date().addingTimeInterval(30)
     }
 
     static func end() {
+        hasLiveSession = false
         active = false
         deadline = nil
     }
@@ -57,60 +57,6 @@ enum ShelfDropPolicy {
 enum ShelfDragCompletionPolicy {
     static func shouldClear(settingEnabled: Bool, operationSucceeded: Bool) -> Bool {
         settingEnabled && operationSucceeded
-    }
-}
-
-@MainActor
-private final class ShelfThumbnailCache {
-    static let shared = ShelfThumbnailCache()
-
-    private struct PendingRequest {
-        let id: UUID
-        let task: Task<NSImage?, Never>
-    }
-
-    private let cache = NSCache<NSURL, NSImage>()
-    private var requests: [URL: PendingRequest] = [:]
-
-    private init() {
-        cache.countLimit = 80
-        cache.totalCostLimit = 80 * 104 * 104 * 4
-    }
-
-    /// Drop a cached thumbnail when its file leaves the shelf. The shelf reuses
-    /// a freed filename for the next same-named drop, so without this a re-added
-    /// file would render the trashed file's stale preview.
-    func invalidate(_ url: URL) {
-        cache.removeObject(forKey: url as NSURL)
-        requests[url]?.task.cancel()
-        requests[url] = nil
-    }
-
-    func image(for url: URL) async -> NSImage? {
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
-        if let request = requests[url] { return await request.task.value }
-
-        let id = UUID()
-        let request = Task { @MainActor in
-            let request = QLThumbnailGenerator.Request(
-                fileAt: url,
-                size: CGSize(width: 104, height: 104),
-                scale: 2,
-                representationTypes: .thumbnail
-            )
-            return try? await QLThumbnailGenerator.shared
-                .generateBestRepresentation(for: request).nsImage
-        }
-        requests[url] = PendingRequest(id: id, task: request)
-        let image = await request.value
-        // invalidate() or a new request for the same recycled path won the
-        // race. The old thumbnail must not clear/cache over that generation.
-        guard requests[url]?.id == id, !request.isCancelled else { return nil }
-        requests[url] = nil
-        if let image {
-            cache.setObject(image, forKey: url as NSURL, cost: 104 * 104 * 4)
-        }
-        return image
     }
 }
 
@@ -485,6 +431,7 @@ private final class ShelfFileDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !ShelfStore.shared.isPreparingForUpdate else { return }
         guard !dragging, let origin = mouseDownPoint else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard hypot(point.x - origin.x, point.y - origin.y) >= 3 else { return }

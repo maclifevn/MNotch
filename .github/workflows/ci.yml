@@ -4,21 +4,32 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
         run: swift --version
-      - name: Validate relay scripts
+      - name: Build debug and resolve pinned Sparkle tools
+        run: swift build --disable-automatic-resolution
+      - name: Validate relay and release scripts
         run: |
+          bash -n Scripts/*.sh
           perl -c Vendor/agent-relay/mnotch-relay.pl
           perl -c Vendor/agent-relay/mnotch-notify.pl
-      - name: Build debug
-        run: swift build
+          python3 -m unittest discover -s Tests/BuildChecks -v
       - name: Run tests
-        run: swift test
+        run: swift test --disable-automatic-resolution
+      - name: Run release regression tests
+        run: swift test -c release --disable-automatic-resolution
       - name: Assemble and verify release app
         env:
           CONFIG: release
@@ -27,5 +38,28 @@ jobs:
           Scripts/build.sh
           plutil -lint build/MNotch.app/Contents/Info.plist
           codesign --verify --strict build/MNotch.app/Contents/Frameworks/MediaRemoteAdapter.framework
+          codesign --verify --deep --strict build/MNotch.app/Contents/Frameworks/Sparkle.framework
           codesign --verify --strict build/MNotch.app
+          test -f build/MNotch.app/Contents/Resources/Sparkle-LICENSE.txt
+          test -f build/MNotch.app/Contents/Resources/MediaRemoteAdapter-LICENSE.txt
           test ! -e build/MNotch.app/Contents/Resources/MediaRemoteAdapterTestClient
+          ditto -c -k --keepParent build/MNotch.app build/MNotch-candidate.zip
+          ditto -c -k --keepParent build/symbols build/MNotch-symbols.zip
+      - name: Preserve candidate and matching symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.os }}
+          path: |
+            build/MNotch-candidate.zip
+            build/MNotch-symbols.zip
+
+  sanitizers:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, thread]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run separate sanitizer suite
+        run: swift test --disable-automatic-resolution --sanitize=${{ matrix.sanitizer }}

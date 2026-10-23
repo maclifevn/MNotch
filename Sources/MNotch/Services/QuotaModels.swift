@@ -28,7 +28,7 @@ struct QuotaWindow: Identifiable, Equatable, Codable, Sendable {
     var resetsAt: Date?
 
     var remainingPercent: Double {
-        min(max(100 - usedPercent, 0), 100)
+        usedPercent.isFinite ? min(max(100 - usedPercent, 0), 100) : 0
     }
 
     func merging(over older: QuotaWindow?) -> QuotaWindow {
@@ -153,7 +153,7 @@ enum CodexQuotaParser {
               let used = number(raw["usedPercent"])
         else { return nil }
         let minutes = integer(raw["windowDurationMins"])
-        let reset = number(raw["resetsAt"]).map(Date.init(timeIntervalSince1970:))
+        let reset = SafeNumeric.date(seconds: number(raw["resetsAt"]))
         return QuotaWindow(
             id: id,
             label: QuotaWindow.durationLabel(minutes: minutes, fallback: fallback),
@@ -172,21 +172,15 @@ enum CodexQuotaParser {
             label: "Budget",
             usedPercent: 100 - remaining,
             durationMinutes: nil,
-            resetsAt: number(raw["resetsAt"]).map(Date.init(timeIntervalSince1970:))
+            resetsAt: SafeNumeric.date(seconds: number(raw["resetsAt"]))
         )
     }
 
     private static func number(_ raw: Any?) -> Double? {
-        switch raw {
-        case let value as Double: value
-        case let value as Int: Double(value)
-        case let value as NSNumber: value.doubleValue
-        case let value as String: Double(value)
-        default: nil
-        }
+        SafeNumeric.number(raw)
     }
 
     private static func integer(_ raw: Any?) -> Int? {
-        number(raw).map(Int.init)
+        SafeNumeric.integer(number(raw))
     }
 }

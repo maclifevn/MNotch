@@ -37,6 +37,11 @@ enum NotchStatus: Equatable {
         if case .expanded = self { return true }
         return false
     }
+
+    var isHUD: Bool {
+        if case .hud = self { return true }
+        return false
+    }
 }
 
 struct NotchIdleInputs: Equatable {
@@ -84,7 +89,23 @@ final class NotchViewModel {
         self.geometry = geometry
     }
 
-    private(set) var status: NotchStatus = .closed
+    private(set) var status: NotchStatus = .closed {
+        didSet {
+            if status != oldValue { onStatusChanged?() }
+        }
+    }
+    @ObservationIgnored var onStatusChanged: (() -> Void)?
+    /// Keep the invisible notch's interactive region alive so hover can reveal it.
+    var isAutoHidden: Bool {
+        SettingsStore.shared.autoHideSimulatedNotch
+            && !geometry.isPhysical
+            && !isHovering
+            && status == .closed
+    }
+
+    /// Window occlusion also pauses decorative rendering without losing UI state.
+    var isPresentationSuppressed = false
+
     var mediaActive = false
     private(set) var lastTab: NotchTab = .media
 
@@ -174,9 +195,7 @@ final class NotchViewModel {
         .pomodoro: 190,
     ]
     static let hudExtraWidth: CGFloat = 160
-    static let hudExtraHeight: CGFloat = 10
     static let popExtraWidth: CGFloat = 190
-    static let popExtraHeight: CGFloat = 6
 
     /// Fixed panel (window) size — never animated, big enough for max
     /// expansion (400 tall so a full-height agent diff + drop shadow render
@@ -247,19 +266,12 @@ final class NotchViewModel {
         return min(max(height, range.lowerBound), range.upperBound)
     }
 
-    var agentConfirmSize: CGSize {
-        CGSize(
-            width: max(minAgentWidth, geometry.notchWidth + 150),
-            height: geometry.notchHeight + 36
-        )
-    }
-
     /// Hover apron: interactive region extends this far past the visible shape.
     static let apron: CGFloat = 8
 
-    /// Subtle growth while hovering the closed notch (Alcove-style feedback);
-    /// expanding requires a click.
-    static let hoverGrowth = CGSize(width: 18, height: 4)
+    /// Hover feedback stays in the menu band, including when a pop dismisses
+    /// under the pointer. Only explicitly expanded panels grow vertically.
+    static let hoverGrowth = CGSize(width: 18, height: 0)
 
     var closedSize: CGSize {
         CGSize(
@@ -278,16 +290,17 @@ final class NotchViewModel {
             }
             return size
         case .hud:
+            // System HUDs grow into side wings without extending below the notch.
             return CGSize(
                 width: closedSize.width + Self.hudExtraWidth,
-                height: closedSize.height + Self.hudExtraHeight
+                height: geometry.notchHeight
             )
-        case .pop(.agentConfirm):
-            return agentConfirmSize
         case .pop:
+            // Every transient notice, including agent acknowledgements, uses
+            // the same menu-bar band as the closed notch and system HUDs.
             return CGSize(
                 width: closedSize.width + Self.popExtraWidth,
-                height: closedSize.height + Self.popExtraHeight
+                height: geometry.notchHeight
             )
         case .expanded(let tab):
             guard tab == .agent else {
@@ -430,7 +443,7 @@ final class NotchViewModel {
         let duration = isVolume ? settings.soundHUDDuration : settings.displayHUDDuration
 
         mnotchLog.notice("showHUD \(String(describing: kind), privacy: .public) value=\(value)")
-        hudValue = value
+        hudValue = SafeNumeric.unit(value)
         hudMuted = muted
         hudDismissTask?.cancel()
         if status != .hud(kind) {

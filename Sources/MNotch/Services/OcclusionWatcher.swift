@@ -1,5 +1,17 @@
 import AppKit
 
+enum NotchOcclusion: Equatable, Sendable {
+    case visible, fullscreen, missionControl, gaming
+
+    func hidesPanel(showingHUD: Bool) -> Bool {
+        switch self {
+        case .visible: false
+        case .fullscreen: !showingHUD
+        case .missionControl, .gaming: true
+        }
+    }
+}
+
 /// Decides when the notch UI should get out of the way: fullscreen apps,
 /// Mission Control, games, or (for media chrome) the media source app being
 /// frontmost. Polls lightly (1s) and reacts to app activation immediately;
@@ -7,11 +19,10 @@ import AppKit
 @MainActor
 @Observable
 final class OcclusionWatcher {
-    /// Panels fade out while true.
-    private(set) var shouldHide = false
+    private(set) var state: NotchOcclusion = .visible
     private(set) var frontmostBundleID: String?
 
-    @ObservationIgnored var onHideChanged: ((Bool) -> Void)?
+    @ObservationIgnored var onChange: ((NotchOcclusion) -> Void)?
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var activationObserver: NSObjectProtocol?
@@ -35,7 +46,7 @@ final class OcclusionWatcher {
             }
         }
 
-        let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.evaluate() }
         }
         timer.tolerance = 0.3
@@ -53,18 +64,15 @@ final class OcclusionWatcher {
         }
         activationObserver = nil
         evaluationTask?.cancel()
-        evaluationTask = nil
         evaluationRequested = false
         frontmostBundleID = nil
         frontmostPID = nil
         frontmostIsGame = false
-        if shouldHide {
-            shouldHide = false
-            onHideChanged?(false)
-        }
+        apply(.visible)
     }
 
     private func evaluate() {
+        guard timer != nil else { return }
         guard evaluationTask == nil else {
             evaluationRequested = true
             return
@@ -72,14 +80,13 @@ final class OcclusionWatcher {
 
         let settings = SettingsStore.shared
 
-        var hide = false
-
         if settings.hideWhileGaming, frontmostIsGame {
-            hide = true
+            apply(.gaming)
+            return
         }
 
-        guard !hide, settings.hideInFullscreen || settings.hideInMissionControl else {
-            apply(hide)
+        guard settings.hideInFullscreen || settings.hideInMissionControl else {
+            apply(.visible)
             return
         }
 
@@ -91,12 +98,17 @@ final class OcclusionWatcher {
         let ownPID = ProcessInfo.processInfo.processIdentifier
 
         evaluationTask = Task { [weak self] in
-            let shouldHide = await Task.detached(priority: .utility) {
+            let state = await Task.detached(priority: .utility) { () -> NotchOcclusion in
                 let windows = CGWindowListCopyWindowInfo(
                     [.optionOnScreenOnly, .excludeDesktopElements],
                     kCGNullWindowID
                 ) as? [[String: Any]] ?? []
 
+                // Mission Control suppresses every surface, including a HUD
+                // left over from the fullscreen space beneath its thumbnails.
+                if hideMissionControl && Self.missionControlActive(in: windows) {
+                    return .missionControl
+                }
                 if hideFullscreen,
                    let frontmostPID,
                    !frontmostIsMNotch,
@@ -106,14 +118,19 @@ final class OcclusionWatcher {
                        screenSizes: screenSizes,
                        ownPID: ownPID
                    ) {
-                    return true
+                    return .fullscreen
                 }
-                return hideMissionControl && Self.missionControlActive(in: windows)
+                return .visible
             }.value
 
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
             self.evaluationTask = nil
-            self.apply(shouldHide)
+            guard !Task.isCancelled else {
+                if self.timer != nil { self.evaluate() }
+                return
+            }
+            guard self.timer != nil else { return }
+            self.apply(state)
             if self.evaluationRequested {
                 self.evaluationRequested = false
                 self.evaluate()
@@ -130,10 +147,10 @@ final class OcclusionWatcher {
         frontmostIsGame = app.map(Self.isGame) ?? false
     }
 
-    private func apply(_ hide: Bool) {
-        guard hide != shouldHide else { return }
-        shouldHide = hide
-        onHideChanged?(hide)
+    private func apply(_ state: NotchOcclusion) {
+        guard state != self.state else { return }
+        self.state = state
+        onChange?(state)
     }
 
     // MARK: - Heuristics

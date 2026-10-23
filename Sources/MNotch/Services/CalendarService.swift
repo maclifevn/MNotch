@@ -12,11 +12,17 @@ enum CalendarSourceSelection {
     }
 }
 
-/// Own EventKit on a dedicated serial actor. `EKEventStore.events(matching:)`
+/// Own EventKit on a dedicated serial queue. `EKEventStore.events(matching:)`
 /// is synchronous and can touch Calendar's database; running it on MainActor
 /// made the first notch expansion and Settings changes visibly hitch on users
 /// with large calendars.
-private actor CalendarWorker {
+protocol CalendarDataSource: AnyObject, Sendable {
+    func requestAccess() async -> Bool
+    func load(disabledCalendarIDs: [String], includeMonthDays: Bool,
+              upcomingDays: Int, now: Date) async -> CalendarWorker.Snapshot
+}
+
+final class CalendarWorker: CalendarDataSource, @unchecked Sendable {
     struct Snapshot: Sendable {
         let today: [CalendarService.Item]
         let upcoming: [CalendarService.DaySection]
@@ -24,10 +30,17 @@ private actor CalendarWorker {
         let monthEventDays: Set<Int>
     }
 
-    private let store = EKEventStore()
+    private let queue = DispatchQueue(label: "com.mnotch.calendar", qos: .utility)
+    private lazy var store = EKEventStore()
 
     func requestAccess() async -> Bool {
-        (try? await store.requestFullAccessToEvents()) ?? false
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.store.requestFullAccessToEvents { granted, _ in
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
     }
 
     func load(
@@ -35,6 +48,19 @@ private actor CalendarWorker {
         includeMonthDays: Bool,
         upcomingDays: Int = 7,
         now: Date = Date()
+    ) async -> Snapshot {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self.loadSync(
+                    disabledCalendarIDs: disabledCalendarIDs,
+                    includeMonthDays: includeMonthDays, upcomingDays: upcomingDays, now: now
+                ))
+            }
+        }
+    }
+
+    private func loadSync(
+        disabledCalendarIDs: [String], includeMonthDays: Bool, upcomingDays: Int, now: Date
     ) -> Snapshot {
         let allCalendars = store.calendars(for: .event)
         let calendarInfos = allCalendars.map { calendarInfo($0) }
@@ -213,7 +239,8 @@ final class CalendarService {
     @ObservationIgnored var onPeek: ((Item, Bool) -> Void)?
     @ObservationIgnored var onChime: (() -> Void)?
 
-    @ObservationIgnored private var worker: CalendarWorker?
+    @ObservationIgnored private var worker: (any CalendarDataSource)?
+    @ObservationIgnored private let persistentWorker: any CalendarDataSource
     @ObservationIgnored private var startToken: UUID?
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var reloadDelayTask: Task<Void, Never>?
@@ -232,20 +259,33 @@ final class CalendarService {
         let upcomingDays: Int
     }
 
+    init(worker: any CalendarDataSource = CalendarWorker()) {
+        persistentWorker = worker
+    }
+
     func ensureStarted() {
         guard !requested else { return }
         requested = true
-        let worker = CalendarWorker()
+        let worker = persistentWorker
         let token = UUID()
         self.worker = worker
         startToken = token
+        beginAuthorizationIfNeeded()
+    }
+
+    private func beginAuthorizationIfNeeded() {
+        guard startTask == nil, requested, let worker, let token = startToken else { return }
         startTask = Task { [weak self] in
             let granted = await worker.requestAccess()
+            guard let self else { return }
+            self.startTask = nil
             // stop() (e.g. display sleep) or a newer ensureStarted() may have run
             // during the await; without this guard the observer + 600s timer
             // below would be installed after teardown and leak, one per race.
-            guard let self, self.requested, self.startToken == token else { return }
-            self.startTask = nil
+            guard self.requested, self.startToken == token, !Task.isCancelled else {
+                self.beginAuthorizationIfNeeded()
+                return
+            }
             self.authorized = granted
             guard granted else { return }
             self.reload()
@@ -272,12 +312,13 @@ final class CalendarService {
         }
         storeChangeObserver = nil
         startTask?.cancel()
-        startTask = nil
+        // Permission callbacks are not cancellable. Retain the task until its
+        // callback returns, then service at most the latest restart request.
         reloadDelayTask?.cancel()
         reloadDelayTask = nil
+        // Keep the in-flight query until it actually returns. Restarting while
+        // EventKit is wedged must not spawn another query/store on every wake.
         reloadTask?.cancel()
-        reloadTask = nil
-        activeReloadID = nil
         pendingReload = nil
         startToken = nil
         refreshTimer?.invalidate()
@@ -289,6 +330,10 @@ final class CalendarService {
         worker = nil
         requested = false
         authorized = false
+        today = []
+        upcoming = []
+        calendars = []
+        monthEventDays = []
     }
 
     /// Rebuild event selection and timers after a Calendar setting changes.
@@ -379,7 +424,7 @@ final class CalendarService {
             let snapshot = await worker.load(
                 disabledCalendarIDs: request.disabledCalendarIDs,
                 includeMonthDays: request.includeMonthDays,
-                upcomingDays: request.upcomingDays
+                upcomingDays: request.upcomingDays, now: Date()
             )
             guard let self else { return }
             self.completeReload(snapshot, request: request, reloadID: reloadID)
@@ -442,7 +487,7 @@ final class CalendarService {
     }
 
     private func schedulePeek(at date: Date, item: Item, starting: Bool) {
-        let timer = Timer(fire: date, interval: 0, repeats: false) { _ in
+        let timer = Timer(fire: date, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.onPeek?(item, starting)
             }
@@ -463,7 +508,7 @@ final class CalendarService {
             matchingPolicy: .nextTime
         ) else { return }
 
-        let timer = Timer(fire: nextHour, interval: 3600, repeats: true) { _ in
+        let timer = Timer(fire: nextHour, interval: 3600, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard SettingsStore.shared.calendarHourlyChime else { return }
                 self?.onChime?()

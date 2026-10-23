@@ -16,8 +16,8 @@ private actor FocusDatabaseReader {
     private var cachedModeNames: [String: FocusModeInfo] = [:]
 
     func read(directory: URL) -> FocusReadResult {
-        guard let assertions = try? Data(
-            contentsOf: directory.appending(path: "Assertions.json")
+        guard let assertions = try? BoundedFileReader.read(
+            directory.appending(path: "Assertions.json"), limit: 2 * 1_024 * 1_024
         ) else {
             return FocusReadResult(available: false, identifier: nil, modeNames: cachedModeNames)
         }
@@ -34,8 +34,8 @@ private actor FocusDatabaseReader {
     }
 
     private func loadModeNames(from directory: URL) -> [String: FocusModeInfo] {
-        guard let data = try? Data(
-            contentsOf: directory.appending(path: "ModeConfigurations.json")
+        guard let data = try? BoundedFileReader.read(
+            directory.appending(path: "ModeConfigurations.json"), limit: 2 * 1_024 * 1_024
         ),
         let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
         let dataArray = root["data"] as? [[String: Any]]
@@ -117,7 +117,7 @@ final class FocusWatcher {
     func start() {
         guard timer == nil else { return }
         establishingBaseline = true
-        let timer = Timer(timeInterval: 4, repeats: true) { _ in
+        let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.requestPoll() }
         }
         timer.tolerance = 1
@@ -130,7 +130,6 @@ final class FocusWatcher {
         timer?.invalidate()
         timer = nil
         pollTask?.cancel()
-        pollTask = nil
         current = nil
         available = false
     }
@@ -140,8 +139,13 @@ final class FocusWatcher {
         let directory = Self.dbDirectory
         pollTask = Task { [weak self, reader] in
             let result = await reader.read(directory: directory)
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
             self.pollTask = nil
+            guard !Task.isCancelled else {
+                if self.timer != nil { self.requestPoll() }
+                return
+            }
+            guard self.timer != nil else { return }
             self.apply(result)
         }
     }

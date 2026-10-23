@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import XCTest
 @testable import MNotch
 
@@ -190,6 +192,341 @@ final class CoreLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testAutoHideKeepsPhysicalNotchAndInteractiveContentVisible() {
+        let settings = SettingsStore.shared
+        let previous = settings.autoHideSimulatedNotch
+        let hover = settings.expandOnHover
+        settings.expandOnHover = false
+        defer {
+            settings.autoHideSimulatedNotch = previous
+            settings.expandOnHover = hover
+        }
+        let simulated = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: false
+        ))
+        let physical = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: true
+        ))
+        settings.autoHideSimulatedNotch = false
+        XCTAssertFalse(simulated.isAutoHidden)
+        settings.autoHideSimulatedNotch = true
+        XCTAssertTrue(simulated.isAutoHidden)
+        XCTAssertFalse(physical.isAutoHidden)
+        let bounds = CGRect(x: 0, y: 0, width: 700, height: 448)
+        let revealArea = simulated.interactiveRect(in: bounds, flipped: true)
+        XCTAssertTrue(revealArea.contains(CGPoint(x: 350, y: 1)))
+        XCTAssertFalse(revealArea.contains(CGPoint(x: 10, y: 200)))
+        simulated.setPointerInside(true)
+        XCTAssertFalse(simulated.isAutoHidden)
+        simulated.setPointerInside(false)
+        XCTAssertTrue(simulated.isAutoHidden)
+        simulated.showHUD(.volume, value: 0.5)
+        XCTAssertFalse(simulated.isAutoHidden)
+        simulated.collapse()
+        simulated.showPop(.accessibility)
+        XCTAssertFalse(simulated.isAutoHidden)
+        simulated.dismissAccessibilityNotice()
+        XCTAssertTrue(simulated.isAutoHidden)
+        simulated.expand(.media)
+        XCTAssertFalse(simulated.isAutoHidden)
+        simulated.collapse()
+        XCTAssertTrue(simulated.isAutoHidden)
+    }
+
+    @MainActor
+    func testNativePanelRevealsHiddenNotchAndPassesOutsideClicksThrough() throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { throw XCTSkip("No display in test host") }
+        let settings = SettingsStore.shared
+        let autoHide = settings.autoHideSimulatedNotch
+        let hover = settings.expandOnHover
+        settings.autoHideSimulatedNotch = true
+        settings.expandOnHover = false
+        defer {
+            settings.autoHideSimulatedNotch = autoHide
+            settings.expandOnHover = hover
+        }
+        let model = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: false
+        ))
+        let panel = NotchPanel(screen: screen, viewModel: model)
+        defer { panel.close() }
+        let outside = NSPoint(x: screen.frame.minX + 1, y: screen.frame.minY + 1)
+        let reveal = NSPoint(x: screen.frame.midX, y: screen.frame.maxY - 1)
+        panel.updatePointerInteraction(at: outside, mouseButtonPressed: false)
+        XCTAssertTrue(model.isAutoHidden)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        panel.updatePointerInteraction(at: reveal, mouseButtonPressed: false)
+        XCTAssertFalse(model.isAutoHidden)
+        XCTAssertFalse(panel.ignoresMouseEvents)
+        panel.updatePointerInteraction(at: outside, mouseButtonPressed: false)
+        XCTAssertTrue(model.isAutoHidden)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        panel.setInteractionSuppressed(true)
+        panel.updatePointerInteraction(at: reveal, mouseButtonPressed: false)
+        XCTAssertTrue(model.isAutoHidden)
+        XCTAssertTrue(model.isPresentationSuppressed)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        panel.setInteractionSuppressed(false)
+        panel.updatePointerInteraction(at: reveal, mouseButtonPressed: false)
+        XCTAssertFalse(model.isAutoHidden)
+        XCTAssertFalse(model.isPresentationSuppressed)
+        XCTAssertFalse(panel.ignoresMouseEvents)
+    }
+
+    @MainActor
+    func testHUDCoversVisibleMenuBandWithoutVerticalGrowth() throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else {
+            throw XCTSkip("Requires a physical notched display")
+        }
+        let settings = SettingsStore.shared
+        let previousOffset = settings.notchHeightOffset
+        settings.notchHeightOffset = 0
+        defer { settings.notchHeightOffset = previousOffset }
+
+        let geometry = NotchGeometry.forScreen(screen)
+        let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        XCTAssertGreaterThanOrEqual(geometry.notchHeight, menuBarHeight)
+        XCTAssertGreaterThanOrEqual(geometry.notchHeight, screen.safeAreaInsets.top)
+        let model = NotchViewModel(geometry: geometry)
+        let closedHeight = model.visualSize.height
+        for kind in [HUDKind.volume, .brightness, .keyboardBacklight] {
+            model.showHUD(kind, value: 0.5)
+            XCTAssertEqual(model.visualSize.height, closedHeight)
+            XCTAssertGreaterThan(model.visualSize.width, model.closedSize.width)
+        }
+        model.collapse()
+    }
+
+    @MainActor
+    func testRenderedHUDBottomIsOpaqueAndOutlineStaysInsideBand() throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { throw XCTSkip("No display in test host") }
+        let settings = SettingsStore.shared
+        let previousOutline = settings.contrastOutline
+        defer { settings.contrastOutline = previousOutline }
+        for scale: CGFloat in [1, 2] {
+            for outline in [false, true] {
+                settings.contrastOutline = outline
+                for occlusion in [NotchOcclusion.visible, .fullscreen] {
+                    for kind in [HUDKind.volume, .brightness] {
+                        try autoreleasepool {
+                            let model = NotchViewModel(geometry: .init(
+                                notchWidth: 179, notchHeight: 33, isPhysical: true
+                            ))
+                            let panel = NotchPanel(screen: screen, viewModel: model)
+                            defer { panel.close() }
+                            panel.setOcclusion(occlusion, animated: false)
+                            model.showHUD(kind, value: 0.89)
+                            XCTAssertEqual(panel.alphaValue, 1)
+
+                            let renderer = ImageRenderer(content: NotchRootView(viewModel: model)
+                                .environment(\.displayScale, scale))
+                            renderer.scale = scale
+                            let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(renderer.cgImage))
+                            let bottom = Int(model.visualSize.height * scale) - 1
+                            let inset = model.topRadius + model.bottomRadius + 2
+                            let left = Int(((NotchViewModel.panelSize.width - model.visualSize.width) / 2 + inset) * scale)
+                            let right = bitmap.pixelsWide - left
+                            for x in stride(from: left, to: right, by: 3) {
+                                XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: x, y: bottom)).alphaComponent, 1, accuracy: 0.001)
+                                XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: x, y: bottom + 1)).alphaComponent, 0, accuracy: 0.001)
+                            }
+                            model.collapse()
+                            if occlusion == .fullscreen { XCTAssertEqual(panel.alphaValue, 0) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testFullscreenRevealsOnlyHUDsAndKeepsThemPassive() throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { throw XCTSkip("No display in test host") }
+        let model = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: false
+        ))
+        let panel = NotchPanel(screen: screen, viewModel: model)
+        defer { panel.close() }
+        panel.setOcclusion(.fullscreen, animated: false)
+        XCTAssertEqual(panel.alphaValue, 0)
+        XCTAssertTrue(model.isPresentationSuppressed)
+
+        for kind in [HUDKind.volume, .brightness, .keyboardBacklight] {
+            model.showHUD(kind, value: 0.5)
+            XCTAssertEqual(panel.alphaValue, 1)
+            XCTAssertFalse(model.isPresentationSuppressed)
+            XCTAssertEqual(model.visualSize.height, 32)
+            panel.updatePointerInteraction(
+                at: NSPoint(x: screen.frame.midX, y: screen.frame.maxY - 1),
+                mouseButtonPressed: false
+            )
+            XCTAssertTrue(panel.ignoresMouseEvents)
+            XCTAssertFalse(model.isHovering)
+
+            for blocked in [NotchOcclusion.missionControl, .gaming] {
+                panel.setOcclusion(blocked, animated: false)
+                XCTAssertEqual(panel.alphaValue, 0)
+                XCTAssertTrue(model.isPresentationSuppressed)
+                panel.setOcclusion(.fullscreen, animated: false)
+                XCTAssertEqual(panel.alphaValue, 1)
+            }
+            model.collapse()
+            XCTAssertEqual(panel.alphaValue, 0)
+        }
+
+        model.showPop(.accessibility)
+        XCTAssertEqual(panel.alphaValue, 0)
+        model.selectTab(.media)
+        XCTAssertEqual(panel.alphaValue, 0)
+        model.collapse()
+        panel.setOcclusion(.visible, animated: false)
+        XCTAssertEqual(panel.alphaValue, 1)
+        XCTAssertFalse(model.isPresentationSuppressed)
+    }
+
+    @MainActor
+    func testFullscreenHUDExtendsItsDeadlineAndHidesOnExpiry() async throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { throw XCTSkip("No display in test host") }
+        let settings = SettingsStore.shared
+        let duration = settings.soundHUDDuration
+        settings.soundHUDDuration = 0.5
+        defer { settings.soundHUDDuration = duration }
+        let model = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: true
+        ))
+        let panel = NotchPanel(screen: screen, viewModel: model)
+        defer { panel.close() }
+        panel.setOcclusion(.fullscreen, animated: false)
+        model.showHUD(.volume, value: 0.5)
+        try await Task.sleep(for: .milliseconds(300))
+        model.showHUD(.volume, value: 0.75)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.status, .hud(.volume))
+        XCTAssertEqual(panel.alphaValue, 1)
+        // A sleep resumption does not guarantee that the main-actor dismissal
+        // task has run first, particularly on instrumented CI runners.
+        let expiryTimeout = ContinuousClock.now.advanced(by: .seconds(3))
+        while model.status != .closed, ContinuousClock.now < expiryTimeout {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.status, .closed)
+        XCTAssertEqual(panel.alphaValue, 0)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+    }
+
+    @MainActor
+    func testFullscreenHUDSurvivesAnInFlightOcclusionFade() async throws {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { throw XCTSkip("No display in test host") }
+        let model = NotchViewModel(geometry: .init(
+            notchWidth: 185, notchHeight: 32, isPhysical: true
+        ))
+        let panel = NotchPanel(screen: screen, viewModel: model)
+        defer { panel.close() }
+        panel.orderFrontRegardless()
+        panel.setOcclusion(.fullscreen)
+        try await Task.sleep(for: .milliseconds(30))
+        model.showHUD(.volume, value: 0.5)
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(panel.alphaValue, 1)
+        model.collapse()
+        XCTAssertEqual(panel.alphaValue, 0)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(panel.alphaValue, 0)
+    }
+
+    @MainActor
+    func testAutoHidePreferencePersistsWithoutDisplayRebuild() {
+        let suite = "MNotchTests.AutoHide." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        XCTAssertFalse(settings.autoHideSimulatedNotch)
+        var rebuilds = 0
+        settings.onDisplayConfigChanged = { rebuilds += 1 }
+        settings.autoHideSimulatedNotch = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).autoHideSimulatedNotch)
+        settings.autoHideSimulatedNotch = false
+        XCTAssertFalse(SettingsStore(defaults: defaults).autoHideSimulatedNotch)
+        XCTAssertEqual(rebuilds, 0)
+    }
+
+    @MainActor
+    func testPowerObserverStaysSingleWhenNativeSourceFails() async {
+        var attempts = 0
+        let power = PowerSourceService(createNotificationSource: { _, _ in
+            attempts += 1
+            return nil
+        })
+        var events = 0
+        power.onPowerEvent = { _ in events += 1 }
+        for _ in 0..<100 { power.start() }
+        XCTAssertEqual(attempts, 1)
+        NotificationCenter.default.post(name: .NSProcessInfoPowerStateDidChange, object: nil)
+        // The notification queues a main-actor delivery; stop/restart must
+        // prevent that old generation from emitting into the fresh session.
+        power.stop()
+        power.start()
+        await Task.yield()
+        XCTAssertEqual(events, 0)
+        XCTAssertEqual(attempts, 2)
+        power.stop()
+    }
+
+    func testUpdaterIsDisabledForTestsAndRequiresDebugOptIn() {
+        XCTAssertFalse(AppUpdateRuntimePolicy(
+            isRunningTests: true,
+            isDebugBuild: false,
+            environment: [:]
+        ).updatesAreEnabled)
+        XCTAssertFalse(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: true,
+            environment: [:]
+        ).updatesAreEnabled)
+        XCTAssertTrue(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: true,
+            environment: ["MNOTCH_ENABLE_UPDATES": "1"]
+        ).updatesAreEnabled)
+        XCTAssertTrue(AppUpdateRuntimePolicy(
+            isRunningTests: false,
+            isDebugBuild: false,
+            environment: [:]
+        ).updatesAreEnabled)
+    }
+
+    func testUpdaterOnlyAcceptsWritableApplicationsInstallations() {
+        XCTAssertTrue(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch.app"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Volumes/MNotch/MNotch.app"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch"),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(
+                fileURLWithPath: "/private/var/folders/AppTranslocation/MNotch.app"
+            ),
+            applicationsDirectoryIsWritable: true
+        ))
+        XCTAssertFalse(AppUpdateRuntimePolicy.installationIsEligible(
+            bundleURL: URL(fileURLWithPath: "/Applications/MNotch.app"),
+            applicationsDirectoryIsWritable: false
+        ))
+    }
+
+    @MainActor
     func testSimulatedNotchExpansionLeavesRoomForTheFullTabStrip() {
         let geometry = NotchGeometry(
             notchWidth: NotchGeometry.fallbackWidth,
@@ -268,6 +605,33 @@ final class CoreLogicTests: XCTestCase {
 
         viewModel.dismissAccessibilityNotice()
         XCTAssertEqual(viewModel.status, .closed)
+    }
+
+    @MainActor
+    func testDisplayHUDAloneStartsHardwareAndKeyHandlingAcrossSleepWake() {
+        let suite = "MNotchTests.displayHUD.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        settings.soundHUDEnabled = false
+        settings.mediaEnabled = false
+        settings.displayHUDEnabled = true
+        settings.lockEnabled = false
+        let flags = FeatureFlags.capture(settings)
+        let active = FeatureDemand(flags: flags)
+        XCTAssertTrue(flags.displayHUDEnabled)
+        XCTAssertTrue(active.displayControls)
+        XCTAssertTrue(active.keys)
+        XCTAssertFalse(active.audio)
+        let sleeping = active.suspended(true)
+        XCTAssertFalse(sleeping.displayControls)
+        XCTAssertFalse(sleeping.keys)
+        XCTAssertEqual(active.suspended(false), active)
+
+        settings.displayHUDEnabled = false
+        let disabled = FeatureDemand(settings: settings)
+        XCTAssertFalse(disabled.displayControls)
+        XCTAssertFalse(disabled.keys)
     }
 
     @MainActor
@@ -363,7 +727,8 @@ final class CoreLogicTests: XCTestCase {
 
         let migrated = ClaudeHookInstaller.restoringRetiredQuotaBridge(
             in: root,
-            backupData: backup
+            backupData: backup,
+            legacyCommand: "/usr/bin/perl '/tmp/mnotch-claude-statusline.pl'"
         )
 
         XCTAssertTrue(migrated.restored)
@@ -540,53 +905,6 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertEqual(resolvedCount, 1)
     }
 
-    func testClaudeCLIUsageParsesSessionAndWeeklyWindows() throws {
-        let output = """
-        You are currently using your subscription to power your Claude Code usage
-
-        Current session: 4% used · resets Jul 15 at 6:30pm (Asia/Saigon)
-        Current week (all models): 74% used · resets Jul 17 at 8pm (Asia/Saigon)
-        Current week (Fable): 57% used · resets Jul 17 at 8pm (Asia/Saigon)
-
-        What's contributing to your limits usage?
-        Last 24h · 540 requests · 3 sessions
-        """
-        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
-        XCTAssertEqual(windows.map(\.label), ["5h", "7d", "Fable"])
-        XCTAssertEqual(windows.map(\.id), ["claude-session", "claude-week", "claude-week-Fable"])
-        XCTAssertEqual(windows[0].usedPercent, 4)
-        XCTAssertEqual(windows[1].usedPercent, 74)
-        XCTAssertEqual(windows[2].usedPercent, 57)
-        XCTAssertEqual(windows[0].durationMinutes, 300)
-        XCTAssertEqual(windows[1].durationMinutes, 10_080)
-        XCTAssertNotNil(windows[0].resetsAt)
-    }
-
-    func testClaudeCLIUsageIgnoresProseAndReturnsNilWhenNoBars() {
-        let output = """
-        Approximate, based on local sessions on this machine.
-        66% of your usage came from subagent-heavy sessions
-        Top subagents: workflow-subagent 11%
-        """
-        XCTAssertNil(ClaudeUsageClient.parse(output))
-    }
-
-    func testClaudeCLIResetDateParsesDatedForm() {
-        let date = ClaudeUsageClient.parseCLIDate("resets Jul 17 at 8pm (Asia/Saigon)")
-        XCTAssertNotNil(date)
-    }
-
-    func testClaudeCLIUsageParsesLineWithLongTimezoneAndOverage() throws {
-        // A long IANA timezone at 100% used pushes the line past 90 chars; it
-        // must still parse (the old guard dropped it).
-        let output = """
-        Current week (all models): 100% used · resets Dec 31 at 11:59pm (America/Argentina/Buenos_Aires)
-        """
-        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
-        XCTAssertEqual(windows.map(\.label), ["7d"])
-        XCTAssertEqual(windows[0].usedPercent, 100)
-    }
-
     func testCodexQuotaParserReadsOfficialWindowsAndCredits() throws {
         let json = #"{"id":2,"result":{"rateLimits":{"planType":"plus","credits":{"balance":"12.50"},"primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1784044800},"secondary":{"usedPercent":60,"windowDurationMins":10080,"resetsAt":1784649600}},"rateLimitResetCredits":{"availableCount":2}}}"#
         let snapshot = try XCTUnwrap(CodexQuotaParser.snapshot(
@@ -725,7 +1043,8 @@ final class CoreLogicTests: XCTestCase {
             })
         }
 
-        let removed = CodexHookInstaller.uninstalling(from: installed)
+        let removed = CodexHookInstaller.uninstalling(from: installed,
+            command: "/usr/bin/perl '/tmp/mnotch-relay.pl' codex")
         XCTAssertEqual(removed["custom"] as? String, "keep")
         let remainingHooks = try XCTUnwrap(removed["hooks"] as? [String: Any])
         let permissionGroups = try XCTUnwrap(

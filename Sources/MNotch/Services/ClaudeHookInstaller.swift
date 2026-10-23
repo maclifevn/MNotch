@@ -107,24 +107,19 @@ enum ClaudeHookInstaller {
             forResource: "mnotch-notify", withExtension: "pl"
         ) else { return }
         let dest = AgentServer.supportDirectory.appending(path: "mnotch-notify.pl")
-        try? FileManager.default.removeItem(at: dest)
-        try? FileManager.default.copyItem(at: bundled, to: dest)
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: dest.path
-        )
+        try? HookConfiguration.deploy(bundled, to: dest)
     }
 
     static func install() throws {
+        var root = try HookConfiguration.read(settingsURL) ?? [:]
         try deployScripts()
-
-        var root = readSettings() ?? [:]
         var hooks = root["hooks"] as? [String: Any] ?? [:]
 
-        let command = "/usr/bin/perl '\(relayURL.path)'"
+        let command = "/usr/bin/perl \(HookConfiguration.shellQuote(relayURL.path))"
         let hookEntry: [String: Any] = [
             "type": "command",
             "command": command,
-            "timeout": 600,
+            "timeout": 65,
             marker: true,
         ]
 
@@ -174,12 +169,12 @@ enum ClaudeHookInstaller {
         } else {
             root["hooks"] = hooks
         }
-        (root, _) = restoringRetiredQuotaBridge(
+        let migration = restoringRetiredQuotaBridge(
             in: root,
-            backupData: try? Data(contentsOf: statusLineBackupURL)
+            backupData: try quotaBackupData(for: root)
         )
-        try writeSettings(root)
-        cleanupRetiredQuotaFiles()
+        try writeSettings(migration.root)
+        if migration.restored { cleanupRetiredQuotaFiles() }
         mnotchLog.notice("Claude hooks uninstalled")
     }
 
@@ -189,9 +184,21 @@ enum ClaudeHookInstaller {
         (entry[marker] as? Bool) == true
     }
 
-    private static func isOurStatusLine(_ entry: [String: Any]) -> Bool {
+    private static var legacyStatusLineCommand: String {
+        let helper = AgentServer.supportDirectory.appending(path: "mnotch-claude-statusline.pl")
+        return "/usr/bin/perl \(HookConfiguration.shellQuote(helper.path))"
+    }
+
+    private static func isOurStatusLine(_ entry: [String: Any], command expected: String? = nil) -> Bool {
         guard let command = entry["command"] as? String else { return false }
-        return command.contains("mnotch-claude-statusline.pl")
+        return command == (expected ?? legacyStatusLineCommand)
+    }
+
+    private static func quotaBackupData(for root: [String: Any]) throws -> Data? {
+        guard let current = root["statusLine"] as? [String: Any], isOurStatusLine(current),
+              FileManager.default.fileExists(atPath: statusLineBackupURL.path)
+        else { return nil }
+        return try BoundedFileReader.read(statusLineBackupURL, limit: 2 * 1_024 * 1_024)
     }
 
     /// One-time migration for builds that installed MNotch as Claude's status
@@ -199,15 +206,20 @@ enum ClaudeHookInstaller {
     /// retired helper files.
     static func restoringRetiredQuotaBridge(
         in source: [String: Any],
-        backupData: Data?
+        backupData: Data?,
+        legacyCommand: String? = nil
     ) -> (root: [String: Any], restored: Bool) {
         guard let current = source["statusLine"] as? [String: Any],
-              isOurStatusLine(current)
+              isOurStatusLine(current, command: legacyCommand)
         else { return (source, false) }
 
         var root = source
-        if let backupData,
-           let previous = try? JSONSerialization.jsonObject(with: backupData) as? [String: Any] {
+        if let backupData {
+            // A corrupt backup is still user data. Keep both the current
+            // configuration and the backup so it can be repaired or retried.
+            guard backupData.count <= 2 * 1_024 * 1_024,
+                  let previous = try? JSONSerialization.jsonObject(with: backupData) as? [String: Any]
+            else { return (source, false) }
             root["statusLine"] = previous
         } else {
             root.removeValue(forKey: "statusLine")
@@ -228,15 +240,11 @@ enum ClaudeHookInstaller {
 
     private static func retireQuotaBridge() {
         guard let root = readSettings() else { return }
-        let result = restoringRetiredQuotaBridge(
-            in: root,
-            backupData: try? Data(contentsOf: statusLineBackupURL)
-        )
-        guard result.restored else {
-            cleanupRetiredQuotaFiles()
-            return
-        }
         do {
+            let result = restoringRetiredQuotaBridge(in: root, backupData: try quotaBackupData(for: root))
+            // A custom command may still use these files. Only remove them
+            // after a migration whose ownership and backup were verified.
+            guard result.restored else { return }
             try writeSettings(result.root)
             cleanupRetiredQuotaFiles()
             mnotchLog.notice("Retired Claude quota status-line bridge")
@@ -256,20 +264,11 @@ enum ClaudeHookInstaller {
             ])
         }
         let dest = relayURL
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        try FileManager.default.copyItem(at: bundled, to: dest)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: dest.path
-        )
+        try HookConfiguration.deploy(bundled, to: dest)
     }
 
     private static func readSettings() -> [String: Any]? {
-        guard let data = try? Data(contentsOf: settingsURL),
-              let json = try? JSONSerialization.jsonObject(with: data)
-        else { return nil }
-        return json as? [String: Any]
+        try? HookConfiguration.read(settingsURL)
     }
 
     private static func writeSettings(_ root: [String: Any]) throws {

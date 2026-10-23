@@ -6,6 +6,9 @@ import AppKit
 final class NotchPanel: NSPanel {
     /// Tunable: escalate toward `.screenSaver` if fullscreen chrome overdraws us.
     static let notchLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
+    private let viewModel: NotchViewModel
+    private var occlusion: NotchOcclusion = .visible
+    private var occlusionHidden = false
     private var interactionSuppressed = false
     private var outgoingDragActive = false
     private var outgoingDragDeadline: Date?
@@ -14,6 +17,7 @@ final class NotchPanel: NSPanel {
     private static let outgoingDragFailsafe: TimeInterval = 30
 
     init(screen: NSScreen, viewModel: NotchViewModel) {
+        self.viewModel = viewModel
         let size = NotchViewModel.panelSize
         let frame = NSRect(
             x: screen.frame.midX - size.width / 2,
@@ -48,6 +52,12 @@ final class NotchPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         contentView = NotchHostingView(viewModel: viewModel)
         setFrame(frame, display: true)
+        viewModel.onStatusChanged = { [weak self] in
+            guard let self, self.occlusion == .fullscreen else { return }
+            // Hide at dismissal before the closed shape can flash onscreen.
+            // Width/content animation remains owned by the SwiftUI HUD.
+            self.refreshOcclusion(animated: false)
+        }
     }
 
     // This overlay must never become key. A non-activating panel that calls
@@ -57,8 +67,33 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    func setInteractionSuppressed(_ suppressed: Bool) {
+    func setOcclusion(_ occlusion: NotchOcclusion, animated: Bool = true) {
+        guard occlusion != self.occlusion else { return }
+        self.occlusion = occlusion
+        refreshOcclusion(animated: animated)
+    }
+
+    private func refreshOcclusion(animated: Bool) {
+        let hidden = occlusion.hidesPanel(showingHUD: viewModel.status.isHUD)
+        // A fullscreen HUD is passive: hovering/clicking it must not reveal
+        // the normal notch, while its visible contents remain free to render.
+        setInteractionSuppressed(occlusion != .visible, presentationSuppressed: hidden)
+        guard hidden != occlusionHidden else { return }
+        occlusionHidden = hidden
+        mnotchLog.debug("notch visibility occlusion=\(String(describing: self.occlusion), privacy: .public) hud=\(self.viewModel.status.isHUD) hidden=\(hidden)")
+        if animated && isVisible {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Anim.reduceMotion ? 0.1 : 0.25
+                animator().alphaValue = hidden ? 0 : 1
+            }
+        } else {
+            alphaValue = hidden ? 0 : 1
+        }
+    }
+
+    func setInteractionSuppressed(_ suppressed: Bool, presentationSuppressed: Bool? = nil) {
         interactionSuppressed = suppressed
+        (contentView as? NotchHostingView)?.setPresentationSuppressed(presentationSuppressed ?? suppressed)
         if suppressed {
             ignoresMouseEvents = true
             outsideDragStartedAt = nil

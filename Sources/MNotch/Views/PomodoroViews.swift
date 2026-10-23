@@ -133,6 +133,7 @@ struct PomodoroTabView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Skip to the next phase")
+                .accessibilityLabel(L10n.string("Skip to the next phase"))
 
                 Button {
                     pomodoro.reset()
@@ -145,6 +146,7 @@ struct PomodoroTabView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Reset the session")
+                .accessibilityLabel(L10n.string("Reset the session"))
             }
         }
     }

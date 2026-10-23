@@ -1,1 +1,34 @@
 /* English is the development language. Source strings are used as values. */
+
+"Diagnostics" = "Diagnostics";
+
+"Export Diagnostics…" = "Export Diagnostics…";
+
+"Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included." = "Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included.";
+
+"Couldn't save diagnostics. Choose another location and try again." = "Couldn't save diagnostics. Choose another location and try again.";
+
+"Private macOS integration is disabled until this macOS version completes compatibility verification." = "Private macOS integration is disabled until this macOS version completes compatibility verification.";
+
+"File is outside the File Tray." = "File is outside the File Tray.";
+"Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged." = "Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged.";
+"Preparing Update" = "Preparing Update";
+"Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts.";
+"Cancel Update" = "Cancel Update";
+"Auto-hide on displays without a notch" = "Auto-hide on displays without a notch";
+"Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible." = "Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible.";
+"Preview sound" = "Preview sound";
+"Agent Monitor is off" = "Agent Monitor is off";
+"Previous track" = "Previous track";
+"Next track" = "Next track";
+"Pause" = "Pause";
+"Play" = "Play";
+"Shuffle" = "Shuffle";
+"Repeat" = "Repeat";
+"Copy track info" = "Copy track info";
+"Favorite" = "Favorite";
+"Open terminal" = "Open terminal";
+"Skip to the next phase" = "Skip to the next phase";
+"Reset the session" = "Reset the session";
+"Cannot add a folder that contains the File Tray." = "Cannot add a folder that contains the File Tray.";
+"Display brightness control is unavailable. macOS will handle the brightness keys." = "Display brightness control is unavailable. macOS will handle the brightness keys.";

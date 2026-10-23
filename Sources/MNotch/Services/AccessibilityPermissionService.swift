@@ -86,7 +86,7 @@ final class AccessibilityPermissionService {
         timer = nil
         guard shouldPoll else { return }
 
-        let timer = Timer(timeInterval: 2, repeats: true) { _ in
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
         timer.tolerance = 0.5

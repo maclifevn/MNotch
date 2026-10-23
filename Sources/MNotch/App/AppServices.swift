@@ -63,6 +63,8 @@ final class AppServices {
     var showHUD: ((HUDKind, Double, Bool) -> Void)?
     /// Set by NotchWindowController; fans pops out to every panel.
     var showPop: ((PopKind) -> Void)?
+    /// Reconciles windows after the display server has finished waking.
+    var displayDidWake: (() -> Void)?
 
     private var startedAt = Date.distantPast
     private var lastObservedVolume: Double?
@@ -93,8 +95,9 @@ final class AppServices {
             }
         }
         accessibility.start()
-        // Observe-mode brightness HUD (mirrors the system OSD until the
-        // event tap has Accessibility and consumes the keys itself).
+        // With a modifying key tap, explicit key actions own the HUD. Ambient
+        // light adjustments must not repeatedly reveal the notch. Without a
+        // tap, mirror external/native-key changes as the observe-only fallback.
         brightness.onChanged = { [weak self] value in
             guard let self,
                   SettingsStore.shared.displayHUDEnabled,
@@ -252,6 +255,7 @@ final class AppServices {
         removeWorkspaceLifecycleObservers()
         featureCoordinator.stop()
         accessibility.stop()
+        pomodoro.reset()
     }
 
     func setAgentMonitoringEnabled(_ enabled: Bool) {
@@ -272,18 +276,35 @@ final class AppServices {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.setSuspension(reason, active: active) }
+                // The notification is already delivered serially on the main
+                // queue. An unstructured Task here could let wake overtake
+                // sleep (or vice versa) during a noisy clamshell transition.
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.setSuspension(reason, active: active)
+                    if !active {
+                        self.lockScreen.reconcileSystemState()
+                        self.displayDidWake?()
+                    }
+                }
             })
         }
         observe(NSWorkspace.screensDidSleepNotification, .displaySleep, active: true)
         observe(NSWorkspace.screensDidWakeNotification, .displaySleep, active: false)
+        // Clamshell sleep is a system sleep on some Macs but only a display
+        // sleep on others. macOS may omit/delay screensDidWake while still
+        // delivering didWake, so use it as an idempotent recovery signal for
+        // the same suspension reason.
+        observe(NSWorkspace.didWakeNotification, .displaySleep, active: false)
 
         applicationObservers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.featureCoordinator.applicationDidBecomeActive() }
+            MainActor.assumeIsolated {
+                self?.featureCoordinator.applicationDidBecomeActive()
+            }
         })
     }
 
@@ -294,6 +315,7 @@ final class AppServices {
         applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
         applicationObservers.removeAll()
         suspensionReasons.removeAll()
+        displayDidWake = nil
     }
 
     private func setSuspension(_ reason: SuspensionReason, active: Bool) {
@@ -315,13 +337,13 @@ final class AppServices {
         let fine = modifiers.contains(.shift) && modifiers.contains(.option)
         switch key {
         case .soundUp, .soundDown:
-            guard settings.soundHUDEnabled else { return false }
+            guard settings.soundHUDEnabled, audio.canSetVolume else { return false }
             if keyDown {
                 enqueueSystemKeyAction(key, fine: fine)
             }
             return true
         case .mute:
-            guard settings.soundHUDEnabled else { return false }
+            guard settings.soundHUDEnabled, audio.canSetMute else { return false }
             if keyDown {
                 enqueueSystemKeyAction(key, fine: fine)
             }
@@ -370,22 +392,20 @@ final class AppServices {
         let settings = SettingsStore.shared
         switch key {
         case .soundUp, .soundDown:
-            guard settings.soundHUDEnabled else { return }
-            let step = (fine ? 1.0 / 64 : 1.0 / 16) * (key == .soundUp ? 1 : -1)
-            let newVolume = min(max(audio.volume + step, 0), 1)
-            audio.setVolume(newVolume)
+            guard settings.soundHUDEnabled, audio.canSetVolume else { return }
+            let newVolume = audio.step(up: key == .soundUp, fine: fine)
             if allowedNow(.sound) {
                 showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
             }
         case .mute:
-            guard settings.soundHUDEnabled else { return }
+            guard settings.soundHUDEnabled, audio.canSetMute else { return }
             audio.setMuted(!audio.muted)
             if allowedNow(.sound) {
                 showHUD?(.volume, audio.muted ? 0 : audio.volume, audio.muted)
             }
         case .brightnessUp, .brightnessDown:
             guard settings.displayHUDEnabled, brightness.available else { return }
-            let newValue = await brightness.step(up: key == .brightnessUp, fine: fine)
+            let newValue = brightness.step(up: key == .brightnessUp, fine: fine)
             if allowedNow(.display) {
                 showHUD?(.brightness, newValue, false)
             }

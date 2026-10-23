@@ -4,10 +4,12 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private let statusItem = StatusItemController()
+    private let updates = AppUpdateController.shared
     private var permissionNoticeTask: Task<Void, Never>?
+    private let healthProbe = AppHealthProbe()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        mnotchLog.notice("MNotch launched")
+        AppDiagnostics.record(.application, .started)
         installMainMenu()
         AppServices.shared.startAll()
         notchController = NotchWindowController()
@@ -18,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 #endif
         statusItem.install()
+        healthProbe.start()
+        // Start only after the app's services and user-facing entry points are
+        // ready. Release builds then follow Sparkle's daily schedule.
+        updates.start()
 
         let returningUser = SettingsStore.shared.hasSeenWelcome
         // First launch: greet the user and walk them through the one permission
@@ -50,6 +56,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Welcome, and users resort to Activity Monitor to quit MNotch.
     private func installMainMenu() {
         let appMenu = NSMenu()
+        let settings = NSMenuItem(
+            title: L10n.string("Settings…"),
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: L10n.string("Close Window"),
             action: #selector(NSWindow.performClose(_:)),
@@ -68,11 +82,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
     }
 
+    @objc private func openSettings() {
+        SettingsWindowController.shared.show()
+    }
+
     @objc private func screensChanged() {
         notchController?.repositionAll()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updates.applicationShouldTerminate()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        SubprocessLifecycle.shared.beginShutdown()
+        AppDiagnostics.record(.application, .stopped)
+        healthProbe.stop()
+        notchController?.stop()
         permissionNoticeTask?.cancel()
         AppServices.shared.stopAll()
     }

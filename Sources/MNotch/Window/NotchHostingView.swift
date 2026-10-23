@@ -48,6 +48,10 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         return viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local)
     }
 
+    func setPresentationSuppressed(_ suppressed: Bool) {
+        viewModel.isPresentationSuppressed = suppressed
+    }
+
     func setPointerInsideFromWindow(_ inside: Bool) {
         viewModel.setPointerInside(inside)
     }
@@ -141,7 +145,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard ShelfDropPolicy.accepts(
-            featureEnabled: SettingsStore.shared.shelfEnabled,
+            featureEnabled: SettingsStore.shared.shelfEnabled && !ShelfStore.shared.isPreparingForUpdate,
             outgoingShelfDrag: ShelfOutgoingDragState.isActive
         ) else { return [] }
         viewModel.expand(.shelf)
@@ -150,7 +154,7 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard ShelfDropPolicy.accepts(
-            featureEnabled: SettingsStore.shared.shelfEnabled,
+            featureEnabled: SettingsStore.shared.shelfEnabled && !ShelfStore.shared.isPreparingForUpdate,
             outgoingShelfDrag: ShelfOutgoingDragState.isActive
         ) else { return false }
         let urls = sender.draggingPasteboard.readObjects(

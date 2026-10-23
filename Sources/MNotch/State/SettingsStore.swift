@@ -16,7 +16,7 @@ enum SimulatedNotchPolicy {
 final class SettingsStore {
     static let shared = SettingsStore()
 
-    @ObservationIgnored private let d = UserDefaults.standard
+    @ObservationIgnored private let d: UserDefaults
     @ObservationIgnored private var loading = true
 
     /// Set by NotchWindowController to rebuild panels on display-ish toggles.
@@ -60,6 +60,9 @@ final class SettingsStore {
             onDisplayConfigChanged?()
         }
     }
+    var autoHideSimulatedNotch: Bool {
+        didSet { save("general.autoHideSimulatedNotch", autoHideSimulatedNotch) }
+    }
     var hideMenuBarIcon: Bool { didSet { save("general.hideMenuBar", hideMenuBarIcon) } }
     /// "all" | "main" | "builtIn" | display id string
     var displayTarget: String {
@@ -85,15 +88,23 @@ final class SettingsStore {
     var gestureDismissActivity: Bool { didSet { save("gesture.dismiss", gestureDismissActivity) } }
     var gestureSkipMedia: Bool { didSet { save("gesture.skipMedia", gestureSkipMedia) } }
 
+    private var storedNotchWidthOffset: Double
     var notchWidthOffset: Double {
-        didSet {
-            save("tuning.width", notchWidthOffset)
+        get { storedNotchWidthOffset }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "tuning.width", fallback: 0)
+            storedNotchWidthOffset = value
+            save("tuning.width", value)
             onDisplayConfigChanged?()
         }
     }
+    private var storedNotchHeightOffset: Double
     var notchHeightOffset: Double {
-        didSet {
-            save("tuning.height", notchHeightOffset)
+        get { storedNotchHeightOffset }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "tuning.height", fallback: 0)
+            storedNotchHeightOffset = value
+            save("tuning.height", value)
             onDisplayConfigChanged?()
         }
     }
@@ -101,10 +112,26 @@ final class SettingsStore {
     // MARK: Battery
 
     var batteryEnabled: Bool { didSet { save("battery.enabled", batteryEnabled) } }
-    var batteryDuration: Double { didSet { save("battery.duration", batteryDuration) } }
+    private var storedBatteryDuration: Double
+    var batteryDuration: Double {
+        get { storedBatteryDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "battery.duration", fallback: 0)
+            storedBatteryDuration = value
+            save("battery.duration", value)
+        }
+    }
     var batteryNotifyLowPower: Bool { didSet { save("battery.lowPower", batteryNotifyLowPower) } }
     var batteryWarnLow: Bool { didSet { save("battery.warnLow", batteryWarnLow) } }
-    var batteryLowThreshold: Double { didSet { save("battery.threshold", batteryLowThreshold) } }
+    private var storedBatteryLowThreshold: Double
+    var batteryLowThreshold: Double {
+        get { storedBatteryLowThreshold }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "battery.threshold", fallback: 0)
+            storedBatteryLowThreshold = value
+            save("battery.threshold", value)
+        }
+    }
     var batterySoundOnLow: Bool { didSet { save("battery.sound", batterySoundOnLow) } }
     var batteryHideLabel: Bool { didSet { save("battery.hideLabel", batteryHideLabel) } }
     var batteryHidePercentage: Bool { didSet { save("battery.hidePct", batteryHidePercentage) } }
@@ -112,15 +139,39 @@ final class SettingsStore {
     // MARK: Connectivity
 
     var connectivityEnabled: Bool { didSet { save("bt.enabled", connectivityEnabled) } }
-    var connectivityDuration: Double { didSet { save("bt.duration", connectivityDuration) } }
+    private var storedConnectivityDuration: Double
+    var connectivityDuration: Double {
+        get { storedConnectivityDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "bt.duration", fallback: 0)
+            storedConnectivityDuration = value
+            save("bt.duration", value)
+        }
+    }
     var connectivityWarnLow: Bool { didSet { save("bt.warnLow", connectivityWarnLow) } }
-    var connectivityLowThreshold: Double { didSet { save("bt.threshold", connectivityLowThreshold) } }
+    private var storedConnectivityLowThreshold: Double
+    var connectivityLowThreshold: Double {
+        get { storedConnectivityLowThreshold }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "bt.threshold", fallback: 0)
+            storedConnectivityLowThreshold = value
+            save("bt.threshold", value)
+        }
+    }
     var connectivitySoundOnLow: Bool { didSet { save("bt.sound", connectivitySoundOnLow) } }
 
     // MARK: Focus
 
     var focusEnabled: Bool { didSet { save("focus.enabled", focusEnabled) } }
-    var focusDuration: Double { didSet { save("focus.duration", focusDuration) } }
+    private var storedFocusDuration: Double
+    var focusDuration: Double {
+        get { storedFocusDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "focus.duration", fallback: 0)
+            storedFocusDuration = value
+            save("focus.duration", value)
+        }
+    }
     var focusSoundOnSleep: Bool { didSet { save("focus.sleepSound", focusSoundOnSleep) } }
     var focusReplaceWaveform: Bool { didSet { save("focus.replaceWaveform", focusReplaceWaveform) } }
     var focusHideLabel: Bool { didSet { save("focus.hideLabel", focusHideLabel) } }
@@ -132,17 +183,57 @@ final class SettingsStore {
     // MARK: Pomodoro
 
     var pomodoroEnabled: Bool { didSet { save("pomo.enabled", pomodoroEnabled) } }
-    var pomodoroWorkMinutes: Double { didSet { save("pomo.work", pomodoroWorkMinutes) } }
-    var pomodoroShortBreakMinutes: Double { didSet { save("pomo.shortBreak", pomodoroShortBreakMinutes) } }
-    var pomodoroLongBreakMinutes: Double { didSet { save("pomo.longBreak", pomodoroLongBreakMinutes) } }
-    var pomodoroCyclesPerLongBreak: Double { didSet { save("pomo.cycles", pomodoroCyclesPerLongBreak) } }
+    private var storedPomodoroWorkMinutes: Double
+    var pomodoroWorkMinutes: Double {
+        get { storedPomodoroWorkMinutes }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "pomo.work", fallback: 0)
+            storedPomodoroWorkMinutes = value
+            save("pomo.work", value)
+        }
+    }
+    private var storedPomodoroShortBreakMinutes: Double
+    var pomodoroShortBreakMinutes: Double {
+        get { storedPomodoroShortBreakMinutes }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "pomo.shortBreak", fallback: 0)
+            storedPomodoroShortBreakMinutes = value
+            save("pomo.shortBreak", value)
+        }
+    }
+    private var storedPomodoroLongBreakMinutes: Double
+    var pomodoroLongBreakMinutes: Double {
+        get { storedPomodoroLongBreakMinutes }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "pomo.longBreak", fallback: 0)
+            storedPomodoroLongBreakMinutes = value
+            save("pomo.longBreak", value)
+        }
+    }
+    private var storedPomodoroCyclesPerLongBreak: Double
+    var pomodoroCyclesPerLongBreak: Double {
+        get { storedPomodoroCyclesPerLongBreak }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "pomo.cycles", fallback: 0)
+            storedPomodoroCyclesPerLongBreak = value
+            save("pomo.cycles", value)
+        }
+    }
     var pomodoroSound: Bool { didSet { save("pomo.sound", pomodoroSound) } }
     var pomodoroAutoContinue: Bool { didSet { save("pomo.autoContinue", pomodoroAutoContinue) } }
 
     // MARK: Display HUD (brightness)
 
     var displayHUDEnabled: Bool { didSet { save("display.enabled", displayHUDEnabled) } }
-    var displayHUDDuration: Double { didSet { save("display.duration", displayHUDDuration) } }
+    private var storedDisplayHUDDuration: Double
+    var displayHUDDuration: Double {
+        get { storedDisplayHUDDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "display.duration", fallback: 0)
+            storedDisplayHUDDuration = value
+            save("display.duration", value)
+        }
+    }
     var displayBarStyle: HUDBarStyle { didSet { save("display.barStyle", displayBarStyle.rawValue) } }
     var displayShowPercentage: Bool { didSet { save("display.showPct", displayShowPercentage) } }
     var displayHideLabel: Bool { didSet { save("display.hideLabel", displayHideLabel) } }
@@ -151,7 +242,15 @@ final class SettingsStore {
     // MARK: Sound HUD (volume)
 
     var soundHUDEnabled: Bool { didSet { save("sound.enabled", soundHUDEnabled) } }
-    var soundHUDDuration: Double { didSet { save("sound.duration", soundHUDDuration) } }
+    private var storedSoundHUDDuration: Double
+    var soundHUDDuration: Double {
+        get { storedSoundHUDDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "sound.duration", fallback: 0)
+            storedSoundHUDDuration = value
+            save("sound.duration", value)
+        }
+    }
     var soundBarStyle: HUDBarStyle { didSet { save("sound.barStyle", soundBarStyle.rawValue) } }
     var soundShowPercentage: Bool { didSet { save("sound.showPct", soundShowPercentage) } }
     var soundHideLabel: Bool { didSet { save("sound.hideLabel", soundHideLabel) } }
@@ -161,7 +260,15 @@ final class SettingsStore {
     // MARK: Now Playing
 
     var mediaEnabled: Bool { didSet { save("media.enabled", mediaEnabled) } }
-    var mediaIdleDuration: Double { didSet { save("media.idleDuration", mediaIdleDuration) } }
+    private var storedMediaIdleDuration: Double
+    var mediaIdleDuration: Double {
+        get { storedMediaIdleDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "media.idleDuration", fallback: 0)
+            storedMediaIdleDuration = value
+            save("media.idleDuration", value)
+        }
+    }
     var mediaBadge: MediaBadgeStyle { didSet { save("media.badge", mediaBadge.rawValue) } }
     var mediaWaveformStyle: WaveformStyle { didSet { save("media.waveform", mediaWaveformStyle.rawValue) } }
     var mediaDisableCompactWaveform: Bool { didSet { save("media.noCompactWave", mediaDisableCompactWaveform) } }
@@ -178,7 +285,15 @@ final class SettingsStore {
     // MARK: Calendar
 
     var calendarEnabled: Bool { didSet { save("cal.enabled", calendarEnabled) } }
-    var calendarTimeBefore: Double { didSet { save("cal.timeBefore", calendarTimeBefore) } }
+    private var storedCalendarTimeBefore: Double
+    var calendarTimeBefore: Double {
+        get { storedCalendarTimeBefore }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "cal.timeBefore", fallback: 0)
+            storedCalendarTimeBefore = value
+            save("cal.timeBefore", value)
+        }
+    }
     var calendarSoundOnEvent: Bool { didSet { save("cal.eventSound", calendarSoundOnEvent) } }
     var calendarHourlyChime: Bool { didSet { save("cal.chime", calendarHourlyChime) } }
     var calendarUseColor: Bool { didSet { save("cal.useColor", calendarUseColor) } }
@@ -190,7 +305,15 @@ final class SettingsStore {
     var calendarQuickPeek: Bool { didSet { save("cal.peek", calendarQuickPeek) } }
     var calendarPeekBeforeStart: Bool { didSet { save("cal.peekBefore", calendarPeekBeforeStart) } }
     var calendarPeekWhenStarting: Bool { didSet { save("cal.peekStarting", calendarPeekWhenStarting) } }
-    var calendarPeekDuration: Double { didSet { save("cal.peekDuration", calendarPeekDuration) } }
+    private var storedCalendarPeekDuration: Double
+    var calendarPeekDuration: Double {
+        get { storedCalendarPeekDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "cal.peekDuration", fallback: 0)
+            storedCalendarPeekDuration = value
+            save("cal.peekDuration", value)
+        }
+    }
     var calendarColoredIndicator: Bool { didSet { save("cal.coloredIndicator", calendarColoredIndicator) } }
     var calendarDisabledCalendars: [String] { didSet { save("cal.disabled", calendarDisabledCalendars) } }
     /// calendarIdentifier -> CalendarUse rawValue (default both)
@@ -205,7 +328,15 @@ final class SettingsStore {
 
     var lockSoundOnLock: Bool { didSet { save("lock.soundLock", lockSoundOnLock) } }
     var lockSoundOnUnlock: Bool { didSet { save("lock.soundUnlock", lockSoundOnUnlock) } }
-    var lockKeepAwake: Double { didSet { save("lock.keepAwake", lockKeepAwake) } }
+    private var storedLockKeepAwake: Double
+    var lockKeepAwake: Double {
+        get { storedLockKeepAwake }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "lock.keepAwake", fallback: 0)
+            storedLockKeepAwake = value
+            save("lock.keepAwake", value)
+        }
+    }
     var lockEnabled: Bool { didSet { save("lock.enabled", lockEnabled) } }
     var lockShowOnScreenSaver: Bool { didSet { save("lock.screensaver", lockShowOnScreenSaver) } }
     var lockWidgetBattery: Bool { didSet { save("lock.widget.battery", lockWidgetBattery) } }
@@ -214,9 +345,25 @@ final class SettingsStore {
     var lockWidgetCalendar: Bool { didSet { save("lock.widget.calendar", lockWidgetCalendar) } }
     var lockNowPlaying: Bool { didSet { save("lock.nowPlaying", lockNowPlaying) } }
     var lockNowPlayingStyle: LockCardStyle { didSet { save("lock.npStyle", lockNowPlayingStyle.rawValue) } }
-    var lockIdleDuration: Double { didSet { save("lock.idle", lockIdleDuration) } }
+    private var storedLockIdleDuration: Double
+    var lockIdleDuration: Double {
+        get { storedLockIdleDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "lock.idle", fallback: 0)
+            storedLockIdleDuration = value
+            save("lock.idle", value)
+        }
+    }
     var lockShowVolume: Bool { didSet { save("lock.volume", lockShowVolume) } }
-    var lockOffset: Double { didSet { save("lock.offset", lockOffset) } }
+    private var storedLockOffset: Double
+    var lockOffset: Double {
+        get { storedLockOffset }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "lock.offset", fallback: 0)
+            storedLockOffset = value
+            save("lock.offset", value)
+        }
+    }
     var lockAllowBattery: Bool { didSet { save("lock.allow.battery", lockAllowBattery) } }
     var lockAllowConnectivity: Bool { didSet { save("lock.allow.connectivity", lockAllowConnectivity) } }
     var lockAllowFocus: Bool { didSet { save("lock.allow.focus", lockAllowFocus) } }
@@ -226,23 +373,32 @@ final class SettingsStore {
     // Agent monitor
     var agentEnabled: Bool { didSet { save("agent.enabled", agentEnabled) } }
     var agentSound: Bool { didSet { save("agent.sound", agentSound) } }
-    var agentDuration: Double { didSet { save("agent.duration", agentDuration) } }
+    private var storedAgentDuration: Double
+    var agentDuration: Double {
+        get { storedAgentDuration }
+        set {
+            let value = PreferenceNumberPolicy.value(newValue, key: "agent.duration", fallback: 0)
+            storedAgentDuration = value
+            save("agent.duration", value)
+        }
+    }
     var agentAutoExpand: Bool { didSet { save("agent.autoExpand", agentAutoExpand) } }
     var agentDeferToTerminal: Bool { didSet { save("agent.deferToTerminal", agentDeferToTerminal) } }
 
     // MARK: - Init / load
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        self.d = defaults
         // Local shadow so the nested helpers don't touch self before
         // initialization completes.
-        let d = UserDefaults.standard
+        let d = defaults
         func flag(_ key: String, _ fallback: Bool, legacy: String? = nil) -> Bool {
             if d.object(forKey: key) != nil { return d.bool(forKey: key) }
             if let legacy, d.object(forKey: legacy) != nil { return d.bool(forKey: legacy) }
             return fallback
         }
         func num(_ key: String, _ fallback: Double) -> Double {
-            d.object(forKey: key) != nil ? d.double(forKey: key) : fallback
+            PreferenceNumberPolicy.value(d.object(forKey: key), key: key, fallback: fallback)
         }
         func str(_ key: String, _ fallback: String) -> String {
             d.string(forKey: key) ?? fallback
@@ -269,6 +425,7 @@ final class SettingsStore {
         // includes the automatic no-physical-notch fallback; keeping those
         // separate lets Settings follow display changes without accidentally
         // persisting a temporary clamshell state.
+        autoHideSimulatedNotch = flag("general.autoHideSimulatedNotch", false)
         forceSimulatedNotch = flag("general.forceNotch", false, legacy: "display.fakeNotch")
         hideMenuBarIcon = flag("general.hideMenuBar", false)
         displayTarget = str("general.displayTarget", "all")
@@ -283,29 +440,29 @@ final class SettingsStore {
         gestureCycleActivity = flag("gesture.cycle", true)
         gestureDismissActivity = flag("gesture.dismiss", true)
         gestureSkipMedia = flag("gesture.skipMedia", true)
-        notchWidthOffset = num("tuning.width", 0)
-        notchHeightOffset = num("tuning.height", 0)
+        storedNotchWidthOffset = num("tuning.width", 0)
+        storedNotchHeightOffset = num("tuning.height", 0)
 
         batteryEnabled = flag("battery.enabled", true, legacy: "feature.battery")
-        batteryDuration = num("battery.duration", 5)
+        storedBatteryDuration = num("battery.duration", 5)
         batteryNotifyLowPower = flag("battery.lowPower", true)
         batteryWarnLow = flag("battery.warnLow", true)
-        batteryLowThreshold = num("battery.threshold", 10)
+        storedBatteryLowThreshold = num("battery.threshold", 10)
         batterySoundOnLow = flag("battery.sound", false)
         batteryHideLabel = flag("battery.hideLabel", false)
         batteryHidePercentage = flag("battery.hidePct", false)
 
         connectivityEnabled = flag("bt.enabled", true, legacy: "feature.bluetooth")
-        connectivityDuration = num("bt.duration", 5)
+        storedConnectivityDuration = num("bt.duration", 5)
         connectivityWarnLow = flag("bt.warnLow", true)
-        connectivityLowThreshold = num("bt.threshold", 20)
+        storedConnectivityLowThreshold = num("bt.threshold", 20)
         connectivitySoundOnLow = flag("bt.sound", false)
 
         // Focus reads a protected on-disk database every few seconds and is
         // unusable without Full Disk Access. Keep this optional integration
         // opt-in; an absent preference should not create background work.
         focusEnabled = flag("focus.enabled", false)
-        focusDuration = num("focus.duration", 5)
+        storedFocusDuration = num("focus.duration", 5)
         focusSoundOnSleep = flag("focus.sleepSound", false)
         focusReplaceWaveform = flag("focus.replaceWaveform", false)
         focusHideLabel = flag("focus.hideLabel", false)
@@ -315,22 +472,22 @@ final class SettingsStore {
         focusAllowSound = flag("focus.allowSound", true)
 
         pomodoroEnabled = flag("pomo.enabled", true)
-        pomodoroWorkMinutes = num("pomo.work", 25)
-        pomodoroShortBreakMinutes = num("pomo.shortBreak", 5)
-        pomodoroLongBreakMinutes = num("pomo.longBreak", 15)
-        pomodoroCyclesPerLongBreak = num("pomo.cycles", 4)
+        storedPomodoroWorkMinutes = num("pomo.work", 25)
+        storedPomodoroShortBreakMinutes = num("pomo.shortBreak", 5)
+        storedPomodoroLongBreakMinutes = num("pomo.longBreak", 15)
+        storedPomodoroCyclesPerLongBreak = num("pomo.cycles", 4)
         pomodoroSound = flag("pomo.sound", true)
         pomodoroAutoContinue = flag("pomo.autoContinue", true)
 
         displayHUDEnabled = flag("display.enabled", true, legacy: "feature.hud")
-        displayHUDDuration = num("display.duration", 1.5)
+        storedDisplayHUDDuration = num("display.duration", 1.5)
         displayBarStyle = opt("display.barStyle", HUDBarStyle.white)
         displayShowPercentage = flag("display.showPct", false)
         displayHideLabel = flag("display.hideLabel", false)
         displayAnimSpeed = opt("display.animSpeed", AnimSpeed.fast)
 
         soundHUDEnabled = flag("sound.enabled", true, legacy: "feature.hud")
-        soundHUDDuration = num("sound.duration", 1.5)
+        storedSoundHUDDuration = num("sound.duration", 1.5)
         soundBarStyle = opt("sound.barStyle", HUDBarStyle.white)
         soundShowPercentage = flag("sound.showPct", false)
         soundHideLabel = flag("sound.hideLabel", false)
@@ -338,7 +495,7 @@ final class SettingsStore {
         soundIconStyle = opt("sound.iconStyle", SoundIconStyle.device)
 
         mediaEnabled = flag("media.enabled", true, legacy: "feature.media")
-        mediaIdleDuration = num("media.idleDuration", 3)
+        storedMediaIdleDuration = num("media.idleDuration", 3)
         mediaBadge = opt("media.badge", MediaBadgeStyle.none)
         mediaWaveformStyle = opt("media.waveform", WaveformStyle.colored)
         mediaDisableCompactWaveform = flag("media.noCompactWave", false)
@@ -351,7 +508,7 @@ final class SettingsStore {
         mediaPreferredPlayer = str("media.preferredPlayer", "")
 
         calendarEnabled = flag("cal.enabled", true, legacy: "feature.calendar")
-        calendarTimeBefore = num("cal.timeBefore", 15)
+        storedCalendarTimeBefore = num("cal.timeBefore", 15)
         calendarSoundOnEvent = flag("cal.eventSound", false)
         calendarHourlyChime = flag("cal.chime", false)
         calendarUseColor = flag("cal.useColor", true)
@@ -362,7 +519,7 @@ final class SettingsStore {
         calendarQuickPeek = flag("cal.peek", true)
         calendarPeekBeforeStart = flag("cal.peekBefore", false)
         calendarPeekWhenStarting = flag("cal.peekStarting", true)
-        calendarPeekDuration = num("cal.peekDuration", 4)
+        storedCalendarPeekDuration = num("cal.peekDuration", 4)
         calendarColoredIndicator = flag("cal.coloredIndicator", true)
         calendarDisabledCalendars = d.stringArray(forKey: "cal.disabled") ?? []
         calendarUses = (d.dictionary(forKey: "cal.uses") as? [String: String]) ?? [:]
@@ -371,7 +528,7 @@ final class SettingsStore {
         shelfClearAfterDrag = flag("shelf.clearAfterDrag", false)
         lockSoundOnLock = flag("lock.soundLock", false)
         lockSoundOnUnlock = flag("lock.soundUnlock", false)
-        lockKeepAwake = num("lock.keepAwake", 0)
+        storedLockKeepAwake = num("lock.keepAwake", 0)
         // Lock Screen relies on private WindowServer APIs. Keep the optional,
         // higher-risk feature opt-in; existing explicit preferences survive.
         lockEnabled = flag("lock.enabled", false)
@@ -382,9 +539,9 @@ final class SettingsStore {
         lockWidgetCalendar = flag("lock.widget.calendar", false)
         lockNowPlaying = flag("lock.nowPlaying", true)
         lockNowPlayingStyle = opt("lock.npStyle", LockCardStyle.glass)
-        lockIdleDuration = num("lock.idle", 10)
+        storedLockIdleDuration = num("lock.idle", 10)
         lockShowVolume = flag("lock.volume", false)
-        lockOffset = num("lock.offset", 0)
+        storedLockOffset = num("lock.offset", 0)
         lockAllowBattery = flag("lock.allow.battery", true)
         lockAllowConnectivity = flag("lock.allow.connectivity", true)
         lockAllowFocus = flag("lock.allow.focus", true)
@@ -393,7 +550,7 @@ final class SettingsStore {
 
         agentEnabled = flag("agent.enabled", false)
         agentSound = flag("agent.sound", true)
-        agentDuration = num("agent.duration", 4)
+        storedAgentDuration = num("agent.duration", 4)
         agentAutoExpand = flag("agent.autoExpand", true)
         agentDeferToTerminal = flag("agent.deferToTerminal", true)
 

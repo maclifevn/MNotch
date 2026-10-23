@@ -31,8 +31,8 @@ enum CodexHookInstaller {
     }
 
     static func install() throws {
+        var root = try HookConfiguration.read(hooksURL) ?? [:]
         try ClaudeHookInstaller.deployScripts()
-        var root = readHooks() ?? [:]
         root = installing(into: root, command: relayCommand)
         try writeHooks(root)
         mnotchLog.notice("Codex hooks installed; trust review required in /hooks")
@@ -52,7 +52,7 @@ enum CodexHookInstaller {
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         for event in events {
             var groups = hooks[event] as? [[String: Any]] ?? []
-            groups = removingOurs(from: groups)
+            groups = removingOurs(from: groups, command: command)
             let blocking = event == "PermissionRequest"
             let handler: [String: Any] = [
                 "type": "command",
@@ -72,12 +72,12 @@ enum CodexHookInstaller {
         return root
     }
 
-    static func uninstalling(from root: [String: Any]) -> [String: Any] {
+    static func uninstalling(from root: [String: Any], command: String? = nil) -> [String: Any] {
         var root = root
         guard var hooks = root["hooks"] as? [String: Any] else { return root }
         for event in events {
             guard let groups = hooks[event] as? [[String: Any]] else { continue }
-            let remaining = removingOurs(from: groups)
+            let remaining = removingOurs(from: groups, command: command ?? relayCommand)
             if remaining.isEmpty {
                 hooks.removeValue(forKey: event)
             } else {
@@ -97,20 +97,20 @@ enum CodexHookInstaller {
     }
 
     private static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+        HookConfiguration.shellQuote(value)
     }
 
     private static func isOurs(_ handler: [String: Any]) -> Bool {
         guard let command = handler["command"] as? String else { return false }
-        return command.contains("mnotch-relay.pl") && command.contains("codex")
+        return command == relayCommand
     }
 
     private static func removingOurs(
-        from groups: [[String: Any]]
+        from groups: [[String: Any]], command: String
     ) -> [[String: Any]] {
         groups.compactMap { group in
             guard var handlers = group["hooks"] as? [[String: Any]] else { return group }
-            handlers.removeAll(where: isOurs)
+            handlers.removeAll { ($0["command"] as? String) == command }
             guard !handlers.isEmpty else { return nil }
             var group = group
             group["hooks"] = handlers
@@ -119,10 +119,7 @@ enum CodexHookInstaller {
     }
 
     private static func readHooks() -> [String: Any]? {
-        guard let data = try? Data(contentsOf: hooksURL),
-              let json = try? JSONSerialization.jsonObject(with: data)
-        else { return nil }
-        return json as? [String: Any]
+        try? HookConfiguration.read(hooksURL)
     }
 
     private static func writeHooks(_ root: [String: Any]) throws {

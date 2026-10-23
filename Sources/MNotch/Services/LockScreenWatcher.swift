@@ -32,22 +32,22 @@ final class LockScreenWatcher {
             forName: NSNotification.Name("com.apple.screenIsLocked"),
             object: nil,
             queue: .main
-        ) { _ in
-            Task { @MainActor [weak self] in self?.screenLocked() }
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenLocked() }
         })
         observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"),
             object: nil,
             queue: .main
-        ) { _ in
-            Task { @MainActor [weak self] in self?.screenUnlocked() }
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenUnlocked() }
         })
         observers.append(center.addObserver(
             forName: NSNotification.Name("com.apple.screensaver.didstart"),
             object: nil,
             queue: .main
-        ) { _ in
-            Task { @MainActor [weak self] in
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.saverRunning = true
                 self?.refreshOverlay()
             }
@@ -56,12 +56,30 @@ final class LockScreenWatcher {
             forName: NSNotification.Name("com.apple.screensaver.didstop"),
             object: nil,
             queue: .main
-        ) { _ in
-            Task { @MainActor [weak self] in
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.saverRunning = false
                 self?.refreshOverlay()
             }
         })
+    }
+
+    /// Sleep/wake and lock/unlock notifications are emitted by different
+    /// subsystems and macOS does not promise their relative order. Re-read the
+    /// authoritative session state after wake so a missed/late unlock cannot
+    /// leave notch windows assigned to the lock presentation indefinitely.
+    func reconcileSystemState() {
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        let locked = session?["CGSSessionScreenIsLocked"] as? Bool ?? false
+        guard locked != isLocked else {
+            updateLockPresentation()
+            refreshOverlay()
+            return
+        }
+        isLocked = locked
+        if !locked { releaseAssertion() }
+        updateLockPresentation()
+        refreshOverlay()
     }
 
     func stop() {
@@ -85,6 +103,7 @@ final class LockScreenWatcher {
     private func refreshOverlay() {
         let settings = SettingsStore.shared
         let wanted = settings.lockEnabled
+            && PrivateAPICompatibility.permits(.lockScreen)
             && (isLocked || (saverRunning && settings.lockShowOnScreenSaver))
         overlay.setVisible(wanted)
     }
@@ -138,7 +157,7 @@ final class LockScreenWatcher {
     private func updateLockPresentation() {
         onLockPresentationChanged?(LockPresentationPolicy.shouldElevateNotch(
             isLocked: isLocked,
-            featureEnabled: SettingsStore.shared.lockEnabled
+            featureEnabled: SettingsStore.shared.lockEnabled && PrivateAPICompatibility.permits(.lockScreen)
         ))
     }
 

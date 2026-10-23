@@ -9,7 +9,11 @@ struct AgentPane: View {
     @State private var claudeHooksInstalled = ClaudeHookInstaller.isInstalled
     @State private var codexHooksInstalled = CodexHookInstaller.isInstalled
     @State private var errorMessage: String?
+    @State private var checkingClaudeCLI = false
     @State private var claudeCLIInstalled: Bool?   // nil = still checking
+    @State private var claudeDesktopAvailable = false
+    @State private var connectingClaude = false
+    @State private var claudeConnectionMessage: String?
 
     private let claudeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash"
 
@@ -41,7 +45,7 @@ struct AgentPane: View {
                         run { try ClaudeHookInstaller.install() }
                     }
                 }
-                Text("Adds MNotch's permission and session relay to ~/.claude/settings.json. Claude usage is read separately from the local CLI.")
+                Text("Adds MNotch's permission and session relay to ~/.claude/settings.json. Subscription usage uses your existing Claude sign-in separately.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 if let errorMessage {
@@ -52,7 +56,32 @@ struct AgentPane: View {
             }
 
             Section("Claude usage") {
-                LabeledContent("Claude CLI") {
+                Text("Uses your saved Claude sign-in to show session and weekly usage, even when Claude Code is closed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if claudeDesktopAvailable {
+                    Button {
+                        Task { await connectClaude() }
+                    } label: {
+                        HStack {
+                            Text("Connect Claude")
+                            if connectingClaude { ProgressView().controlSize(.small) }
+                        }
+                    }
+                    .disabled(connectingClaude)
+                    Text("Connect once to let MNotch read Claude's saved sign-in. macOS may ask for Keychain access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Choose Always Allow in the macOS prompt to keep this connection after restarting MNotch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let claudeConnectionMessage {
+                        Text(L10n.string(claudeConnectionMessage))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("Claude CLI (optional)") {
                     switch claudeCLIInstalled {
                     case .some(true): Text("Installed").foregroundStyle(.green)
                     case .some(false): Text("Not found").foregroundStyle(.orange)
@@ -61,7 +90,7 @@ struct AgentPane: View {
                 }
                 if claudeCLIInstalled == false {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Claude usage % is read from the local `claude` CLI. Install it, then sign in — no Keychain, no separate login for MNotch.")
+                        Text("You can also install and sign in to the Claude CLI to provide subscription usage.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text("1. Run this in Terminal to install:")
@@ -88,7 +117,7 @@ struct AgentPane: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("Usage % comes straight from the `claude` CLI (`claude -p /usage`) — no Keychain access and no extra login.")
+                    Text("MNotch reads subscription usage without refreshing tokens or changing your Claude sign-in.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -140,7 +169,7 @@ struct AgentPane: View {
             Section("Live quota") {
                 let quota = AppServices.shared.quota
                 LabeledContent("Codex") {
-                    Text(quotaSummary(quota.codexQuota))
+                    Text(settings.agentEnabled ? quotaSummary(quota.codexQuota) : L10n.string("Agent Monitor is off"))
                         .foregroundStyle(
                             quota.codexQuota.windows.isEmpty
                                 ? Color(nsColor: .secondaryLabelColor)
@@ -148,7 +177,7 @@ struct AgentPane: View {
                         )
                 }
                 LabeledContent("Claude") {
-                    Text(quotaSummary(quota.claudeQuota))
+                    Text(settings.agentEnabled ? quotaSummary(quota.claudeQuota) : L10n.string("Agent Monitor is off"))
                         .foregroundStyle(
                             quota.claudeQuota.windows.isEmpty
                                 ? Color(nsColor: .secondaryLabelColor)
@@ -156,7 +185,8 @@ struct AgentPane: View {
                         )
                 }
                 Button("Refresh Now") { quota.refresh(force: true) }
-                Text("Codex uses the official App Server. Claude's session + weekly percentages come from the `claude` CLI (see Claude usage above).")
+                    .disabled(!settings.agentEnabled)
+                Text("Usage refreshes automatically. The last values stay visible if a provider is temporarily unavailable.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -191,9 +221,36 @@ struct AgentPane: View {
 
     @MainActor
     private func recheckClaudeCLI() async {
+        guard !checkingClaudeCLI else { return }
+        checkingClaudeCLI = true
+        defer { checkingClaudeCLI = false }
         // Locating the CLI can spawn a login shell — keep it off the main actor.
-        let path = await Task.detached { ClaudeUsageClient.cliPath() }.value
+        let (path, desktopAvailable) = await Task.detached {
+            (ClaudeUsageClient.cliPath(), ClaudeDesktopCredentials.isAvailable)
+        }.value
+        guard !Task.isCancelled else { return }
         claudeCLIInstalled = (path != nil)
+        claudeDesktopAvailable = desktopAvailable
+    }
+
+    @MainActor
+    private func connectClaude() async {
+        guard !connectingClaude else { return }
+        connectingClaude = true
+        defer { connectingClaude = false }
+        let result = await ClaudeDesktopCredentials.connect()
+        guard !Task.isCancelled else { return }
+        switch result {
+        case .connected:
+            claudeConnectionMessage = "Claude connected. Usage works while Claude Code is closed."
+            AppServices.shared.quota.refresh(force: true)
+        case .permissionRequired:
+            claudeConnectionMessage = "Keychain access was not granted. Connect again when you are ready."
+        case .signInRequired:
+            claudeConnectionMessage = "Sign in to the Claude app again, then reconnect MNotch."
+        case .unavailable:
+            claudeConnectionMessage = "Couldn't read Claude's saved sign-in. Try connecting again."
+        }
     }
 
     private var notifyPath: String {

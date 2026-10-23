@@ -20,13 +20,13 @@ final class KeyboardBacklightService {
 
     private actor HardwareGate {
         func read(_ access: HardwareAccess) -> Double? {
-            guard let value = access.proxy.brightness?(forKeyboard: access.keyboardID)
+            guard let value = access.proxy.brightness?(forKeyboard: access.keyboardID), value.isFinite
             else { return nil }
-            return Double(value)
+            return SafeNumeric.unit(Double(value))
         }
 
         func step(_ access: HardwareAccess, up: Bool) -> Double? {
-            guard let current = access.proxy.brightness?(forKeyboard: access.keyboardID)
+            guard let current = access.proxy.brightness?(forKeyboard: access.keyboardID), current.isFinite
             else { return nil }
             let target = min(max(current + (up ? 1.0 / 16 : -1.0 / 16), 0), 1)
             guard access.proxy.setBrightness?(target, forKeyboard: access.keyboardID) == true
@@ -46,6 +46,10 @@ final class KeyboardBacklightService {
     var available: Bool { client != nil }
 
     func start() {
+        guard PrivateAPICompatibility.permits(.keyboardBacklight) else {
+            AppDiagnostics.record(.keyboardBacklight, .unsupportedOS)
+            return
+        }
         if frameworkHandle != nil {
             requestRefresh()
             return

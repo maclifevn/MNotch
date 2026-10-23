@@ -21,6 +21,8 @@
 "Approved" = "Đã duyệt";
 "Artwork badge" = "Nhãn ảnh bìa";
 "Auto-open notch on permission request" = "Tự mở notch khi có yêu cầu quyền";
+"Automatically check for updates" = "Tự động kiểm tra bản cập nhật";
+"Automatically download updates and install them when MNotch quits" = "Tự động tải bản cập nhật và cài đặt khi MNotch thoát";
 "Battery" = "Pin";
 "Before event starts" = "Trước khi sự kiện bắt đầu";
 "Behaviour" = "Hành vi";
@@ -31,16 +33,17 @@
 "Calendar access needed" = "Cần quyền truy cập Lịch";
 "Calendar, Bluetooth, and AI-agent hooks are requested only when you first use those features." = "Quyền Lịch, Bluetooth và hook AI Agent chỉ được yêu cầu khi bạn dùng các tính năng đó lần đầu.";
 "Calendars" = "Các lịch";
+"Cancel" = "Hủy";
 "Charging" = "Đang sạc";
+"Check for Updates…" = "Kiểm tra bản cập nhật…";
 "Checking…" = "Đang kiểm tra…";
 "Claude Code" = "Claude Code";
 "Claude usage" = "Mức sử dụng Claude";
-"Claude usage % is read from the local `claude` CLI. Install it, then sign in — no Keychain, no separate login for MNotch." = "Phần trăm sử dụng Claude được đọc từ CLI `claude` trên máy. Hãy cài đặt rồi đăng nhập — MNotch không dùng Keychain và không cần đăng nhập riêng.";
 "Claude usage unavailable" = "Không lấy được mức sử dụng Claude";
 "Clear" = "Xóa hết";
 "Clear successfully dragged files" = "Xóa file sau khi kéo thành công";
 "Codex usage unavailable" = "Không lấy được mức sử dụng Codex";
-"Codex uses the official App Server. Claude's session + weekly percentages come from the `claude` CLI (see Claude usage above)." = "Codex dùng App Server chính thức. Phần trăm phiên và tuần của Claude được lấy từ CLI `claude` (xem mục Mức sử dụng Claude ở trên).";
+"Usage refreshes automatically. The last values stay visible if a provider is temporarily unavailable." = "Hạn mức được tự động làm mới. Khi kết nối tạm gián đoạn, MNotch giữ lại số liệu gần nhất.";
 "Colored" = "Có màu";
 "Connecting…" = "Đang kết nối…";
 "Connectivity" = "Kết nối";
@@ -82,6 +85,7 @@
 "Haptic feedback" = "Phản hồi rung";
 "Hide from screen capture" = "Ẩn khỏi quay màn hình";
 "Hide in fullscreen" = "Ẩn khi toàn màn hình";
+"Volume and brightness HUDs still appear temporarily." = "HUD âm lượng và độ sáng vẫn hiện tạm thời.";
 "Hide in mission control" = "Ẩn trong Mission Control";
 "Hide label" = "Ẩn nhãn";
 "Hide media title extras" = "Ẩn phần phụ trong tên bài";
@@ -99,6 +103,7 @@
 "Instant" = "Tức thì";
 "Keep awake" = "Giữ máy thức";
 "Language" = "Ngôn ngữ";
+"Last checked: %@" = "Kiểm tra lần cuối: %@";
 "Launch at login" = "Mở khi đăng nhập";
 "Licenses" = "Giấy phép";
 "Live Activities" = "Hoạt động trực tiếp";
@@ -112,13 +117,16 @@
 "Low battery threshold" = "Ngưỡng pin yếu";
 "MNotch Settings" = "Cài đặt MNotch";
 "MNotch needs access to your calendars." = "MNotch cần quyền truy cập lịch của bạn.";
+"MNotch must be in /Applications before it can check for updates." = "MNotch phải nằm trong /Applications trước khi có thể kiểm tra bản cập nhật.";
 "MNotch — Accessibility not granted" = "MNotch — Chưa cấp quyền Trợ năng";
 "MNotch — Accessibility required" = "MNotch — Cần quyền Trợ năng";
 "Main display" = "Màn hình chính";
 "Monitor AI coding agents, approve permission requests, and jump to their terminal — right from the notch." = "Theo dõi AI Agent lập trình, duyệt yêu cầu quyền và chuyển tới Terminal của chúng ngay từ notch.";
 "Monochrome" = "Đơn sắc";
 "Most Recent" = "Gần đây nhất";
+"Move MNotch to Applications" = "Di chuyển MNotch vào Applications";
 "Natural movement" = "Chuyển động tự nhiên";
+"Never checked for updates" = "Chưa từng kiểm tra bản cập nhật";
 "Needs Full Disk Access to read Focus state." = "Cần quyền Truy cập toàn bộ ổ đĩa để đọc trạng thái Tập trung.";
 "Needs input" = "Cần phản hồi";
 "No active agents" = "Không có agent hoạt động";
@@ -172,6 +180,7 @@
 "Remove from File Tray" = "Xóa khỏi Khay file";
 "Repeat" = "Lặp lại";
 "Replace waveform during focus" = "Thay waveform khi đang Tập trung";
+"Reveal MNotch" = "Hiện MNotch trong Finder";
 "Required for MNotch to handle volume, brightness, and keyboard-backlight keys without also showing Apple's OSD. Other features keep working without it." = "Cần để MNotch xử lý phím âm lượng, độ sáng và đèn bàn phím mà không hiện thêm OSD của Apple. Các tính năng khác vẫn hoạt động khi thiếu quyền này.";
 "Restart MNotch" = "Khởi động lại MNotch";
 "Restart MNotch to apply the new language." = "Khởi động lại MNotch để áp dụng ngôn ngữ mới.";
@@ -192,6 +201,7 @@
 "Sound" = "Âm thanh";
 "Sound on agent events" = "Âm thanh khi agent có sự kiện";
 "Source" = "Nguồn";
+"Software Updates" = "Cập nhật phần mềm";
 "Status pop duration" = "Thời lượng hiện trạng thái";
 "Swipe to cycle activity" = "Vuốt để chuyển hoạt động";
 "Swipe to dismiss activity" = "Vuốt để ẩn hoạt động";
@@ -200,11 +210,11 @@
 "System Language" = "Theo ngôn ngữ hệ thống";
 "System default" = "Mặc định hệ thống";
 "Time before event" = "Thời gian trước sự kiện";
+"To install updates safely, move MNotch to /Applications and open it again." = "Để cài đặt bản cập nhật an toàn, hãy di chuyển MNotch vào /Applications rồi mở lại ứng dụng.";
 "Tuning" = "Tinh chỉnh";
 "Unavailable" = "Không khả dụng";
 "Uninstall Codex Hooks" = "Gỡ hook Codex";
 "Uninstall Hooks" = "Gỡ hook";
-"Usage % comes straight from the `claude` CLI (`claude -p /usage`) — no Keychain access and no extra login." = "Phần trăm sử dụng được lấy thẳng từ CLI `claude` (`claude -p /usage`) — không truy cập Keychain và không cần đăng nhập thêm.";
 "Use calendar color" = "Dùng màu của lịch";
 "Use colored calendar indicator" = "Dùng màu cho chỉ báo lịch";
 "Use event indicators" = "Dùng chỉ báo sự kiện";
@@ -234,7 +244,6 @@
 ", resets in %@" = ", đặt lại sau %@";
 "%@ %d percent remaining%@" = "%@ còn %d phần trăm%@";
 
-"Adds MNotch's permission and session relay to ~/.claude/settings.json. Claude usage is read separately from the local CLI." = "Thêm relay quyền và phiên của MNotch vào ~/.claude/settings.json. Mức sử dụng Claude được đọc riêng từ CLI trên máy.";
 "Adds PermissionRequest hooks to ~/.codex/hooks.json. After installing or changing them, open /hooks in Codex once and trust the MNotch command. Codex keeps its built-in approval prompt if MNotch is unavailable." = "Thêm hook PermissionRequest vào ~/.codex/hooks.json. Sau khi cài hoặc thay đổi, mở /hooks trong Codex một lần và tin cậy lệnh MNotch. Codex vẫn giữ hộp duyệt mặc định nếu MNotch không hoạt động.";
 "1. Run this in Terminal to install:" = "1. Chạy lệnh này trong Terminal để cài đặt:";
 "2. Then run `claude` in Terminal and sign in. Usage appears within a few minutes (or reopen MNotch)." = "2. Sau đó chạy `claude` trong Terminal và đăng nhập. Mức sử dụng sẽ hiện sau vài phút (hoặc mở lại MNotch).";
@@ -252,6 +261,20 @@
 "Install claude CLI for usage" = "Cài CLI claude để xem mức sử dụng";
 "Run claude /login for usage" = "Chạy claude /login để xem mức sử dụng";
 "Couldn't read Claude usage" = "Không đọc được mức sử dụng Claude";
+"Connect Claude in Settings to read usage" = "Kết nối Claude trong Cài đặt để xem hạn mức";
+"Claude usage temporarily rate limited" = "Claude tạm giới hạn lượt đọc mức sử dụng";
+"Claude CLI (optional)" = "Claude CLI (tùy chọn)";
+"Adds MNotch's permission and session relay to ~/.claude/settings.json. Subscription usage uses your existing Claude sign-in separately." = "Thêm relay quyền và phiên của MNotch vào ~/.claude/settings.json. Hạn mức thuê bao được đọc riêng từ phiên đăng nhập Claude hiện có.";
+"Uses your saved Claude sign-in to show session and weekly usage, even when Claude Code is closed." = "Dùng đăng nhập Claude đã lưu để hiển thị mức sử dụng theo phiên và tuần, kể cả khi đã đóng Claude Code.";
+"Connect Claude" = "Kết nối Claude";
+"Connect once to let MNotch read Claude's saved sign-in. macOS may ask for Keychain access." = "Kết nối một lần để MNotch đọc đăng nhập Claude đã lưu. macOS có thể hỏi quyền truy cập Keychain.";
+"Choose Always Allow in the macOS prompt to keep this connection after restarting MNotch." = "Chọn Luôn cho phép trong hộp thoại macOS để giữ kết nối sau khi khởi động lại MNotch.";
+"Claude connected. Usage works while Claude Code is closed." = "Đã kết nối Claude. Hạn mức vẫn được cập nhật khi đóng Claude Code.";
+"Keychain access was not granted. Connect again when you are ready." = "Chưa được cấp quyền Keychain. Bạn có thể kết nối lại khi sẵn sàng.";
+"Sign in to the Claude app again, then reconnect MNotch." = "Hãy đăng nhập lại ứng dụng Claude, sau đó kết nối lại MNotch.";
+"Couldn't read Claude's saved sign-in. Try connecting again." = "Không đọc được đăng nhập Claude đã lưu. Hãy thử kết nối lại.";
+"You can also install and sign in to the Claude CLI to provide subscription usage." = "Bạn cũng có thể cài và đăng nhập Claude CLI để cung cấp mức sử dụng thuê bao.";
+"MNotch reads subscription usage without refreshing tokens or changing your Claude sign-in." = "MNotch đọc mức sử dụng thuê bao mà không làm mới token hoặc thay đổi phiên đăng nhập Claude.";
 "Codex app or CLI not found" = "Không tìm thấy ứng dụng hoặc CLI Codex";
 "Couldn't start Codex" = "Không thể khởi chạy Codex";
 "Sign in to Codex" = "Đăng nhập Codex";
@@ -291,3 +314,30 @@
 "Quit" = "Thoát";
 "Also ⌘Q, or the menu bar icon." = "Hoặc nhấn ⌘Q, hoặc dùng icon trên thanh menu.";
 "Settings stays reachable from the gear tab in the notch, and you can always quit with ⌘Q or the button below." = "Vẫn mở được Cài đặt từ nút bánh răng trên notch, và luôn có thể thoát bằng ⌘Q hoặc nút bên dưới.";
+
+"Diagnostics" = "Chẩn đoán";
+
+"Export Diagnostics…" = "Xuất chẩn đoán…";
+
+"Save local version, service state and error metadata. No file contents, conversations, account information or tokens are included." = "Lưu phiên bản, trạng thái dịch vụ và thông tin lỗi trên máy. Không bao gồm nội dung file, hội thoại, thông tin tài khoản hay token.";
+
+"Couldn't save diagnostics. Choose another location and try again." = "Không lưu được chẩn đoán. Hãy chọn vị trí khác và thử lại.";
+
+"Private macOS integration is disabled until this macOS version completes compatibility verification." = "Tích hợp API riêng của macOS được tắt cho đến khi phiên bản macOS này hoàn tất kiểm tra tương thích.";
+
+"File is outside the File Tray." = "File nằm ngoài khay tệp.";
+"Existing hook configuration is invalid or too large. Repair it before installing hooks; MNotch has left it unchanged." = "Cấu hình hook hiện tại bị lỗi hoặc quá lớn. Hãy sửa trước khi cài hook; MNotch đã giữ nguyên tệp này.";
+"Preparing Update" = "Chuẩn bị cập nhật";
+"Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Đang chờ Khay tệp hoàn tất sao chép hoặc kéo tệp. Thao tác tệp mới tạm dừng cho đến khi bắt đầu cập nhật.";
+"Cancel Update" = "Hủy cập nhật";
+"Auto-hide on displays without a notch" = "Tự ẩn trên màn hình không có notch";
+"Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible." = "Rê chuột vào vùng notch ở chính giữa cạnh trên để hiện lại. Bảng đang mở và thông báo vẫn hiển thị.";
+"Preview sound" = "Nghe thử âm thanh";
+"Agent Monitor is off" = "Theo dõi AI Agent đang tắt";
+"Previous track" = "Bài trước";
+"Next track" = "Bài tiếp theo";
+"Play" = "Phát";
+"Copy track info" = "Sao chép thông tin bài hát";
+"Open terminal" = "Mở terminal";
+"Cannot add a folder that contains the File Tray." = "Không thể thêm thư mục chứa Khay file.";
+"Display brightness control is unavailable. macOS will handle the brightness keys." = "Chưa thể điều khiển độ sáng màn hình. macOS sẽ xử lý các phím độ sáng.";

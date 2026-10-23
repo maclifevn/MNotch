@@ -15,6 +15,7 @@ private final class BluetoothNotificationBox: @unchecked Sendable {
 /// peripherals). Registry keys are private-ish — everything degrades to nil.
 @MainActor
 final class BluetoothWatcher: NSObject {
+    var isRunning: Bool { batteryTimer != nil }
     var onConnect: ((_ name: String, _ symbol: String, _ battery: Int?) -> Void)?
     var onLowBattery: ((_ name: String, _ symbol: String, _ battery: Int) -> Void)?
 
@@ -46,7 +47,7 @@ final class BluetoothWatcher: NSObject {
 
         // Periodic re-check of connected devices' battery (Settings →
         // Connectivity → Warn on low battery).
-        let timer = Timer(timeInterval: 300, repeats: true) { _ in
+        let timer = Timer(timeInterval: 300, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.recheckBatteries() }
         }
         timer.tolerance = 30
@@ -115,15 +116,17 @@ final class BluetoothWatcher: NSObject {
 
         let symbol = Self.symbol(forName: name, classOfDevice: device.classOfDevice)
         let address = device.addressString
+        let registration = ObjectIdentifier(notification)
         let disconnectNotification = device.register(
             forDisconnectNotification: self,
             selector: #selector(deviceDisconnected(_:device:))
         ).map(BluetoothNotificationBox.init)
 
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self else { disconnectNotification?.value.unregister(); return }
             let generation = self.runGeneration
-            guard self.batteryTimer != nil else {
+            guard self.batteryTimer != nil,
+                  self.connectNotification.map(ObjectIdentifier.init) == registration else {
                 disconnectNotification?.value.unregister()
                 return
             }
@@ -165,11 +168,14 @@ final class BluetoothWatcher: NSObject {
         // Each connect registered one disconnect notification; retire it now
         // or registrations accumulate unboundedly across reconnects.
         notification.unregister()
+        let registration = ObjectIdentifier(notification)
         let key = device.addressString ?? device.name ?? ""
         Task { @MainActor [weak self] in
-            self?.connected.removeValue(forKey: key)
-            self?.warnedLow.remove(key)
-            self?.disconnectNotifications.removeValue(forKey: key)
+            guard let self,
+                  self.disconnectNotifications[key].map({ ObjectIdentifier($0.value) }) == registration else { return }
+            self.connected.removeValue(forKey: key)
+            self.warnedLow.remove(key)
+            self.disconnectNotifications.removeValue(forKey: key)
         }
     }
 

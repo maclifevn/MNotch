@@ -14,7 +14,7 @@ struct CapsuleSlider: View {
 
     /// Clamped: sources without a duration report raw elapsed seconds as the
     /// fraction, which would render a fill hundreds of times the track width.
-    private var displayed: Double { min(max(dragValue ?? value, 0), 1) }
+    private var displayed: Double { SafeNumeric.unit(dragValue ?? value) }
     private var thick: Bool { hovering || dragValue != nil }
 
     var body: some View {
@@ -32,12 +32,14 @@ struct CapsuleSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
-                        let next = min(max(gesture.location.x / geo.size.width, 0), 1)
+                        guard geo.size.width.isFinite, geo.size.width > 0 else { return }
+                        let next = SafeNumeric.unit(gesture.location.x / geo.size.width)
                         dragValue = next
                         onScrub?(next)
                     }
                     .onEnded { gesture in
-                        let final = min(max(gesture.location.x / geo.size.width, 0), 1)
+                        guard geo.size.width.isFinite, geo.size.width > 0 else { dragValue = nil; return }
+                        let final = SafeNumeric.unit(gesture.location.x / geo.size.width)
                         dragValue = nil
                         onCommit(final)
                     }

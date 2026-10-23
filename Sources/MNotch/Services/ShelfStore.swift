@@ -1,23 +1,28 @@
 import AppKit
+import Darwin
 import Observation
 
-private struct ShelfSnapshot: Sendable {
+struct ShelfSnapshot: Sendable {
     let revision: UInt64
     let items: [URL]
 }
 
-private struct ShelfClearResult: Sendable {
+struct ShelfClearResult: Sendable {
     let snapshot: ShelfSnapshot
     let failedNames: [String]
 }
 
-private actor ShelfFileWorker {
+actor ShelfFileWorker {
     private enum WorkerError: LocalizedError {
         case capacity(Int)
+        case outsideShelf
+        case recursiveSource
 
         var errorDescription: String? {
             switch self {
             case .capacity(let limit): "File Tray can hold up to \(limit) items."
+            case .outsideShelf: "File is outside the File Tray."
+            case .recursiveSource: L10n.string("Cannot add a folder that contains the File Tray.")
             }
         }
     }
@@ -25,10 +30,14 @@ private actor ShelfFileWorker {
     private static let itemLimit = 100
     private let directory: URL
     private let fm = FileManager.default
+    private let trashItem: @Sendable (URL) throws -> Void
     private var revision: UInt64 = 0
 
-    init(directory: URL) {
+    init(directory: URL, trashItem: @escaping @Sendable (URL) throws -> Void = {
+        try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
+    }) {
         self.directory = directory
+        self.trashItem = trashItem
     }
 
     func list() throws -> ShelfSnapshot {
@@ -55,6 +64,12 @@ private actor ShelfFileWorker {
 
     func add(_ urls: [URL]) throws -> ShelfSnapshot {
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destinationComponents = directory.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        for url in urls {
+            guard url.isFileURL,
+                  !destinationComponents.starts(with: url.resolvingSymlinksInPath().standardizedFileURL.pathComponents)
+            else { throw WorkerError.recursiveSource }
+        }
         let existing = try fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
@@ -67,8 +82,13 @@ private actor ShelfFileWorker {
         var copied: [URL] = []
         do {
             for url in urls {
-                let destination = uniqueDestination(for: url)
-                try fm.copyItem(at: url, to: destination)
+                let destination = try uniqueDestination(for: url)
+                do {
+                    try fm.copyItem(at: url, to: destination)
+                } catch {
+                    try? fm.removeItem(at: destination)
+                    throw error
+                }
                 copied.append(destination)
             }
         } catch {
@@ -83,7 +103,8 @@ private actor ShelfFileWorker {
     }
 
     func remove(_ url: URL) throws -> ShelfSnapshot {
-        try fm.trashItem(at: url, resultingItemURL: nil)
+        guard ShelfRetentionPolicy.belongsToShelf(url, directory: directory) else { throw WorkerError.outsideShelf }
+        try trashItem(url)
         revision &+= 1
         return ShelfSnapshot(revision: revision, items: try sortedItems())
     }
@@ -91,9 +112,11 @@ private actor ShelfFileWorker {
     func clear(_ urls: [URL]) throws -> ShelfClearResult {
         var removedAny = false
         var failedNames: [String] = []
-        for url in urls where fm.fileExists(atPath: url.path) {
+        for url in urls {
+            guard ShelfRetentionPolicy.belongsToShelf(url, directory: directory) else { throw WorkerError.outsideShelf }
             do {
-                try fm.trashItem(at: url, resultingItemURL: nil)
+                guard try pathExists(url) else { continue }
+                try trashItem(url)
                 removedAny = true
             } catch {
                 // Continue clearing the remaining files. A single item with a
@@ -110,9 +133,19 @@ private actor ShelfFileWorker {
         )
     }
 
-    private func uniqueDestination(for source: URL) -> URL {
+    private func pathExists(_ url: URL) throws -> Bool {
+        var metadata = stat()
+        if lstat(url.path, &metadata) == 0 { return true }
+        let code = errno
+        if code == ENOENT { return false }
+        throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+    }
+
+    private func uniqueDestination(for source: URL) throws -> URL {
         let original = directory.appending(path: source.lastPathComponent)
-        guard fm.fileExists(atPath: original.path) else { return original }
+        // fileExists follows symlinks and reports a dangling link as absent.
+        // Reusing that name would make failed-copy cleanup delete an old item.
+        guard try pathExists(original) else { return original }
 
         let stem = source.deletingPathExtension().lastPathComponent
         let suffix = source.pathExtension.isEmpty ? "" : ".\(source.pathExtension)"
@@ -120,7 +153,7 @@ private actor ShelfFileWorker {
             let candidate = directory.appending(
                 path: "\(stem)-\(UUID().uuidString.prefix(8))\(suffix)"
             )
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
+            if try !pathExists(candidate) { return candidate }
         }
     }
 }
@@ -132,12 +165,20 @@ private actor ShelfFileWorker {
 final class ShelfStore {
     static let shared = ShelfStore()
 
-    private(set) var items: [URL] = []
+    private(set) var items: [URL] = [] {
+        didSet {
+            // Cache invalidation must also happen while the shelf tab is closed.
+            for removed in Set(oldValue).subtracting(items) {
+                ShelfThumbnailCache.shared.invalidate(removed)
+            }
+        }
+    }
     /// Selection belongs to the tray, not to a transient SwiftUI tab. Keeping
     /// it here preserves multi-selection while the notch collapses, another
     /// app becomes active, or ShelfView is reconstructed.
     private(set) var selection: Set<URL> = []
     private(set) var isBusy = false
+    private(set) var isPreparingForUpdate = false
     private(set) var lastError: String?
     @ObservationIgnored private var activeOperations = 0
     @ObservationIgnored private var lastAppliedRevision: UInt64 = 0
@@ -151,18 +192,17 @@ final class ShelfStore {
     private static let failedCleanupRetryInterval: TimeInterval = 60 * 60
 
     private static var directory: URL {
-        let base = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0]
-        return base.appending(path: "MNotch/Shelf")
+        AppPaths.supportDirectory.appending(path: "Shelf", directoryHint: .isDirectory)
     }
 
     private init() {
         worker = ShelfFileWorker(directory: Self.directory)
         let saved = UserDefaults.standard.dictionary(forKey: Self.retainedDefaultsKey) ?? [:]
         retainedAfterDrag = saved.reduce(into: [:]) { result, entry in
-            if let deadline = entry.value as? NSNumber {
-                result[entry.key] = deadline.doubleValue
+            if let deadline = ShelfRetentionPolicy.deadline(
+                entry.value, path: entry.key, directory: Self.directory
+            ) {
+                result[entry.key] = deadline
             }
         }
         reload()
@@ -171,6 +211,17 @@ final class ShelfStore {
 
     var selectedItems: [URL] {
         items.filter(selection.contains)
+    }
+
+    func beginUpdatePreparation() {
+        isPreparingForUpdate = true
+        retainedCleanupTask?.cancel()
+        retainedCleanupTask = nil
+    }
+
+    func cancelUpdatePreparation() {
+        isPreparingForUpdate = false
+        scheduleRetainedCleanup()
     }
 
     func toggleSelection(_ url: URL) {
@@ -194,14 +245,14 @@ final class ShelfStore {
     }
 
     func add(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        guard !isPreparingForUpdate, !urls.isEmpty else { return }
         perform { worker in
             try await worker.add(urls)
         }
     }
 
     func remove(_ url: URL) {
-        guard let originalIndex = items.firstIndex(of: url) else { return }
+        guard !isPreparingForUpdate, let originalIndex = items.firstIndex(of: url) else { return }
 
         // Remove from the observable collection immediately so the delete
         // button feels direct. FileManager work stays on ShelfFileWorker; if
@@ -235,6 +286,7 @@ final class ShelfStore {
     }
 
     func clear() {
+        guard !isPreparingForUpdate else { return }
         let snapshot = items
         guard !snapshot.isEmpty else { return }
 
@@ -304,6 +356,7 @@ final class ShelfStore {
     private func perform(
         _ operation: @escaping @Sendable (ShelfFileWorker) async throws -> ShelfSnapshot
     ) {
+        guard !isPreparingForUpdate else { return }
         activeOperations += 1
         isBusy = true
         lastError = nil
@@ -349,7 +402,7 @@ final class ShelfStore {
     private func scheduleRetainedCleanup() {
         retainedCleanupTask?.cancel()
         retainedCleanupTask = nil
-        guard let nextDeadline = retainedAfterDrag.values.min() else { return }
+        guard !isPreparingForUpdate, let nextDeadline = retainedAfterDrag.values.min() else { return }
         let delay = max(0, nextDeadline - Date().timeIntervalSince1970)
         retainedCleanupTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
@@ -360,6 +413,7 @@ final class ShelfStore {
 
     private func cleanupExpiredRetainedItems() {
         retainedCleanupTask = nil
+        guard !isPreparingForUpdate else { return }
         let now = Date().timeIntervalSince1970
         let expiredPaths = retainedAfterDrag.compactMap { path, deadline in
             deadline <= now ? path : nil
@@ -370,7 +424,15 @@ final class ShelfStore {
         }
 
         let expiredURLs = expiredPaths.map { URL(fileURLWithPath: $0) }
+        activeOperations += 1
+        isBusy = true
         Task { [weak self, worker] in
+            defer {
+                if let self {
+                    self.activeOperations -= 1
+                    self.isBusy = self.activeOperations > 0
+                }
+            }
             do {
                 let result = try await worker.clear(expiredURLs)
                 guard let self else { return }
@@ -389,7 +451,7 @@ final class ShelfStore {
                 if !result.failedNames.isEmpty {
                     let names = result.failedNames.prefix(3).joined(separator: ", ")
                     mnotchLog.error(
-                        "Shelf deferred cleanup couldn't remove: \(names, privacy: .public)"
+                        "Shelf deferred cleanup couldn't remove: \(names, privacy: .private)"
                     )
                 }
             } catch {

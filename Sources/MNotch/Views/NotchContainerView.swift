@@ -26,10 +26,7 @@ struct NotchBodyView: View {
     /// Behind-window blur samples bright desktop content and creates a white
     /// halo, so it must never be used as the expanded surface shadow.
     private var usesFloatingSurfaceShadow: Bool {
-        switch viewModel.status {
-        case .expanded, .pop(.agentConfirm): true
-        default: false
-        }
+        viewModel.status.isExpanded
     }
 
     var body: some View {
@@ -40,6 +37,7 @@ struct NotchBodyView: View {
         )
 
         content
+            .environment(\.notchRenderingPaused, viewModel.isAutoHidden || viewModel.isPresentationSuppressed)
             .frame(width: size.width, height: size.height, alignment: .top)
             // Opaque black notch: fill behind the content, clipped to the
             // shape so the interior always reads solid — never washed out.
@@ -61,7 +59,12 @@ struct NotchBodyView: View {
                         bottomRadius: viewModel.bottomRadius
                     )
                         .stroke(.white.opacity(0.14), lineWidth: 1)
+                        // Keep the centered stroke inside the measured band.
+                        .clipShape(shape)
                 }
+            }
+            .animation(Anim.close) { view in
+                view.opacity(viewModel.isAutoHidden ? 0 : 1)
             }
             .contentShape(Rectangle())
             .onTapGesture {

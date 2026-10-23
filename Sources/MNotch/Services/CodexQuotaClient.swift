@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Small, read-only Codex App Server client. It reuses the user's existing
@@ -8,6 +9,7 @@ final class CodexQuotaClient {
     var onUnavailable: ((String) -> Void)?
 
     private var process: Process?
+    private var ownedProcessGroup: pid_t?
     private var inputPipe: Pipe?
     private var outputPipe: Pipe?
     private var outputBuffer = Data()
@@ -15,6 +17,14 @@ final class CodexQuotaClient {
     private var intentionallyStopped = false
     private var nextRequestID = 2
     private var lastSnapshot: CodexQuotaSnapshot?
+    private var outputStream: BoundedPipeStream?
+    private var readerTask: Task<Void, Never>?
+    private var responseTimeoutTask: Task<Void, Never>?
+    private var pendingRequestID: Int?
+    private var retryAfter = Date.distantPast
+    private let binaryOverride: URL?
+
+    init(binary: URL? = nil) { binaryOverride = binary }
 
     func start() {
         intentionallyStopped = false
@@ -31,20 +41,14 @@ final class CodexQuotaClient {
 
     func stop() {
         intentionallyStopped = true
-        initialized = false
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        inputPipe?.fileHandleForWriting.closeFile()
-        process?.terminationHandler = nil
-        if process?.isRunning == true { process?.terminate() }
-        process = nil
-        inputPipe = nil
-        outputPipe = nil
-        outputBuffer.removeAll(keepingCapacity: false)
+        tearDown()
     }
 
     private func launchIfNeeded() {
-        guard process?.isRunning != true else { return }
-        guard let binary = Self.findCodexBinary() else {
+        guard process?.isRunning != true, Date() >= retryAfter,
+              !SubprocessLifecycle.shared.isShuttingDown else { return }
+        tearDown()
+        guard let binary = binaryOverride ?? Self.findCodexBinary() else {
             onUnavailable?("Codex app or CLI not found")
             return
         }
@@ -58,19 +62,9 @@ final class CodexQuotaClient {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else {
-                // EOF (the child closed stdout). Left armed, the dispatch read
-                // source re-fires without end and each spin enqueues another
-                // main-actor job — a main-thread livelock. Disarm on EOF and
-                // let terminationHandler do the real teardown.
-                handle.readabilityHandler = nil
-                return
-            }
-            Task { @MainActor [weak self] in
-                self?.receive(data)
-            }
+        let outputStream = BoundedPipeStream()
+        output.fileHandleForReading.readabilityHandler = { handle in
+            outputStream.read(handle)
         }
         process.terminationHandler = { [weak self] process in
             let status = process.terminationStatus
@@ -81,16 +75,43 @@ final class CodexQuotaClient {
 
         do {
             try process.run()
+            let pid = process.processIdentifier
+            let ownedGroup = getpgid(pid) == pid ? pid : nil
+            if let ownedGroup { SubprocessLifecycle.shared.register(ownedGroup) }
             // Non-blocking stdin: a codex process that stops draining its input
             // would otherwise fill the pipe buffer and park the main thread in
             // write(2) forever (see send()). Only our write end is affected —
             // the child inherited a separate description for the read end.
-            _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETFL, O_NONBLOCK)
+            guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETFL, O_NONBLOCK) == 0,
+                  fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0,
+                  fcntl(output.fileHandleForReading.fileDescriptor, F_SETFL, O_NONBLOCK) == 0
+            else {
+                outputStream.close(output.fileHandleForReading)
+                Self.terminate(process, group: ownedGroup)
+                onUnavailable?("Codex connection unavailable")
+                return
+            }
             self.process = process
+            ownedProcessGroup = ownedGroup
             inputPipe = input
             outputPipe = output
+            self.outputStream = outputStream
+            readerTask = Task { [weak self] in
+                for await data in outputStream.stream {
+                    guard !Task.isCancelled, let self, self.process === process else { return }
+                    if outputStream.overflowed {
+                        self.failConnection()
+                        return
+                    }
+                    self.receive(data)
+                    await Task.yield()
+                }
+                guard !Task.isCancelled, let self, self.process === process else { return }
+                self.failConnection()
+            }
             outputBuffer.removeAll(keepingCapacity: true)
             initialized = false
+            armResponseTimeout(id: 1, process: process, seconds: 10)
             send([
                 "method": "initialize",
                 "id": 1,
@@ -105,6 +126,8 @@ final class CodexQuotaClient {
                 ],
             ])
         } catch {
+            outputStream.close(output.fileHandleForReading)
+            process.terminationHandler = nil
             self.process = nil
             inputPipe = nil
             outputPipe = nil
@@ -114,11 +137,16 @@ final class CodexQuotaClient {
 
     private func receive(_ data: Data) {
         guard !data.isEmpty else { return }
+        guard data.count <= 1_024 * 1_024 - outputBuffer.count else {
+            failConnection()
+            return
+        }
         outputBuffer.append(data)
         while let newline = outputBuffer.firstIndex(of: 0x0A) {
             let line = Data(outputBuffer[..<newline])
             outputBuffer.removeSubrange(...newline)
             handleLine(line)
+            guard process != nil else { return }
         }
     }
 
@@ -127,7 +155,13 @@ final class CodexQuotaClient {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
 
-        if (root["id"] as? NSNumber)?.intValue == 1, root["result"] != nil {
+        let responseID = (root["id"] as? NSNumber)?.intValue
+        if responseID == pendingRequestID, responseID != nil {
+            responseTimeoutTask?.cancel()
+            responseTimeoutTask = nil
+            pendingRequestID = nil
+        }
+        if responseID == 1, root["result"] != nil {
             initialized = true
             send(["method": "initialized", "params": [:]])
             requestRateLimits()
@@ -149,9 +183,10 @@ final class CodexQuotaClient {
     }
 
     private func requestRateLimits() {
-        guard initialized else { return }
+        guard initialized, pendingRequestID == nil, let process else { return }
         let id = nextRequestID
-        nextRequestID += 1
+        nextRequestID = nextRequestID == Int.max ? 2 : nextRequestID + 1
+        armResponseTimeout(id: id, process: process, seconds: 10)
         send(["method": "account/rateLimits/read", "id": id])
     }
 
@@ -187,51 +222,125 @@ final class CodexQuotaClient {
     /// Tear down a broken child without marking the client stopped, so the next
     /// refresh launches a replacement.
     private func recycle() {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        process?.terminationHandler = nil
-        if process?.isRunning == true { process?.terminate() }
+        retryAfter = Date().addingTimeInterval(5)
+        tearDown()
+    }
+
+    private func failConnection() {
+        AppDiagnostics.record(.codex, .connectionFailed)
+        onUnavailable?("Codex quota unavailable")
+        recycle()
+    }
+
+    private func armResponseTimeout(id: Int, process: Process, seconds: Double) {
+        pendingRequestID = id
+        responseTimeoutTask?.cancel()
+        responseTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, let self, self.process === process,
+                  self.pendingRequestID == id else { return }
+            self.failConnection()
+        }
+    }
+
+    private func tearDown() {
+        readerTask?.cancel()
+        readerTask = nil
+        responseTimeoutTask?.cancel()
+        responseTimeoutTask = nil
+        pendingRequestID = nil
+        if let handle = outputPipe?.fileHandleForReading { outputStream?.close(handle) }
+        outputStream = nil
+        try? inputPipe?.fileHandleForWriting.close()
+        if let process {
+            process.terminationHandler = nil
+            Self.terminate(process, group: ownedProcessGroup)
+        }
         process = nil
+        ownedProcessGroup = nil
         inputPipe = nil
         outputPipe = nil
         initialized = false
         outputBuffer.removeAll(keepingCapacity: false)
     }
 
+    private nonisolated static func terminate(_ process: Process, group: pid_t?) {
+        if SubprocessLifecycle.shared.isShuttingDown {
+            if let group {
+                kill(-group, SIGKILL)
+                SubprocessLifecycle.shared.unregister(group)
+            } else if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            return
+        }
+        if let group {
+            kill(-group, SIGTERM)
+        } else if process.isRunning {
+            process.terminate()
+        } else { return }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.25) {
+            // A leader can exit on TERM while a descendant ignores it and
+            // keeps the pipe open. Escalate the group captured at launch even
+            // after Foundation has reported the leader's termination.
+            if let group {
+                kill(-group, SIGKILL)
+                SubprocessLifecycle.shared.unregister(group)
+            }
+            else if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+    }
+
     private func didTerminate(process terminatedProcess: Process, status: Int32) {
-        // A manual refresh may already have launched a replacement while the
-        // old process's termination callback was crossing onto the main actor.
         guard process === terminatedProcess else { return }
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        process = nil
-        inputPipe = nil
-        outputPipe = nil
-        initialized = false
+        tearDown()
         guard !intentionallyStopped else { return }
+        retryAfter = Date().addingTimeInterval(5)
         onUnavailable?(status == 0 ? "Codex quota disconnected" : "Codex quota unavailable")
     }
 
-    private static func findCodexBinary() -> URL? {
-        let environment = ProcessInfo.processInfo.environment
+    static func findCodexBinary(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        applicationURLs: [URL]? = nil,
+        isExecutableFile: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
+    ) -> URL? {
         var paths: [String] = [
             environment["MNOTCH_CODEX_BINARY"],
             environment["CODEX_BINARY"],
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/Applications/Codex.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/Applications/ChatGPT.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/.local/bin/codex",
+        ].compactMap { $0 }
+
+        // Launch Services finds apps even when they have been moved or renamed.
+        // The current Codex app can still be named ChatGPT.app on disk.
+        let registeredApps = applicationURLs ?? ["com.openai.codex", "com.openai.chat"]
+            .compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+        let apps = registeredApps + [
+            URL(fileURLWithPath: "/Applications/Codex.app"),
+            URL(fileURLWithPath: "/Applications/ChatGPT.app"),
+            homeDirectory.appendingPathComponent("Applications/Codex.app"),
+            homeDirectory.appendingPathComponent("Applications/ChatGPT.app"),
+        ]
+        for app in apps {
+            paths += [
+                // Newer releases embed the CLI as a separate application.
+                "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+                "Contents/Resources/codex",
+            ].map { app.appendingPathComponent($0).path }
+        }
+
+        paths += [
+            homeDirectory.appendingPathComponent(".local/bin/codex").path,
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "/usr/bin/codex",
-        ].compactMap { $0 }
+        ]
 
         if let path = environment["PATH"] {
             paths += path.split(separator: ":").map { String($0) + "/codex" }
         }
 
-        let fm = FileManager.default
+        var seen = Set<String>()
         return paths.lazy
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
             .map { URL(fileURLWithPath: $0) }
-            .first { fm.isExecutableFile(atPath: $0.path) }
+            .first { isExecutableFile($0.path) }
     }
 }
