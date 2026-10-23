@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Small, read-only Codex App Server client. It reuses the user's existing
@@ -296,28 +297,50 @@ final class CodexQuotaClient {
         onUnavailable?(status == 0 ? "Codex quota disconnected" : "Codex quota unavailable")
     }
 
-    private static func findCodexBinary() -> URL? {
-        let environment = ProcessInfo.processInfo.environment
+    static func findCodexBinary(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        applicationURLs: [URL]? = nil,
+        isExecutableFile: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
+    ) -> URL? {
         var paths: [String] = [
             environment["MNOTCH_CODEX_BINARY"],
             environment["CODEX_BINARY"],
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/Applications/Codex.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/Applications/ChatGPT.app/Contents/Resources/codex",
-            NSHomeDirectory() + "/.local/bin/codex",
+        ].compactMap { $0 }
+
+        // Launch Services finds apps even when they have been moved or renamed.
+        // The current Codex app can still be named ChatGPT.app on disk.
+        let registeredApps = applicationURLs ?? ["com.openai.codex", "com.openai.chat"]
+            .compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+        let apps = registeredApps + [
+            URL(fileURLWithPath: "/Applications/Codex.app"),
+            URL(fileURLWithPath: "/Applications/ChatGPT.app"),
+            homeDirectory.appendingPathComponent("Applications/Codex.app"),
+            homeDirectory.appendingPathComponent("Applications/ChatGPT.app"),
+        ]
+        for app in apps {
+            paths += [
+                // Newer releases embed the CLI as a separate application.
+                "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+                "Contents/Resources/codex",
+            ].map { app.appendingPathComponent($0).path }
+        }
+
+        paths += [
+            homeDirectory.appendingPathComponent(".local/bin/codex").path,
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "/usr/bin/codex",
-        ].compactMap { $0 }
+        ]
 
         if let path = environment["PATH"] {
             paths += path.split(separator: ":").map { String($0) + "/codex" }
         }
 
-        let fm = FileManager.default
+        var seen = Set<String>()
         return paths.lazy
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
             .map { URL(fileURLWithPath: $0) }
-            .first { fm.isExecutableFile(atPath: $0.path) }
+            .first { isExecutableFile($0.path) }
     }
 }

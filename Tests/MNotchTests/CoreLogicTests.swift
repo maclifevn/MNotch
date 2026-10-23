@@ -905,53 +905,6 @@ final class CoreLogicTests: XCTestCase {
         XCTAssertEqual(resolvedCount, 1)
     }
 
-    func testClaudeCLIUsageParsesSessionAndWeeklyWindows() throws {
-        let output = """
-        You are currently using your subscription to power your Claude Code usage
-
-        Current session: 4% used · resets Jul 15 at 6:30pm (Asia/Saigon)
-        Current week (all models): 74% used · resets Jul 17 at 8pm (Asia/Saigon)
-        Current week (Fable): 57% used · resets Jul 17 at 8pm (Asia/Saigon)
-
-        What's contributing to your limits usage?
-        Last 24h · 540 requests · 3 sessions
-        """
-        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
-        XCTAssertEqual(windows.map(\.label), ["5h", "7d", "Fable"])
-        XCTAssertEqual(windows.map(\.id), ["claude-session", "claude-week", "claude-week-Fable"])
-        XCTAssertEqual(windows[0].usedPercent, 4)
-        XCTAssertEqual(windows[1].usedPercent, 74)
-        XCTAssertEqual(windows[2].usedPercent, 57)
-        XCTAssertEqual(windows[0].durationMinutes, 300)
-        XCTAssertEqual(windows[1].durationMinutes, 10_080)
-        XCTAssertNotNil(windows[0].resetsAt)
-    }
-
-    func testClaudeCLIUsageIgnoresProseAndReturnsNilWhenNoBars() {
-        let output = """
-        Approximate, based on local sessions on this machine.
-        66% of your usage came from subagent-heavy sessions
-        Top subagents: workflow-subagent 11%
-        """
-        XCTAssertNil(ClaudeUsageClient.parse(output))
-    }
-
-    func testClaudeCLIResetDateParsesDatedForm() {
-        let date = ClaudeUsageClient.parseCLIDate("resets Jul 17 at 8pm (Asia/Saigon)")
-        XCTAssertNotNil(date)
-    }
-
-    func testClaudeCLIUsageParsesLineWithLongTimezoneAndOverage() throws {
-        // A long IANA timezone at 100% used pushes the line past 90 chars; it
-        // must still parse (the old guard dropped it).
-        let output = """
-        Current week (all models): 100% used · resets Dec 31 at 11:59pm (America/Argentina/Buenos_Aires)
-        """
-        let windows = try XCTUnwrap(ClaudeUsageClient.parse(output))
-        XCTAssertEqual(windows.map(\.label), ["7d"])
-        XCTAssertEqual(windows[0].usedPercent, 100)
-    }
-
     func testCodexQuotaParserReadsOfficialWindowsAndCredits() throws {
         let json = #"{"id":2,"result":{"rateLimits":{"planType":"plus","credits":{"balance":"12.50"},"primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1784044800},"secondary":{"usedPercent":60,"windowDurationMins":10080,"resetsAt":1784649600}},"rateLimitResetCredits":{"availableCount":2}}}"#
         let snapshot = try XCTUnwrap(CodexQuotaParser.snapshot(

@@ -4,7 +4,7 @@ import Observation
 /// Unified Codex + Claude quota service.
 ///
 /// Codex comes from the official App Server rate-limit API. Claude is read from
-/// the local Claude CLI. There is deliberately no transcript scan or status-line
+/// Claude's read-only OAuth usage endpoint. There is no transcript scan or status-line
 /// hook: both were duplicate, non-authoritative sources of the same UI state.
 @MainActor
 @Observable
@@ -98,8 +98,7 @@ final class QuotaService {
         }
     }
 
-    /// Claude usage straight from the `claude` CLI (`claude -p /usage`) — the
-    /// session + weekly windows, no Keychain access involved.
+    /// Authoritative Claude subscription session + weekly windows.
     func ingestClaudeWindows(_ windows: [QuotaWindow], updatedAt: Date = .now) {
         guard !windows.isEmpty else { return }
         claudeQuota = ProviderQuota(
