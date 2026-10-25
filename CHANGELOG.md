@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.6 — Edge activation for auto-hidden notches
+
+- Reveal an auto-hidden simulated notch only after holding the pointer in a
+  2 pt strip at the top center for 200 ms. Hovering menu-bar icons below the
+  strip keeps the notch hidden and their clicks pass through.
+- Cancel a pending reveal on mouse-down and require leaving the edge before
+  trying again. Keep a revealed notch usable below the strip, then hide it
+  300 ms after the pointer leaves its interactive region.
+- Release mouse routing immediately when a temporary HUD or notification
+  dismisses into the hidden state. Preserve open panels and control drags.
+
 ## 1.5.5 — Persistent hang diagnostics
 
 - Save bounded local diagnostics across relaunches, including the previous

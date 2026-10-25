@@ -95,12 +95,78 @@ final class NotchViewModel {
         }
     }
     @ObservationIgnored var onStatusChanged: (() -> Void)?
-    /// Keep the invisible notch's interactive region alive so hover can reveal it.
+    private var autoHideEnabled: Bool {
+        SettingsStore.shared.autoHideSimulatedNotch && !geometry.isPhysical
+    }
+
+    /// Edge intent is separate from hover: a transient HUD under the pointer
+    /// must not keep the closed notch visible after the HUD dismisses.
     var isAutoHidden: Bool {
-        SettingsStore.shared.autoHideSimulatedNotch
-            && !geometry.isPhysical
-            && !isHovering
-            && status == .closed
+        autoHideEnabled && !isAutoHideRevealed && status == .closed
+    }
+
+    private(set) var isAutoHideRevealed = false
+    static let autoHideRevealHeight: CGFloat = 2
+    static let autoHideRevealDelay: Duration = .milliseconds(200)
+    static let autoHideDismissDelay: Duration = .milliseconds(300)
+    @ObservationIgnored private var autoHideRevealStartedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var autoHideDismissStartedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var autoHideRevealRequiresExit = false
+
+    /// Called by the existing pointer sampler, using a monotonic clock so
+    /// clock changes cannot shorten the dwell or strand a revealed notch.
+    func updateAutoHideInteraction(
+        inRevealArea: Bool,
+        inNotch: Bool,
+        mouseButtonPressed: Bool,
+        now: ContinuousClock.Instant
+    ) {
+        guard autoHideEnabled else {
+            resetAutoHideInteraction()
+            return
+        }
+        if !inRevealArea { autoHideRevealRequiresExit = false }
+
+        if isAutoHideRevealed {
+            autoHideRevealStartedAt = nil
+            if inNotch {
+                autoHideDismissStartedAt = nil
+            } else {
+                let began = autoHideDismissStartedAt ?? now
+                autoHideDismissStartedAt = began
+                if began.duration(to: now) >= Self.autoHideDismissDelay {
+                    withAnimation(Anim.close) { isAutoHideRevealed = false }
+                    autoHideDismissStartedAt = nil
+                }
+            }
+            return
+        }
+
+        autoHideDismissStartedAt = nil
+        guard status == .closed, inRevealArea else {
+            autoHideRevealStartedAt = nil
+            return
+        }
+        guard !mouseButtonPressed, !autoHideRevealRequiresExit else {
+            // Releasing a menu-bar click must not start a fresh dwell while
+            // its menu is open. Require leaving and re-entering the edge.
+            autoHideRevealStartedAt = nil
+            autoHideRevealRequiresExit = true
+            return
+        }
+        let began = autoHideRevealStartedAt ?? now
+        autoHideRevealStartedAt = began
+        if began.duration(to: now) >= Self.autoHideRevealDelay {
+            withAnimation(Anim.open) { isAutoHideRevealed = true }
+            autoHideRevealStartedAt = nil
+        }
+    }
+
+    func resetAutoHideInteraction() {
+        autoHideRevealStartedAt = nil
+        autoHideDismissStartedAt = nil
+        autoHideRevealRequiresExit = false
+        if isAutoHideRevealed { isAutoHideRevealed = false }
     }
 
     /// Window occlusion also pauses decorative rendering without losing UI state.
@@ -328,6 +394,8 @@ final class NotchViewModel {
     /// so the notch region hugs y = 0. Slightly larger than the visible shape
     /// so tiny pointer overshoots don't collapse the panel.
     func interactiveRect(in bounds: CGRect, flipped: Bool) -> CGRect {
+        // Hidden content never owns clicks, including during the edge dwell.
+        guard !isAutoHidden else { return .zero }
         let size = visualSize
         let width = size.width + Self.apron * 2
         let height = size.height + Self.apron
@@ -336,6 +404,17 @@ final class NotchViewModel {
             y: flipped ? 0 : bounds.height - height,
             width: width,
             height: height
+        )
+    }
+
+    /// A stable strip over the body, independent of media/HUD wings and the
+    /// visible notch's hover apron. Each host aligns it to its own screen top.
+    func autoHideRevealRect(in bounds: CGRect, flipped: Bool) -> CGRect {
+        CGRect(
+            x: bounds.midX - geometry.notchWidth / 2,
+            y: flipped ? bounds.minY : bounds.maxY - Self.autoHideRevealHeight,
+            width: geometry.notchWidth,
+            height: Self.autoHideRevealHeight
         )
     }
 

@@ -16,7 +16,7 @@
 "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts.";
 "Cancel Update" = "Cancel Update";
 "Auto-hide on displays without a notch" = "Auto-hide on displays without a notch";
-"Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible." = "Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible.";
+"Hold the pointer at the very top center of the display briefly to reveal the notch. Open panels and notifications stay visible." = "Hold the pointer at the very top center of the display briefly to reveal the notch. Open panels and notifications stay visible.";
 "Preview sound" = "Preview sound";
 "Agent Monitor is off" = "Agent Monitor is off";
 "Previous track" = "Previous track";

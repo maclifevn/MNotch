@@ -331,7 +331,7 @@
 "Waiting for File Tray to finish copying or dragging files. New file operations are paused until the update starts." = "Đang chờ Khay tệp hoàn tất sao chép hoặc kéo tệp. Thao tác tệp mới tạm dừng cho đến khi bắt đầu cập nhật.";
 "Cancel Update" = "Hủy cập nhật";
 "Auto-hide on displays without a notch" = "Tự ẩn trên màn hình không có notch";
-"Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible." = "Rê chuột vào vùng notch ở chính giữa cạnh trên để hiện lại. Bảng đang mở và thông báo vẫn hiển thị.";
+"Hold the pointer at the very top center of the display briefly to reveal the notch. Open panels and notifications stay visible." = "Giữ chuột một lát sát mép trên, chính giữa màn hình để hiện notch. Bảng đang mở và thông báo vẫn hiển thị.";
 "Preview sound" = "Nghe thử âm thanh";
 "Agent Monitor is off" = "Theo dõi AI Agent đang tắt";
 "Previous track" = "Bài trước";

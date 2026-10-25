@@ -62,7 +62,7 @@ struct GeneralPane: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle("Auto-hide on displays without a notch", isOn: $settings.autoHideSimulatedNotch)
-                    Text("Move the pointer to the notch area at the top center to reveal it. Open panels and notifications stay visible.")
+                    Text("Hold the pointer at the very top center of the display briefly to reveal the notch. Open panels and notifications stay visible.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

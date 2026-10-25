@@ -9,6 +9,8 @@ final class NotchWindowController {
     private var rebuildTask: Task<Void, Never>?
     private var wakeRecoveryTask: Task<Void, Never>?
     private var pointerTimer: Timer?
+    private var globalMouseDownMonitor: Any?
+    private var localMouseDownMonitor: Any?
     /// SkyLight removes windows from their desktop spaces. Only a full rebuild
     /// can safely restore them, and only after we actually attempted elevation.
     private var needsDesktopRebuild = false
@@ -24,11 +26,30 @@ final class NotchWindowController {
         timer.tolerance = 0.004
         RunLoop.main.add(timer, forMode: .common)
         pointerTimer = timer
+
+        // A complete click can occur between 60Hz pointer samples. Observe
+        // mouse-down without consuming it so menu-bar clicks cancel the dwell.
+        let mouseDown: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDown) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshPointerInteractions(mouseButtonPressed: true)
+            }
+        }
+        localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDown) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.refreshPointerInteractions(mouseButtonPressed: true)
+            }
+            return event
+        }
     }
 
     func stop() {
         pointerTimer?.invalidate()
         pointerTimer = nil
+        if let globalMouseDownMonitor { NSEvent.removeMonitor(globalMouseDownMonitor) }
+        if let localMouseDownMonitor { NSEvent.removeMonitor(localMouseDownMonitor) }
+        globalMouseDownMonitor = nil
+        localMouseDownMonitor = nil
         rebuildTask?.cancel()
         rebuildTask = nil
         wakeRecoveryTask?.cancel()
@@ -184,9 +205,9 @@ final class NotchWindowController {
         }
     }
 
-    private func refreshPointerInteractions() {
+    private func refreshPointerInteractions(mouseButtonPressed: Bool? = nil) {
         let location = NSEvent.mouseLocation
-        let pressed = NSEvent.pressedMouseButtons != 0
+        let pressed = mouseButtonPressed ?? (NSEvent.pressedMouseButtons != 0)
         for panel in panels where panel.isVisible {
             panel.updatePointerInteraction(
                 at: location,

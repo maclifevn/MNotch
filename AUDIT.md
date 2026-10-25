@@ -643,3 +643,34 @@ khóa Sparkle và URL feed hiện có.
 Phạm vi kiểm chứng mới tập trung vào Codex/quota và đường cập nhật. Các giới
 hạn ma trận phần cứng và workload soak ở các mốc audit trước vẫn được giữ
 nguyên; không coi kết quả CI hoặc notarization là kiểm chứng mọi thiết bị.
+
+## 2026-10-25 — QA native cho tự ẩn notch trước bản 1.5.6
+
+Host: **Mac17,3 / macOS 27.0.1 (26A434)**, màn hình tích hợp có notch vật lý.
+Kiểm tra tự ẩn dùng geometry mô phỏng trên NSPanel/NSHostingView thật; fixture
+biên dịch nguyên nguồn production với tối ưu Release, dùng chính
+NotchWindowController, bộ lấy mẫu con trỏ 60 Hz và mouse-down monitors.
+Fixture di chuyển panel so với con trỏ thực để đi qua các vùng kích hoạt;
+thao tác các nút native bằng CUA. Không coi đây là thử nghiệm hot-plug hoặc
+màn hình ngoài vật lý.
+
+- Đã xác nhận: dừng ở mép thì hiện; vào phần thân tiếp tục thao tác được;
+  rời vùng thì ẩn; lướt qua trong 100 ms không hiện; hủy lượt chờ giữ trạng
+  thái ẩn tới khi rời rồi vào lại; mở rộng khi hover vẫn hoạt động.
+- HUD tạm thời nhận tương tác khi hiện và trả mouse pass-through ngay khi
+  đóng. Ba vòng liên tiếp hiện → vào thân → rời/ẩn → mở menu thử đều qua;
+  native menu delegate ghi nhận tổng cộng 5 lần mở menu trong phiên QA.
+- Test WindowServer đặt panel ngay trên một NSStatusItem thật, xác nhận đích
+  nhận mouse-down vẫn là cửa sổ menu bar khi ẩn/chờ hiện và đổi sang panel khi
+  chủ động hiện. Test còn kiểm tra trả đích nhận về icon sau khi ẩn lại.
+- Debug và Release: **210/210 mỗi lượt**, gồm test WindowServer bật bằng
+  `MNOTCH_TEST_MENU_BAR_ROUTING=1`; script/build checks **32/32**. Lint cả hai
+  ngôn ngữ và diff whitespace qua. Các trường hợp 2 pt, 200 ms, 300 ms được
+  kiểm tra ở ranh giới chính xác bằng đồng hồ monotonic trong regression tests.
+
+Bằng chứng native và fixture lưu cục bộ tại
+`build/qa-native-autohide-1.5.6/native-qa-result.json` và các `case-*.json`.
+Bản phát hành dùng build **111**, cao hơn stable 1.5.5 (110); giữ bundle ID,
+Developer ID team, khóa Sparkle và URL feed. Quy trình `make release` tiếp tục
+chạy lại debug/release, ASan, TSan, script checks, ký/notarize app/DMG và kiểm
+tra chữ ký/lịch sử feed trước khi xuất bản.

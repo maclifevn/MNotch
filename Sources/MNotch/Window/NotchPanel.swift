@@ -53,10 +53,18 @@ final class NotchPanel: NSPanel {
         contentView = NotchHostingView(viewModel: viewModel)
         setFrame(frame, display: true)
         viewModel.onStatusChanged = { [weak self] in
-            guard let self, self.occlusion == .fullscreen else { return }
-            // Hide at dismissal before the closed shape can flash onscreen.
-            // Width/content animation remains owned by the SwiftUI HUD.
-            self.refreshOcclusion(animated: false)
+            guard let self else { return }
+            if self.occlusion == .fullscreen {
+                // Hide at dismissal before the closed shape can flash onscreen.
+                // Width/content animation remains owned by the SwiftUI HUD.
+                self.refreshOcclusion(animated: false)
+            }
+            if self.viewModel.isAutoHidden {
+                // A HUD/pop may dismiss under a stationary pointer. Release
+                // the menu bar immediately, without waiting for the next tick.
+                self.ignoresMouseEvents = true
+                (self.contentView as? NotchHostingView)?.setPointerInsideFromWindow(false)
+            }
         }
     }
 
@@ -97,13 +105,15 @@ final class NotchPanel: NSPanel {
         if suppressed {
             ignoresMouseEvents = true
             outsideDragStartedAt = nil
+            viewModel.resetAutoHideInteraction()
             (contentView as? NotchHostingView)?.setPointerInsideFromWindow(false)
         }
     }
 
     func updatePointerInteraction(
         at screenPoint: NSPoint,
-        mouseButtonPressed: Bool
+        mouseButtonPressed: Bool,
+        now: ContinuousClock.Instant = .now
     ) {
         // AppKit normally sends draggingSession(...endedAt:...), but a source
         // app/window disappearing mid-drag can skip it. Never leave this
@@ -123,14 +133,14 @@ final class NotchPanel: NSPanel {
             return
         }
 
-        let inside = hosting.containsInteractivePoint(screenPoint)
+        let wasInside = hosting.containsInteractivePoint(screenPoint)
 
         // Once a slider drag starts in the notch, retain the event stream while
         // the pointer briefly leaves the shape. If a mouse utility/driver loses
         // mouse-up and pressedMouseButtons remains stuck, release after a short
         // outside-only grace period so the notch can recover by itself.
         if mouseButtonPressed, !ignoresMouseEvents {
-            if inside {
+            if wasInside {
                 outsideDragStartedAt = nil
                 return
             }
@@ -143,6 +153,15 @@ final class NotchPanel: NSPanel {
             outsideDragStartedAt = nil
         }
 
+        viewModel.updateAutoHideInteraction(
+            inRevealArea: hosting.containsAutoHideRevealPoint(screenPoint),
+            inNotch: wasInside,
+            mouseButtonPressed: mouseButtonPressed,
+            now: now
+        )
+        // The dwell may just have revealed the notch, or the exit delay may
+        // have hidden it. Route clicks using the resulting presentation.
+        let inside = hosting.containsInteractivePoint(screenPoint)
         hosting.setPointerInsideFromWindow(inside)
         if ignoresMouseEvents == inside {
             ignoresMouseEvents = !inside

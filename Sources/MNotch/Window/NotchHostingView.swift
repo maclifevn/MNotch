@@ -48,6 +48,17 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         return viewModel.interactiveRect(in: bounds, flipped: isFlipped).contains(local)
     }
 
+    func containsAutoHideRevealPoint(_ screenPoint: NSPoint) -> Bool {
+        guard let window else { return false }
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let local = convert(windowPoint, from: nil)
+        let rect = viewModel.autoHideRevealRect(in: bounds, flipped: isFlipped)
+        let distanceFromTop = isFlipped ? local.y - rect.minY : rect.maxY - local.y
+        // Include the exact screen edge in both coordinate systems.
+        return local.x >= rect.minX && local.x < rect.maxX
+            && distanceFromTop >= 0 && distanceFromTop < rect.height
+    }
+
     func setPresentationSuppressed(_ suppressed: Bool) {
         viewModel.isPresentationSuppressed = suppressed
     }
@@ -56,9 +67,9 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
         viewModel.setPointerInside(inside)
     }
 
-    // Hover and window pass-through intentionally share the same rectangle in
-    // NotchPanel. A second SwiftUI onHover source would disagree over the 8pt
-    // apron and rapidly toggle the spring while the pointer sits at the edge.
+    // Visible hover and window pass-through share the same rectangle. Hidden
+    // edge intent is sampled separately and never enables mouse routing until
+    // the dwell completes. Do not add a second SwiftUI onHover source.
 
     /// Fallback for SwiftUI gestures being unreliable in a never-key panel:
     /// a click on the closed notch expands it. No-op when already expanded
