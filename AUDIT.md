@@ -698,6 +698,12 @@ diện Anh/Việt. Mặc định 1% và bước mịn Shift + Option 0,25% đư�
   lỗi triển khai mới cần sửa trong phạm vi thay đổi. Bằng chứng riêng nằm ở
   `build/release-1.5.7-audit/`; kết quả release cuối được lưu trong manifest
   của `build/releases/1.5.7-112/` sau khi prepare hoàn tất.
+- CI TSan đầu tiên phát hiện test chẩn đoán có thời gian chờ 6 giây, ngắn
+  hơn deadline 8 giây của system sampler. Các assertion phát hiện hang/recovery
+  và các test âm lượng đều qua; test chưa thấy sample trước khi hết hạn chờ.
+  Sửa riêng budget của test thành 12 giây, thêm outcome vào thông báo lỗi và
+  chạy lại pipeline trên commit mới. Giữ nguyên yêu cầu phải chụp được stack
+  và đọc được lịch sử sau restart; không đổi timeout hay hành vi production.
 
 Quy trình release tiếp tục bắt buộc debug/release, ASan, TSan, script checks,
 CI macOS 15/26 cho commit phát hành, ký/notarize app/DMG và kiểm tra feed/ZIP

@@ -227,17 +227,21 @@ final class PersistentDiagnosticsTests: XCTestCase {
             Thread.sleep(forTimeInterval: 1)
         }
         CFRunLoopWakeUp(CFRunLoopGetMain())
-        let deadline = ProcessInfo.processInfo.systemUptime + 6
+        // The real sampler has an 8-second subprocess deadline. Allow time
+        // for hang detection and publishing its result on loaded sanitizer CI.
+        let deadline = ProcessInfo.processInfo.systemUptime + 12
         var sampled = false
+        var sampleOutcomes: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             let history = await recorder.history()
+            sampleOutcomes = history.sessions.first?.samples.map { $0.outcome.rawValue } ?? []
             if history.sessions.first?.samples.first?.outcome == .captured {
                 sampled = true
                 break
             }
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertTrue(sampled)
+        XCTAssertTrue(sampled, "Sampler did not finish successfully; outcomes: \(sampleOutcomes)")
         // Read through a new store before any clean shutdown marker is written.
         let restarted = DiagnosticFileStore(directory: directory)
         try restarted.begin(metadata(100))
