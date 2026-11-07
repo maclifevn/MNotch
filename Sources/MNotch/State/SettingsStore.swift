@@ -256,6 +256,7 @@ final class SettingsStore {
     var soundHideLabel: Bool { didSet { save("sound.hideLabel", soundHideLabel) } }
     var soundAnimSpeed: AnimSpeed { didSet { save("sound.animSpeed", soundAnimSpeed.rawValue) } }
     var soundIconStyle: SoundIconStyle { didSet { save("sound.iconStyle", soundIconStyle.rawValue) } }
+    var soundVolumeStep: VolumeStep { didSet { save("sound.volumeStep", soundVolumeStep.rawValue) } }
 
     // MARK: Now Playing
 
@@ -493,6 +494,7 @@ final class SettingsStore {
         soundHideLabel = flag("sound.hideLabel", false)
         soundAnimSpeed = opt("sound.animSpeed", AnimSpeed.fast)
         soundIconStyle = opt("sound.iconStyle", SoundIconStyle.device)
+        soundVolumeStep = opt("sound.volumeStep", VolumeStep.onePercent)
 
         mediaEnabled = flag("media.enabled", true, legacy: "feature.media")
         storedMediaIdleDuration = num("media.idleDuration", 3)

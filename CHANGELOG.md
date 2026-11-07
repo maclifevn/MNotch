@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.7 — Configurable volume steps for keyboard knobs
+
+- Choose 1%, 2%, 5%, or 10% per volume-key or keyboard-knob event in
+  Settings → Display & Sound → Sound; save the selection and apply it immediately.
+- Preserve the 1% default and independent 0.25% Shift + Option adjustment,
+  including held-key repeats and the existing native-key fallback.
+- Cover rapid input during delayed hardware writes, auto-unmute, volume
+  limits, preference persistence, and unsupported stored values.
+
 ## 1.5.6 — Edge activation for auto-hidden notches
 
 - Reveal an auto-hidden simulated notch only after holding the pointer in a

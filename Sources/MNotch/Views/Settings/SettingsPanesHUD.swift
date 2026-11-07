@@ -168,8 +168,29 @@ struct SoundPane: View {
             showPercentage: $settings.soundShowPercentage,
             hideLabel: $settings.soundHideLabel,
             animSpeed: $settings.soundAnimSpeed,
-            extra: AnyView(SoundIconStylePicker())
+            extra: AnyView(Group {
+                SoundVolumeStepPicker(selection: $settings.soundVolumeStep)
+                SoundIconStylePicker()
+            })
         )
+    }
+}
+
+struct SoundVolumeStepPicker: View {
+    @Binding var selection: VolumeStep
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Volume step", selection: $selection) {
+                ForEach(VolumeStep.allCases, id: \.self) { step in
+                    Text(step.increment, format: .percent.precision(.fractionLength(0)))
+                        .tag(step)
+                }
+            }
+            Text("Applies to volume keys and keyboard knobs. Shift + Option always uses 0.25% steps.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

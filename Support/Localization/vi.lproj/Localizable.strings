@@ -341,3 +341,5 @@
 "Open terminal" = "Mở terminal";
 "Cannot add a folder that contains the File Tray." = "Không thể thêm thư mục chứa Khay file.";
 "Display brightness control is unavailable. macOS will handle the brightness keys." = "Chưa thể điều khiển độ sáng màn hình. macOS sẽ xử lý các phím độ sáng.";
+"Volume step" = "Bước âm lượng";
+"Applies to volume keys and keyboard knobs. Shift + Option always uses 0.25% steps." = "Áp dụng cho phím âm lượng và núm xoay bàn phím. Giữ Shift + Option để điều chỉnh từng bước 0,25%.";

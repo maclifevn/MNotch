@@ -21,6 +21,81 @@ final class AudioOutputTests: XCTestCase {
         await eventually { hardware.snapshot.devices[10]?.volume == 1 }
     }
 
+    func testConfiguredVolumeStepPersistsAndDefaultsToOnePercent() {
+        let suite = "MNotchTests.VolumeStep." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SettingsStore(defaults: defaults)
+        XCTAssertEqual(settings.soundVolumeStep, .onePercent)
+        settings.soundVolumeStep = .fivePercent
+        XCTAssertEqual(SettingsStore(defaults: defaults).soundVolumeStep, .fivePercent)
+
+        defaults.set("unsupported", forKey: "sound.volumeStep")
+        XCTAssertEqual(SettingsStore(defaults: defaults).soundVolumeStep, .onePercent)
+    }
+
+    func testLargerVolumeStepsAccumulateRapidKnobEventsAndCanChangeAtRuntime() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume }
+
+        for _ in 0..<5 { audio.step(up: false, size: .fivePercent) }
+        for _ in 0..<3 { audio.step(up: true, size: .fivePercent) }
+        XCTAssertEqual(audio.volume, 0.4, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[10]!.volume) - 0.4) < 0.000001 }
+
+        XCTAssertEqual(audio.step(up: true, size: .twoPercent), 0.42, accuracy: 0.000001)
+        XCTAssertEqual(audio.step(up: true, size: .tenPercent), 0.52, accuracy: 0.000001)
+        await eventually { abs(Double(hardware.snapshot.devices[10]!.volume) - 0.52) < 0.000001 }
+    }
+
+    func testLargerVolumeStepsKeepQuarterPercentFineControlAndClampAtBothEnds() async {
+        let hardware = TestAudioHardware()
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume }
+
+        XCTAssertEqual(audio.step(up: false, fine: true, size: .tenPercent), 0.4975, accuracy: 0.000001)
+        XCTAssertEqual(audio.step(up: true, fine: true, size: .fivePercent), 0.5, accuracy: 0.000001)
+        for _ in 0..<6 { audio.step(up: true, size: .tenPercent) }
+        XCTAssertEqual(audio.volume, 1)
+        await eventually { hardware.snapshot.devices[10]?.volume == 1 }
+
+        for _ in 0..<11 { audio.step(up: false, size: .tenPercent) }
+        XCTAssertEqual(audio.volume, 0)
+        await eventually { hardware.snapshot.devices[10]?.volume == 0 }
+    }
+
+    func testConfiguredVolumeStepsKeepRapidKnobEventsWhileHardwareWriteIsBlocked() async {
+        let hardware = TestAudioHardware()
+        hardware.update { $0.devices[10]?.mute = 1 }
+        let audio = makeService(hardware)
+        audio.start()
+        defer { audio.stop() }
+        await eventually { audio.canSetVolume && audio.muted }
+
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        hardware.update { $0.blockNextWrite = release }
+        XCTAssertEqual(audio.step(up: false, size: .fivePercent), 0.45, accuracy: 0.000001)
+        await eventually { hardware.snapshot.writeBlocked }
+
+        for _ in 0..<6 { audio.step(up: false, size: .twoPercent) }
+        for _ in 0..<3 { audio.step(up: true, size: .tenPercent) }
+        XCTAssertEqual(audio.volume, 0.63, accuracy: 0.000001)
+        XCTAssertFalse(audio.muted)
+        release.signal()
+        await eventually {
+            abs(Double(hardware.snapshot.devices[10]!.volume) - 0.63) < 0.000001
+                && hardware.snapshot.devices[10]?.mute == 0
+                && abs(audio.volume - 0.63) < 0.000001
+        }
+    }
+
     func testVolumeStepsClampAtBothEndsAndAccumulateRepeatedKeys() async {
         let hardware = TestAudioHardware()
         hardware.update { $0.devices[10]?.volume = 1 }
@@ -53,6 +128,8 @@ final class AudioOutputTests: XCTestCase {
 
         XCTAssertEqual(audio.step(up: false), initialVolume)
         XCTAssertEqual(audio.step(up: true, fine: true), initialVolume)
+        XCTAssertEqual(audio.step(up: false, size: .fivePercent), initialVolume)
+        XCTAssertEqual(audio.step(up: true, fine: true, size: .tenPercent), initialVolume)
         XCTAssertTrue(hardware.snapshot.writes.isEmpty)
     }
 

@@ -32,3 +32,5 @@
 "Reset the session" = "Reset the session";
 "Cannot add a folder that contains the File Tray." = "Cannot add a folder that contains the File Tray.";
 "Display brightness control is unavailable. macOS will handle the brightness keys." = "Display brightness control is unavailable. macOS will handle the brightness keys.";
+"Volume step" = "Volume step";
+"Applies to volume keys and keyboard knobs. Shift + Option always uses 0.25% steps." = "Applies to volume keys and keyboard knobs. Shift + Option always uses 0.25% steps.";

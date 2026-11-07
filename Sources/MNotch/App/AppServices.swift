@@ -393,7 +393,7 @@ final class AppServices {
         switch key {
         case .soundUp, .soundDown:
             guard settings.soundHUDEnabled, audio.canSetVolume else { return }
-            let newVolume = audio.step(up: key == .soundUp, fine: fine)
+            let newVolume = audio.step(up: key == .soundUp, fine: fine, size: settings.soundVolumeStep)
             if allowedNow(.sound) {
                 showHUD?(.volume, audio.muted ? 0 : newVolume, audio.muted)
             }

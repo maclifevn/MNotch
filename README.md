@@ -39,7 +39,7 @@ See [AUDIT.md](AUDIT.md) for evidence and remaining release checks.
 
 - **Now Playing** — artwork, animated waveform, seek controls, previous/play/next, output-device status, and configurable quick actions across supported media apps.
 - **System HUDs** — replace or complement the standard volume, display-brightness, and keyboard-backlight overlays with compact notch animations.
-- **Fine volume control** — adjust volume by 1% per press, or 0.25% with Shift + Option; hold a volume key for repeated small steps.
+- **Configurable volume steps** — choose 1%, 2%, 5%, or 10% per volume-key press or keyboard-knob event in Settings → Display & Sound → Sound. The default is 1%; Shift + Option always uses 0.25% steps. Requires Accessibility access.
 - **Contextual notifications** — battery, charging, low-power mode, Bluetooth devices, Focus, and upcoming calendar events.
 - **File Tray** — drop files onto the notch, select one or many, Quick Look, open, reveal in Finder, AirDrop, or drag them into another app.
 - **Calendar and Pomodoro** — see today's and upcoming events, receive quick peeks, and run focus/break cycles without opening another app.

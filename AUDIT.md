@@ -674,3 +674,33 @@ Bản phát hành dùng build **111**, cao hơn stable 1.5.5 (110); giữ bundle
 Developer ID team, khóa Sparkle và URL feed. Quy trình `make release` tiếp tục
 chạy lại debug/release, ASan, TSan, script checks, ký/notarize app/DMG và kiểm
 tra chữ ký/lịch sử feed trước khi xuất bản.
+
+## 2026-11-07 — Audit bước âm lượng tùy chỉnh trước bản 1.5.7
+
+Theo yêu cầu phát hành, bản 1.5.7 dùng build **112**, cao hơn stable 1.5.6
+(111). Phạm vi thay đổi là bước âm lượng 1%/2%/5%/10%, lưu lựa chọn và giao
+diện Anh/Việt. Mặc định 1% và bước mịn Shift + Option 0,25% được giữ nguyên.
+
+- Rà lại đường event tap → AppServices → AudioOutputService → HAL worker:
+  chỉ thay kích thước bước ở action âm lượng, không thêm I/O vào callback.
+  Mute, giới hạn 0...1, acknowledgement, coalescing và điều kiện trả phím
+  cho macOS khi HUD tắt hoặc output không khả dụng vẫn đi qua cơ chế hiện có.
+- **25/25 audio tests** qua. Bổ sung trường hợp driver giữ lệnh ghi trong
+  khi có nhiều bước 2%/5%/10% tiếp theo: không mất bước hoặc bị snapshot cũ
+  ghi đè, và auto-unmute vẫn đúng. Kiểm tra persistence, giá trị lưu không
+  hợp lệ, đổi bước khi đang chạy, clamp hai đầu và bước mịn độc lập.
+- QA native dùng chính SoundPane/SettingsStore đã biên dịch từ source hiện
+  tại, trong app và defaults domain riêng, không khởi động các service.
+  Qua CUA đã xác nhận đủ bốn lựa chọn, bố cục/nhãn tiếng Việt và tiếng Anh,
+  đổi 1% → 5% tức thời, giữ 5% qua khởi động lại, đổi tiếp sang 10%, và
+  disable/re-enable khi tắt/bật HUD mà không mất lựa chọn.
+- Lint cả hai Localizable.strings và diff whitespace qua. Không phát hiện
+  lỗi triển khai mới cần sửa trong phạm vi thay đổi. Bằng chứng riêng nằm ở
+  `build/release-1.5.7-audit/`; kết quả release cuối được lưu trong manifest
+  của `build/releases/1.5.7-112/` sau khi prepare hoàn tất.
+
+Quy trình release tiếp tục bắt buộc debug/release, ASan, TSan, script checks,
+CI macOS 15/26 cho commit phát hành, ký/notarize app/DMG và kiểm tra feed/ZIP
+công khai. Chưa có núm xoay vật lý để nghiệm thu; test input liên tục và driver
+chậm dùng HAL giả. Không coi lượt này là kiểm chứng lại toàn bộ ma trận phần
+cứng, sleep/hot-plug hay workload soak ở các mốc audit trước.

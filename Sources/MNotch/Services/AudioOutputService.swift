@@ -518,11 +518,12 @@ final class AudioOutputService {
         hal.setVolume(clamped, requestID: nextRequestID())
     }
 
-    /// Small, consistent steps for both individual presses and key repeats.
+    /// Use the selected step for presses, knob events, and key repeats. Fine
+    /// adjustment stays at a quarter percent regardless of the selected size.
     @discardableResult
-    func step(up: Bool, fine: Bool = false) -> Double {
+    func step(up: Bool, fine: Bool = false, size: VolumeStep = .onePercent) -> Double {
         guard canSetVolume else { return volume }
-        let increment = fine ? 0.0025 : 0.01
+        let increment = fine ? 0.0025 : size.increment
         setVolume(volume + (up ? increment : -increment))
         return volume
     }
